@@ -46,7 +46,7 @@ auto get_substrates_layout(const problem_t<num_t, real_t>& problem)
 template <typename real_t>
 void reference_thomas_solver<real_t>::prepare(const max_problem_t& problem)
 {
-	problem_ = problem_cast<std::int32_t, real_t>(problem);
+	problem_ = problems::cast<std::int32_t, real_t>(problem);
 	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
 
 	// Initialize substrates

@@ -72,7 +72,7 @@ void omp_custom_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& b, 
 template <typename real_t>
 void omp_custom_solver<real_t>::prepare(const max_problem_t& problem)
 {
-	problem_ = problem_cast<std::int32_t, real_t>(problem);
+	problem_ = problems::cast<std::int32_t, real_t>(problem);
 	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
 
 	// Initialize substrates
@@ -87,9 +87,9 @@ void omp_custom_solver<real_t>::prepare(const max_problem_t& problem)
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::tune(const tunable_params_t& params)
+void omp_custom_solver<real_t>::tune(const nlohmann::json& params)
 {
-	work_items_ = std::any_cast<std::size_t>(params.at("work_items"));
+	work_items_ = params["work_items"];
 }
 
 template <typename real_t>

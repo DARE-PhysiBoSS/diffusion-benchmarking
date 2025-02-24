@@ -5,7 +5,6 @@
 #include <noarr/structures_extended.hpp>
 
 #include "tridiagonal_solver.h"
-#include "tunable_params.h"
 
 /*
 The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
@@ -52,7 +51,7 @@ class omp_custom_solver : public tridiagonal_solver
 public:
 	void prepare(const max_problem_t& problem) override;
 
-	void tune(const tunable_params_t& params) override;
+	void tune(const nlohmann::json& params) override;
 
 	void initialize() override;
 

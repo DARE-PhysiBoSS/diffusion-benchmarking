@@ -1,3 +1,9 @@
 [submodule "submodules/noarr-structures"]
 	path = submodules/noarr-structures
 	url = https://github.com/ParaCoToUl/noarr-structures.git
+[submodule "submodules/argparse"]
+	path = submodules/argparse
+	url = https://github.com/p-ranav/argparse.git
+[submodule "submodules/json"]
+	path = submodules/json
+	url = https://github.com/nlohmann/json.git
