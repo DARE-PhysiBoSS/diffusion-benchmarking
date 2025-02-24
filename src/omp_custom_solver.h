@@ -1,8 +1,11 @@
+#pragma once
+
 #include <memory>
 
 #include <noarr/structures_extended.hpp>
 
 #include "tridiagonal_solver.h"
+#include "tunable_params.h"
 
 /*
 The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
@@ -41,13 +44,15 @@ class omp_custom_solver : public tridiagonal_solver
 	std::unique_ptr<real_t[]> by_, cy_, ey_;
 	std::unique_ptr<real_t[]> bz_, cz_, ez_;
 
-	auto get_substrates_layout();
+	std::size_t work_items_;
 
 	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
 						   index_t shape, index_t dims, index_t n, index_t copies);
 
 public:
 	void prepare(const max_problem_t& problem) override;
+
+	void tune(const tunable_params_t& params) override;
 
 	void initialize() override;
 

@@ -32,3 +32,6 @@ target_compile_options(
 
 target_include_directories(diffuse
                            PUBLIC ${noarr_structures_SOURCE_DIR}/include)
+
+find_package(OpenMP REQUIRED)
+target_link_libraries(diffuse PUBLIC OpenMP::OpenMP_CXX)
