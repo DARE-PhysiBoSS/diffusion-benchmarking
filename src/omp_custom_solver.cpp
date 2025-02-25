@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <fstream>
 
 #include <noarr/traversers.hpp>
 
@@ -422,6 +423,33 @@ void omp_custom_solver<real_t>::solve_z()
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(problem_),
 							  work_items_);
+}
+
+template <typename real_t>
+void omp_custom_solver<real_t>::save(const std::string& file) const
+{
+	auto dens_l = get_substrates_layout<3>(problem_);
+
+	std::ofstream out(file);
+
+	for (index_t z = 0; z < problem_.nz; z++)
+		for (index_t y = 0; y < problem_.ny; y++)
+			for (index_t x = 0; x < problem_.nx; x++)
+			{
+				for (index_t s = 0; s < problem_.substrates_count; s++)
+					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
+				out << std::endl;
+			}
+
+	out.close();
+}
+
+template <typename real_t>
+double omp_custom_solver<real_t>::access(std::size_t x, std::size_t y, std::size_t z, std::size_t s) const
+{
+	auto dens_l = get_substrates_layout<3>(problem_);
+
+	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
 }
 
 template class omp_custom_solver<float>;

@@ -117,7 +117,7 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 
 template <typename func_t>
 std::vector<std::size_t> warmup_and_measure(tridiagonal_solver& solver, const max_problem_t& problem,
-											double warmup_time_s, func_t&& func)
+											const nlohmann::json& params, double warmup_time_s, func_t&& func)
 {
 	// warmup
 	{
@@ -136,6 +136,7 @@ std::vector<std::size_t> warmup_and_measure(tridiagonal_solver& solver, const ma
 		for (std::size_t i = 0; i < 10; i++)
 		{
 			solver.prepare(problem);
+			solver.tune(params);
 			solver.initialize();
 
 			auto start = std::chrono::high_resolution_clock::now();
@@ -168,9 +169,9 @@ void algorithms::measure(const std::string& alg, const max_problem_t& problem, c
 		init_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
 
-	auto x_times = warmup_and_measure(*solver, problem, warmup_time_s_, [&solver]() { solver->solve_x(); });
-	auto y_times = warmup_and_measure(*solver, problem, warmup_time_s_, [&solver]() { solver->solve_y(); });
-	auto z_times = warmup_and_measure(*solver, problem, warmup_time_s_, [&solver]() { solver->solve_z(); });
+	auto x_times = warmup_and_measure(*solver, problem, params, warmup_time_s_, [&solver]() { solver->solve_x(); });
+	auto y_times = warmup_and_measure(*solver, problem, params, warmup_time_s_, [&solver]() { solver->solve_y(); });
+	auto z_times = warmup_and_measure(*solver, problem, params, warmup_time_s_, [&solver]() { solver->solve_z(); });
 
 	auto compute_mean_and_std = [](const std::vector<std::size_t>& times) {
 		double mean = std::accumulate(times.begin(), times.end(), 0.0) / times.size();

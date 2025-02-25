@@ -1,5 +1,7 @@
 #include "reference_thomas_solver.h"
 
+#include <fstream>
+
 #include <noarr/traversers.hpp>
 
 #include "omp_helper.h"
@@ -246,6 +248,33 @@ void reference_thomas_solver<real_t>::solve_z()
 			}
 		}
 	}
+}
+
+template <typename real_t>
+void reference_thomas_solver<real_t>::save(const std::string& file) const
+{
+	auto dens_l = get_substrates_layout(problem_);
+
+	std::ofstream out(file);
+
+	for (index_t z = 0; z < problem_.nz; z++)
+		for (index_t y = 0; y < problem_.ny; y++)
+			for (index_t x = 0; x < problem_.nx; x++)
+			{
+				for (index_t s = 0; s < problem_.substrates_count; s++)
+					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
+				out << std::endl;
+			}
+
+	out.close();
+}
+
+template <typename real_t>
+double reference_thomas_solver<real_t>::access(std::size_t x, std::size_t y, std::size_t z, std::size_t s) const
+{
+	auto dens_l = get_substrates_layout(problem_);
+
+	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
 }
 
 template class reference_thomas_solver<float>;
