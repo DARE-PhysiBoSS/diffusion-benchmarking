@@ -124,9 +124,9 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 		}
 	}
 
-	std::cout << "Maximal relative difference in x: " << max_relative_diff_x_ << std::endl;
-	std::cout << "Maximal relative difference in y: " << max_relative_diff_y_ << std::endl;
-	std::cout << "Maximal relative difference in z: " << max_relative_diff_z_ << std::endl;
+	std::cout << "Maximal relative difference in x: " << max_relative_diff_x_ * 100 << "%" << std::endl;
+	std::cout << "Maximal relative difference in y: " << max_relative_diff_y_ * 100 << "%" << std::endl;
+	std::cout << "Maximal relative difference in z: " << max_relative_diff_z_ * 100 << "%" << std::endl;
 }
 
 template <typename func_t>
