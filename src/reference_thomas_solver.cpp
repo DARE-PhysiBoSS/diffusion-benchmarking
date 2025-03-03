@@ -1,6 +1,7 @@
 #include "reference_thomas_solver.h"
 
 #include <fstream>
+#include <iostream>
 
 #include <noarr/traversers.hpp>
 
@@ -42,7 +43,7 @@ template <typename num_t, typename real_t>
 auto get_substrates_layout(const problem_t<num_t, real_t>& problem)
 {
 	return noarr::scalar<real_t>()
-		   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nz, problem.ny, problem.nx);
+		   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nx, problem.ny, problem.nz);
 }
 
 template <typename real_t>
@@ -66,11 +67,11 @@ template <typename real_t>
 void reference_thomas_solver<real_t>::initialize()
 {
 	if (problem_.dims >= 1)
-		precompute_values(a_, bx_, b0_, problem_.dx, problem_.dims, problem_.nx);
+		precompute_values(ax_, bx_, b0x_, problem_.dx, problem_.dims, problem_.nx);
 	if (problem_.dims >= 2)
-		precompute_values(a_, by_, b0_, problem_.dy, problem_.dims, problem_.ny);
+		precompute_values(ay_, by_, b0y_, problem_.dy, problem_.dims, problem_.ny);
 	if (problem_.dims >= 3)
-		precompute_values(a_, bz_, b0_, problem_.dz, problem_.dims, problem_.nz);
+		precompute_values(az_, bz_, b0z_, problem_.dz, problem_.dims, problem_.nz);
 }
 
 template <typename real_t>
@@ -83,19 +84,12 @@ void reference_thomas_solver<real_t>::solve_x()
 	{
 		for (index_t y = 0; y < problem_.ny; y++)
 		{
-			for (index_t s = 0; s < problem_.substrates_count; s++)
-			{
-				(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, 1, y, z)) -=
-					(a_[s] / (b0_[s] - a_[s]))
-					* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, 0, y, z));
-			}
-
-			for (index_t x = 2; x < problem_.nx; x++)
+			for (index_t x = 1; x < problem_.nx; x++)
 			{
 				for (index_t s = 0; s < problem_.substrates_count; s++)
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) -=
-						(a_[s] / b0_[s])
+						(ax_[s] / (diag_l | noarr::get_at<'s', 'i'>(bx_.get(), s, x - 1)))
 						* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x - 1, y, z));
 				}
 			}
@@ -112,7 +106,7 @@ void reference_thomas_solver<real_t>::solve_x()
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) =
 						((dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z))
-						 - a_[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x + 1, y, z)))
+						 - ax_[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x + 1, y, z)))
 						/ (diag_l | noarr::get_at<'s', 'i'>(bx_.get(), s, x));
 				}
 			}
@@ -128,27 +122,14 @@ void reference_thomas_solver<real_t>::solve_y()
 
 	for (index_t z = 0; z < problem_.nz; z++)
 	{
-		for (index_t x = 0; x < problem_.nx; x++)
-		{
-			for (index_t s = 0; s < problem_.substrates_count; s++)
-			{
-				(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, 1, z)) -=
-					(a_[s] / (b0_[s] - a_[s]))
-					* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, 0, z));
-			}
-		}
-	}
-
-	for (index_t z = 0; z < problem_.nz; z++)
-	{
-		for (index_t y = 2; y < problem_.ny; y++)
+		for (index_t y = 1; y < problem_.ny; y++)
 		{
 			for (index_t x = 0; x < problem_.nx; x++)
 			{
 				for (index_t s = 0; s < problem_.substrates_count; s++)
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) -=
-						(a_[s] / b0_[s])
+						(ay_[s] / (diag_l | noarr::get_at<'s', 'i'>(by_.get(), s, y - 1)))
 						* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y - 1, z));
 				}
 			}
@@ -177,7 +158,7 @@ void reference_thomas_solver<real_t>::solve_y()
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) =
 						((dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z))
-						 - a_[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y + 1, z)))
+						 - ay_[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y + 1, z)))
 						/ (diag_l | noarr::get_at<'s', 'i'>(by_.get(), s, y));
 				}
 			}
@@ -191,20 +172,7 @@ void reference_thomas_solver<real_t>::solve_z()
 	auto dens_l = get_substrates_layout(problem_);
 	auto diag_l = noarr::scalar<real_t>() ^ noarr::vectors<'s', 'i'>(problem_.substrates_count, problem_.nz);
 
-	for (index_t y = 0; y < problem_.ny; y++)
-	{
-		for (index_t x = 0; x < problem_.nx; x++)
-		{
-			for (index_t s = 0; s < problem_.substrates_count; s++)
-			{
-				(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, 1)) -=
-					(a_[s] / (b0_[s] - a_[s]))
-					* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, 0));
-			}
-		}
-	}
-
-	for (index_t z = 2; z < problem_.nz; z++)
+	for (index_t z = 1; z < problem_.nz; z++)
 	{
 		for (index_t y = 0; y < problem_.ny; y++)
 		{
@@ -213,7 +181,7 @@ void reference_thomas_solver<real_t>::solve_z()
 				for (index_t s = 0; s < problem_.substrates_count; s++)
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) -=
-						(a_[s] / b0_[s])
+						(az_[s] / (diag_l | noarr::get_at<'s', 'i'>(bz_.get(), s, z - 1)))
 						* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z - 1));
 				}
 			}
@@ -242,7 +210,7 @@ void reference_thomas_solver<real_t>::solve_z()
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) =
 						((dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z))
-						 - a_[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z + 1)))
+						 - az_[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z + 1)))
 						/ (diag_l | noarr::get_at<'s', 'i'>(bz_.get(), s, z));
 				}
 			}
@@ -270,7 +238,7 @@ void reference_thomas_solver<real_t>::save(const std::string& file) const
 }
 
 template <typename real_t>
-double reference_thomas_solver<real_t>::access(std::size_t x, std::size_t y, std::size_t z, std::size_t s) const
+double reference_thomas_solver<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
 {
 	auto dens_l = get_substrates_layout(problem_);
 

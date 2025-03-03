@@ -60,7 +60,8 @@ void common_prepare(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_
 	ref.initialize();
 }
 
-void common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_problem_t& problem)
+void algorithms::common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_problem_t& problem,
+								 double& max_relative_difference)
 {
 	for (std::size_t z = 0; z < problem.nz; z++)
 		for (std::size_t y = 0; y < problem.ny; y++)
@@ -70,7 +71,10 @@ void common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref, const max
 					auto ref_val = ref.access(s, x, y, z);
 					auto val = alg.access(s, x, y, z);
 
-					if (val != ref_val)
+					auto relative_diff = std::abs(val - ref_val) / std::abs(ref_val);
+					max_relative_difference = std::max(max_relative_difference, relative_diff);
+
+					if (relative_diff > relative_difference_print_threshold_)
 						std::cout << "At [" << s << ", " << x << ", " << y << ", " << z << "]: " << val
 								  << " != " << ref_val << std::endl;
 				}
@@ -81,13 +85,17 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 	auto& solver = solvers_.at(alg);
 	auto& ref_solver = solvers_.at("ref");
 
+	max_relative_diff_x_ = 0.;
+	max_relative_diff_y_ = 0.;
+	max_relative_diff_z_ = 0.;
+
 	// validate solve_x
 	{
 		common_prepare(*solver, *ref_solver, problem, params);
 		solver->solve_x();
 		ref_solver->solve_x();
 
-		common_validate(*solver, *ref_solver, problem);
+		common_validate(*solver, *ref_solver, problem, max_relative_diff_x_);
 	}
 
 	if (problem.dims > 1)
@@ -98,7 +106,7 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 			solver->solve_y();
 			ref_solver->solve_y();
 
-			common_validate(*solver, *ref_solver, problem);
+			common_validate(*solver, *ref_solver, problem, max_relative_diff_y_);
 		}
 	}
 
@@ -110,9 +118,13 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 			solver->solve_z();
 			ref_solver->solve_z();
 
-			common_validate(*solver, *ref_solver, problem);
+			common_validate(*solver, *ref_solver, problem, max_relative_diff_z_);
 		}
 	}
+
+	std::cout << "Maximal relative difference in x: " << max_relative_diff_x_ << std::endl;
+	std::cout << "Maximal relative difference in y: " << max_relative_diff_y_ << std::endl;
+	std::cout << "Maximal relative difference in z: " << max_relative_diff_z_ << std::endl;
 }
 
 template <typename func_t>

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <fstream>
+#include <iostream>
 
 #include <noarr/traversers.hpp>
 
@@ -90,7 +91,7 @@ void omp_custom_solver<real_t>::prepare(const max_problem_t& problem)
 template <typename real_t>
 void omp_custom_solver<real_t>::tune(const nlohmann::json& params)
 {
-	work_items_ = params["work_items"];
+	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"] : 1;
 }
 
 template <typename real_t>
@@ -111,10 +112,10 @@ auto get_substrates_layout(const problem_t<num_t, real_t>& problem)
 		return noarr::scalar<real_t>() ^ noarr::vectors<'s', 'x'>(problem.substrates_count, problem.nx);
 	else if constexpr (dims == 2)
 		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'s', 'x', 'y'>(problem.substrates_count, problem.ny, problem.nx);
+			   ^ noarr::vectors<'s', 'x', 'y'>(problem.substrates_count, problem.nx, problem.ny);
 	else if constexpr (dims == 3)
 		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nz, problem.ny, problem.nx);
+			   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nx, problem.ny, problem.nz);
 }
 
 template <typename index_t, typename real_t, typename density_layout_t>
@@ -445,7 +446,7 @@ void omp_custom_solver<real_t>::save(const std::string& file) const
 }
 
 template <typename real_t>
-double omp_custom_solver<real_t>::access(std::size_t x, std::size_t y, std::size_t z, std::size_t s) const
+double omp_custom_solver<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
 {
 	auto dens_l = get_substrates_layout<3>(problem_);
 

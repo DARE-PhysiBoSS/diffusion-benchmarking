@@ -27,4 +27,6 @@ public:
 
 	// Accesses the value at the given coordinates
 	virtual double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const = 0;
+
+	virtual ~tridiagonal_solver() = default;
 };

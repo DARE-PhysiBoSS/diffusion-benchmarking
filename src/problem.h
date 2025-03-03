@@ -17,6 +17,8 @@ struct problem_t
 	std::vector<real_t> diffusion_coefficients;
 	std::vector<real_t> decay_rates;
 	std::vector<real_t> initial_conditions;
+
+	problem_t() : dims(1), dx(20), dy(20), dz(20), nx(1), ny(1), nz(1), substrates_count(1), iterations(1), dt(0.01) {}
 };
 
 using max_problem_t = problem_t<std::size_t, double>;

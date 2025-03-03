@@ -16,11 +16,29 @@ max_problem_t problems::read_problem(const std::string& file)
 	max_problem_t problem;
 	problem.dims = j["dims"];
 	problem.dx = j["dx"];
-	problem.dy = j["dy"];
-	problem.dz = j["dz"];
 	problem.nx = j["nx"];
-	problem.ny = j["ny"];
-	problem.nz = j["nz"];
+
+	if (problem.nx < 2)
+		throw std::runtime_error("nx must be at least 2");
+
+	if (problem.dims >= 2)
+	{
+		problem.dy = j["dy"];
+		problem.ny = j["ny"];
+
+		if (problem.ny < 2)
+			throw std::runtime_error("ny must be at least 2");
+	}
+
+	if (problem.dims >= 3)
+	{
+		problem.dz = j["dz"];
+		problem.nz = j["nz"];
+
+		if (problem.nz < 2)
+			throw std::runtime_error("nz must be at least 2");
+	}
+
 	problem.substrates_count = j["substrates_count"];
 	problem.iterations = j["iterations"];
 	problem.dt = j["dt"];
@@ -39,9 +57,6 @@ max_problem_t problems::read_problem(const std::string& file)
 
 	if (problem.dims < 1 || problem.dims > 3)
 		throw std::runtime_error("dims must be in range [1, 3]");
-
-	if (problem.nx < 2 || problem.ny < 2 || problem.nz < 2)
-		throw std::runtime_error("nx, ny, nz must be at least 2");
 
 	return problem;
 }

@@ -12,6 +12,13 @@ class algorithms
 
 	double warmup_time_s_ = 3.;
 
+	static constexpr double relative_difference_print_threshold_ = 0.01;
+
+	double max_relative_diff_x_, max_relative_diff_y_, max_relative_diff_z_;
+
+	void common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_problem_t& problem,
+						 double& max_relative_difference);
+
 public:
 	algorithms(bool double_precision);
 
