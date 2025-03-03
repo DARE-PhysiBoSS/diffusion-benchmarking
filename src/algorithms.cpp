@@ -2,7 +2,8 @@
 
 #include <iostream>
 
-#include "omp_custom_solver.h"
+#include "least_compute_thomas_solver.h"
+#include "least_memory_thomas_solver.h"
 #include "reference_thomas_solver.h"
 #include "tridiagonal_solver.h"
 
@@ -12,7 +13,8 @@ std::map<std::string, std::unique_ptr<tridiagonal_solver>> get_solvers_map()
 	std::map<std::string, std::unique_ptr<tridiagonal_solver>> solvers;
 
 	solvers.emplace("ref", std::make_unique<reference_thomas_solver<real_t>>());
-	solvers.emplace("omp", std::make_unique<omp_custom_solver<real_t>>());
+	solvers.emplace("lstc", std::make_unique<least_compute_thomas_solver<real_t>>());
+	solvers.emplace("lstm", std::make_unique<least_memory_thomas_solver<real_t>>());
 
 	return solvers;
 }

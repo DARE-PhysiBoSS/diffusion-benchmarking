@@ -31,7 +31,7 @@ d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
 */
 
 template <typename real_t>
-class omp_custom_solver : public tridiagonal_solver
+class least_memory_thomas_solver : public tridiagonal_solver
 {
 	using index_t = std::int32_t;
 
@@ -39,14 +39,18 @@ class omp_custom_solver : public tridiagonal_solver
 
 	std::unique_ptr<real_t[]> substrates_;
 
-	std::unique_ptr<real_t[]> bx_, cx_, ex_;
-	std::unique_ptr<real_t[]> by_, cy_, ey_;
-	std::unique_ptr<real_t[]> bz_, cz_, ez_;
+	std::unique_ptr<real_t[]> ax_, b0x_, scratchpadx_;
+	std::unique_ptr<real_t[]> ay_, b0y_, scratchpady_;
+	std::unique_ptr<real_t[]> az_, b0z_, scratchpadz_;
+
+	std::unique_ptr<index_t[]> threshold_indexx_, threshold_indexy_, threshold_indexz_;
+
+	static real_t limit_threshold_;
 
 	std::size_t work_items_;
 
-	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
-						   index_t shape, index_t dims, index_t n, index_t copies);
+	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0,
+						   std::unique_ptr<index_t[]>& threshold_index, index_t shape, index_t dims, index_t n);
 
 public:
 	void prepare(const max_problem_t& problem) override;

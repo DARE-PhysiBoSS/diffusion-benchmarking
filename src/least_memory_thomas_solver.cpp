@@ -1,78 +1,67 @@
-#include "omp_custom_solver.h"
+#include "least_memory_thomas_solver.h"
 
-#include <array>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
+#include <omp.h>
 
 #include <noarr/traversers.hpp>
 
 #include "omp_helper.h"
 
 template <typename real_t>
-void omp_custom_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c,
-												  std::unique_ptr<real_t[]>& e, index_t shape, index_t dims, index_t n,
-												  index_t copies)
+void least_memory_thomas_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0,
+														   std::unique_ptr<index_t[]>& threshold_index, index_t shape,
+														   index_t dims, index_t n)
 {
-	b = std::make_unique<real_t[]>(n * problem_.substrates_count * copies);
-	e = std::make_unique<real_t[]>((n - 1) * problem_.substrates_count * copies);
-	c = std::make_unique<real_t[]>(problem_.substrates_count * copies);
+	a = std::make_unique<real_t[]>(problem_.substrates_count);
+	b0 = std::make_unique<real_t[]>(problem_.substrates_count);
+	threshold_index = std::make_unique<index_t[]>(problem_.substrates_count);
 
-	auto layout = noarr::scalar<real_t>() ^ noarr::vector<'s'>() ^ noarr::vector<'x'>() ^ noarr::vector<'i'>()
-				  ^ noarr::set_length<'i'>(n) ^ noarr::set_length<'x'>(copies)
-				  ^ noarr::set_length<'s'>(problem_.substrates_count);
-
-	auto b_diag = noarr::make_bag(layout, b.get());
-	auto e_diag = noarr::make_bag(layout, e.get());
-
-	// compute c_i
-	for (index_t x = 0; x < copies; x++)
-		for (index_t s = 0; s < problem_.substrates_count; s++)
-			c[x * problem_.substrates_count + s] = -problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
-
-	// compute b_i
+	// compute a_i, b0_i
+	for (index_t s = 0; s < problem_.substrates_count; s++)
 	{
-		std::array<index_t, 2> indices = { 0, n - 1 };
-
-		for (index_t i : indices)
-			for (index_t x = 0; x < copies; x++)
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-					b_diag.template at<'i', 'x', 's'>(i, x, s) =
-						1 + problem_.decay_rates[s] * problem_.dt / dims
-						+ problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
-
-		for (index_t i = 1; i < n - 1; i++)
-			for (index_t x = 0; x < copies; x++)
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-					b_diag.template at<'i', 'x', 's'>(i, x, s) =
-						1 + problem_.decay_rates[s] * problem_.dt / dims
-						+ 2 * problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
+		a[s] = -problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
+		b0[s] = 1 + problem_.dt * problem_.decay_rates[s] / dims
+				+ problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
 	}
 
-	// compute b_i' and e_i
+	real_t prev, curr;
+	for (index_t s = 0; s < problem_.substrates_count; s++)
 	{
-		for (index_t x = 0; x < copies; x++)
-			for (index_t s = 0; s < problem_.substrates_count; s++)
-				b_diag.template at<'i', 'x', 's'>(0, x, s) = 1 / b_diag.template at<'i', 'x', 's'>(0, x, s);
-
-		for (index_t i = 1; i < n; i++)
-			for (index_t x = 0; x < copies; x++)
-				for (index_t s = 0; s < problem_.substrates_count; s++)
+		for (index_t i = 0; i < n; i++)
+		{
+			// computes one element
+			{
+				if (i == 0)
+					curr = b0[s] / a[s];
+				else if (i != n - 1)
 				{
-					b_diag.template at<'i', 'x', 's'>(i, x, s) =
-						1
-						/ (b_diag.template at<'i', 'x', 's'>(i, x, s)
-						   - c[x * problem_.substrates_count + s] * c[x * problem_.substrates_count + s]
-								 * b_diag.template at<'i', 'x', 's'>(i - 1, x, s));
-
-					e_diag.template at<'i', 'x', 's'>(i - 1, x, s) =
-						c[x * problem_.substrates_count + s] * b_diag.template at<'i', 'x', 's'>(i - 1, x, s);
+					prev = curr;
+					curr = (b0[s] - a[s]) / a[s] - 1 / prev;
 				}
+				else
+				{
+					prev = curr;
+					curr = b0[s] / a[s] - 1 / prev;
+				}
+			}
+
+			if (i > 0 && std::abs(curr - prev) < limit_threshold_)
+			{
+				threshold_index[s] = i;
+				break;
+			}
+			else if (i == n - 1)
+			{
+				threshold_index[s] = n;
+			}
+		}
 	}
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::prepare(const max_problem_t& problem)
+void least_memory_thomas_solver<real_t>::prepare(const max_problem_t& problem)
 {
 	problem_ = problems::cast<std::int32_t, real_t>(problem);
 	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
@@ -89,20 +78,20 @@ void omp_custom_solver<real_t>::prepare(const max_problem_t& problem)
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::tune(const nlohmann::json& params)
+void least_memory_thomas_solver<real_t>::tune(const nlohmann::json& params)
 {
 	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"] : 1;
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::initialize()
+void least_memory_thomas_solver<real_t>::initialize()
 {
 	if (problem_.dims >= 1)
-		precompute_values(bx_, cx_, ex_, problem_.dx, problem_.dims, problem_.nx, 1);
+		precompute_values(ax_, b0x_, threshold_indexx_, problem_.dx, problem_.dims, problem_.nx);
 	if (problem_.dims >= 2)
-		precompute_values(by_, cy_, ey_, problem_.dy, problem_.dims, problem_.ny, 1);
+		precompute_values(ay_, b0y_, threshold_indexy_, problem_.dy, problem_.dims, problem_.ny);
 	if (problem_.dims >= 3)
-		precompute_values(bz_, cz_, ez_, problem_.dz, problem_.dims, problem_.nz, 1);
+		precompute_values(az_, b0z_, threshold_indexz_, problem_.dz, problem_.dims, problem_.nz);
 }
 
 template <std::size_t dims, typename num_t, typename real_t>
@@ -119,46 +108,99 @@ auto get_substrates_layout(const problem_t<num_t, real_t>& problem)
 }
 
 template <typename index_t, typename real_t, typename density_layout_t>
-void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, std::size_t work_items)
+void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ a, const real_t* __restrict__ b0,
+					  const index_t* __restrict__ threshold, const density_layout_t dens_l, std::size_t work_items)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
 
-	auto diag_l = noarr::scalar<real_t>() ^ noarr::vector<'s'>(substrates_count) ^ noarr::vector<'i'>(n);
-
-	for (index_t i = 1; i < n; i++)
-	{
-#pragma omp for schedule(static, work_items) nowait
-		for (index_t s = 0; s < substrates_count; s++)
-		{
-			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
-				(dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-				- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
-					  * (dens_l | noarr::get_at<'x', 's'>(densities, i - 1, s));
-		}
-	}
-
 #pragma omp for schedule(static, work_items) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) =
-			(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) * (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-	}
+		real_t b_tmp = b0[s] / a[s];
 
-	for (index_t i = n - 2; i >= 0; i--)
-	{
-#pragma omp for schedule(static, work_items) nowait
-		for (index_t s = 0; s < substrates_count; s++)
+		{
+			(dens_l | noarr::get_at<'x', 's'>(densities, 1, s)) -=
+				(dens_l | noarr::get_at<'x', 's'>(densities, 0, s)) / b_tmp;
+
+			std::cout << "-ftmp 0: " << b_tmp << std::endl;
+		}
+
+		for (index_t i = 2; i < threshold[s]; i++)
+		{
+			b_tmp = (b0[s] - a[s]) / a[s] - 1 / b_tmp;
+
+			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) -=
+				(dens_l | noarr::get_at<'x', 's'>(densities, i - 1, s)) / b_tmp;
+
+
+			std::cout << "-ftmp " << i - 1 << ": " << b_tmp << std::endl;
+		}
+
+		for (index_t i = threshold[s]; i < n; i++)
+		{
+			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) -=
+				(dens_l | noarr::get_at<'x', 's'>(densities, i - 1, s)) / b_tmp;
+
+			std::cout << "ftmp " << i - 1 << ": " << b_tmp << std::endl;
+		}
+
+		{
+			(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) /= b0[s] / a[s] - 1 / b_tmp;
+
+			std::cout << "ftmp " << n - 1 << ": " << b0[s] / a[s] - 1 / b_tmp << std::endl;
+		}
+
+		{
+			(dens_l | noarr::get_at<'x', 's'>(densities, n - 2, s)) =
+				((dens_l | noarr::get_at<'x', 's'>(densities, n - 2, s))
+				 - (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)))
+				/ b_tmp;
+
+			std::cout << "ftmp " << n - 2 << ": " << b_tmp << std::endl;
+
+			(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) /= a[s];
+		}
+
+		for (index_t i = n - 3; i >= threshold[s] - 1; i--)
 		{
 			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
 				((dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-				 - c[s] * (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)))
-				* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+				 - (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)))
+				/ b_tmp;
+
+			std::cout << "btmp " << i << ": " << b_tmp << std::endl;
+
+			(dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)) /= a[s];
+		}
+
+
+		for (index_t i = threshold[s] - 2; i >= 0; i--)
+		{
+			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
+				((dens_l | noarr::get_at<'x', 's'>(densities, i, s))
+				 - (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)))
+				/ b_tmp;
+
+			(dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)) /= a[s];
+
+			std::cout << "-btmp " << i << ": " << b_tmp << std::endl;
+
+			b_tmp = 1 / (((b0[s] - a[s]) / a[s]) - b_tmp);
+		}
+
+		{
+			(dens_l | noarr::get_at<'x', 's'>(densities, 0, s)) /= a[s];
 		}
 	}
 
-#pragma omp barrier
+	// for (index_t i = 0; i < n; i++)
+	// {
+	// 	std::cout << "densities[" << i << "]: ";
+	// 	for (index_t s = 0; s < substrates_count; s++)
+	// 		std::cout << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << " ";
+	// 	std::cout << std::endl;
+	// }
 }
 
 template <typename index_t, typename real_t, typename density_layout_t>
@@ -255,8 +297,6 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 			}
 		}
 	}
-
-#pragma omp barrier
 }
 
 template <typename index_t, typename real_t, typename density_layout_t>
@@ -373,61 +413,60 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 			}
 		}
 	}
-
-#pragma omp barrier
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::solve_x()
+void least_memory_thomas_solver<real_t>::solve_x()
 {
 	if (problem_.dims == 1)
 	{
-#pragma omp parallel
-		solve_slice_x_1d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+		// #pragma omp parallel
+		solve_slice_x_1d<index_t>(substrates_.get(), ax_.get(), b0x_.get(), threshold_indexx_.get(),
 								  get_substrates_layout<1>(problem_), work_items_);
 	}
-	else if (problem_.dims == 2)
-	{
-#pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-										 get_substrates_layout<2>(problem_) ^ noarr::rename<'y', 'm'>(), work_items_);
-	}
-	else if (problem_.dims == 3)
-	{
-#pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-										 get_substrates_layout<3>(problem_) ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-										 work_items_);
-	}
+	// 	else if (problem_.dims == 2)
+	// 	{
+	// #pragma omp parallel
+	// 		solve_slice_x_2d_and_3d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+	// 										 get_substrates_layout<2>(problem_) ^ noarr::rename<'y', 'm'>(),
+	// work_items_);
+	// 	}
+	// 	else if (problem_.dims == 3)
+	// 	{
+	// #pragma omp parallel
+	// 		solve_slice_x_2d_and_3d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+	// 										 get_substrates_layout<3>(problem_) ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+	// 										 work_items_);
+	// 	}
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::solve_y()
+void least_memory_thomas_solver<real_t>::solve_y()
 {
-	if (problem_.dims == 2)
-	{
-#pragma omp parallel
-		solve_slice_y_2d<index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
-								  get_substrates_layout<2>(problem_), work_items_);
-	}
-	else if (problem_.dims == 3)
-	{
-#pragma omp parallel
-		solve_slice_y_3d<index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
-								  get_substrates_layout<3>(problem_), work_items_);
-	}
+	// 	if (problem_.dims == 2)
+	// 	{
+	// #pragma omp parallel
+	// 		solve_slice_y_2d<index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
+	// 								  get_substrates_layout<2>(problem_), work_items_);
+	// 	}
+	// 	else if (problem_.dims == 3)
+	// 	{
+	// #pragma omp parallel
+	// 		solve_slice_y_3d<index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
+	// 								  get_substrates_layout<3>(problem_), work_items_);
+	// 	}
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::solve_z()
+void least_memory_thomas_solver<real_t>::solve_z()
 {
-#pragma omp parallel
-	solve_slice_z_3d<index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(problem_),
-							  work_items_);
+	// #pragma omp parallel
+	// 	solve_slice_z_3d<index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(),
+	// get_substrates_layout<3>(problem_), 							  work_items_);
 }
 
 template <typename real_t>
-void omp_custom_solver<real_t>::save(const std::string& file) const
+void least_memory_thomas_solver<real_t>::save(const std::string& file) const
 {
 	auto dens_l = get_substrates_layout<3>(problem_);
 
@@ -446,12 +485,18 @@ void omp_custom_solver<real_t>::save(const std::string& file) const
 }
 
 template <typename real_t>
-double omp_custom_solver<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
+double least_memory_thomas_solver<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
 {
 	auto dens_l = get_substrates_layout<3>(problem_);
 
 	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
 }
 
-template class omp_custom_solver<float>;
-template class omp_custom_solver<double>;
+template <>
+float least_memory_thomas_solver<float>::limit_threshold_ = 1e-6f;
+
+template <>
+double least_memory_thomas_solver<double>::limit_threshold_ = 1e-12;
+
+template class least_memory_thomas_solver<float>;
+template class least_memory_thomas_solver<double>;
