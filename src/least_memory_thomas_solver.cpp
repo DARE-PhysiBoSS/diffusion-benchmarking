@@ -193,7 +193,7 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 	const index_t n = dens_l | noarr::get_length<'x'>();
 	const index_t m = dens_l | noarr::get_length<'m'>();
 
-#pragma omp for schedule(static, work_items) collapse(2)
+#pragma omp for schedule(static, work_items) collapse(2) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		for (index_t yz = 0; yz < m; yz++)
@@ -259,11 +259,12 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 	const index_t n = dens_l | noarr::get_length<'y'>();
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-#pragma omp for schedule(static, work_items)
+#pragma omp for schedule(static, work_items) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		real_t b_tmp = b0[s];
 
+#pragma omp simd
 		for (index_t x = 0; x < x_len; x++)
 		{
 			(dens_l | noarr::get_at<'x', 'y', 's'>(densities, x, 1, s)) -=
@@ -274,6 +275,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			b_tmp = (b0[s] - a[s]) - (a[s] * a[s]) / b_tmp;
 
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'x', 'y', 's'>(densities, x, i, s)) -=
@@ -283,6 +285,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 
 		for (index_t i = threshold[s]; i < n; i++)
 		{
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'x', 'y', 's'>(densities, x, i, s)) -=
@@ -290,6 +293,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 			}
 		}
 
+#pragma omp simd
 		for (index_t x = 0; x < x_len; x++)
 		{
 			(dens_l | noarr::get_at<'x', 'y', 's'>(densities, x, n - 1, s)) /= b0[s] - (a[s] * a[s]) / b_tmp;
@@ -302,6 +306,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 
 		for (index_t i = n - 3; i >= threshold[s] - 1; i--)
 		{
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'x', 'y', 's'>(densities, x, i, s)) =
@@ -313,6 +318,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 
 		for (index_t i = threshold[s] - 2; i >= 0; i--)
 		{
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'x', 'y', 's'>(densities, x, i, s)) =
@@ -335,13 +341,14 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-#pragma omp for schedule(static, work_items) collapse(2)
+#pragma omp for schedule(static, work_items) collapse(2) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		for (index_t z = 0; z < z_len; z++)
 		{
 			real_t b_tmp = b0[s];
 
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'z', 'x', 'y', 's'>(densities, z, x, 1, s)) -=
@@ -352,6 +359,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 			{
 				b_tmp = (b0[s] - a[s]) - (a[s] * a[s]) / b_tmp;
 
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'z', 'x', 'y', 's'>(densities, z, x, i, s)) -=
@@ -361,6 +369,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 			for (index_t i = threshold[s]; i < n; i++)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'z', 'x', 'y', 's'>(densities, z, x, i, s)) -=
@@ -368,6 +377,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 				}
 			}
 
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'z', 'x', 'y', 's'>(densities, z, x, n - 1, s)) /=
@@ -381,6 +391,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 			for (index_t i = n - 3; i >= threshold[s] - 1; i--)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'z', 'x', 'y', 's'>(densities, z, x, i, s)) =
@@ -392,6 +403,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 			for (index_t i = threshold[s] - 2; i >= 0; i--)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'z', 'x', 'y', 's'>(densities, z, x, i, s)) =
@@ -415,13 +427,14 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-#pragma omp for schedule(static, work_items)
+#pragma omp for schedule(static, work_items) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		real_t b_tmp = b0[s];
 
 		for (index_t y = 0; y < y_len; y++)
 		{
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'x', 'y', 'z', 's'>(densities, x, y, 1, s)) -=
@@ -435,6 +448,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 			for (index_t y = 0; y < y_len; y++)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'x', 'y', 'z', 's'>(densities, x, y, i, s)) -=
@@ -447,6 +461,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			for (index_t y = 0; y < y_len; y++)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'x', 'y', 'z', 's'>(densities, x, y, i, s)) -=
@@ -457,6 +472,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 		for (index_t y = 0; y < y_len; y++)
 		{
+#pragma omp simd
 			for (index_t x = 0; x < x_len; x++)
 			{
 				(dens_l | noarr::get_at<'x', 'y', 'z', 's'>(densities, x, y, n - 1, s)) /=
@@ -473,6 +489,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			for (index_t y = 0; y < y_len; y++)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'x', 'y', 'z', 's'>(densities, x, y, i, s)) =
@@ -487,6 +504,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			for (index_t y = 0; y < y_len; y++)
 			{
+#pragma omp simd
 				for (index_t x = 0; x < x_len; x++)
 				{
 					(dens_l | noarr::get_at<'x', 'y', 'z', 's'>(densities, x, y, i, s)) =
