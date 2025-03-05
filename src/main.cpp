@@ -36,7 +36,7 @@ int main(int argc, char** argv)
 
 	std::string output_file;
 	group.add_argument("--run_and_save")
-		.help("If present, the provided problem will be solved  by the algorithm and results will be stored in the "
+		.help("If present, the provided problem will be solved by the algorithm and results will be stored in the "
 			  "output file")
 		.store_into(output_file);
 
@@ -48,7 +48,8 @@ int main(int argc, char** argv)
 
 	try
 	{
-		// program.parse_args({ "./diffuse", "--alg", "omp", "--problem", "../example-problems/toy.json", "--validate" });
+		// program.parse_args({ "./diffuse", "--alg", "lstc", "--problem", "../example-problems/toy.json", "--validate"
+		// });
 		program.parse_args(argc, argv);
 	}
 	catch (const std::exception& err)

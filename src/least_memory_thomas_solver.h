@@ -49,6 +49,9 @@ class least_memory_thomas_solver : public tridiagonal_solver
 
 	std::size_t work_items_;
 
+	template <std::size_t dims>
+	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
+
 	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0,
 						   std::unique_ptr<index_t[]>& threshold_index, index_t shape, index_t dims, index_t n);
 

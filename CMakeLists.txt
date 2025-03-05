@@ -50,3 +50,6 @@ target_include_directories(
 
 find_package(OpenMP REQUIRED)
 target_link_libraries(diffuse OpenMP::OpenMP_CXX nlohmann_json::nlohmann_json)
+
+find_package(LAPACK REQUIRED)
+target_link_libraries(diffuse LAPACK::LAPACK)

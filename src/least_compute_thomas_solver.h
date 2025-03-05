@@ -48,6 +48,9 @@ class least_compute_thomas_solver : public tridiagonal_solver
 	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
 						   index_t shape, index_t dims, index_t n, index_t copies);
 
+	template <std::size_t dims>
+	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
+
 public:
 	void prepare(const max_problem_t& problem) override;
 

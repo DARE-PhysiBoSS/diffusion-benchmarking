@@ -105,8 +105,9 @@ void least_compute_thomas_solver<real_t>::initialize()
 		precompute_values(bz_, cz_, ez_, problem_.dz, problem_.dims, problem_.nz, 1);
 }
 
-template <std::size_t dims, typename num_t, typename real_t>
-auto get_substrates_layout(const problem_t<num_t, real_t>& problem)
+template <typename real_t>
+template <std::size_t dims>
+auto least_compute_thomas_solver<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
 {
 	if constexpr (dims == 1)
 		return noarr::scalar<real_t>() ^ noarr::vectors<'s', 'x'>(problem.substrates_count, problem.nx);

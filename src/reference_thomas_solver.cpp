@@ -39,8 +39,8 @@ void reference_thomas_solver<real_t>::precompute_values(std::unique_ptr<real_t[]
 					(b0[s]) - (a[s] * a[s]) / (l | noarr::get_at<'s', 'i'>(b.get(), s, i - 1));
 }
 
-template <typename num_t, typename real_t>
-auto get_substrates_layout(const problem_t<num_t, real_t>& problem)
+template <typename real_t>
+auto reference_thomas_solver<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
 {
 	return noarr::scalar<real_t>()
 		   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nx, problem.ny, problem.nz);

@@ -17,6 +17,8 @@ class reference_thomas_solver : public tridiagonal_solver
 	std::unique_ptr<real_t[]> ay_, b0y_, by_;
 	std::unique_ptr<real_t[]> az_, b0z_, bz_;
 
+	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
+
 	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& b0,
 						   index_t shape, index_t dims, index_t n);
 
