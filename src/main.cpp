@@ -61,7 +61,17 @@ int main(int argc, char** argv)
 
 	algorithms algs(double_precision);
 
-	auto problem = problems::read_problem(problem_file);
+	max_problem_t problem;
+
+	try
+	{
+		problem = problems::read_problem(problem_file);
+	}
+	catch (const std::exception& err)
+	{
+		std::cerr << err.what() << std::endl;
+		return 1;
+	}
 
 	nlohmann::json params;
 
@@ -87,7 +97,7 @@ int main(int argc, char** argv)
 	}
 	else if (benchmark)
 	{
-		algs.measure(alg, problem, params);
+		algs.benchmark(alg, problem, params);
 	}
 
 	return 0;

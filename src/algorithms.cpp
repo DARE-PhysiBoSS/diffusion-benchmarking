@@ -168,28 +168,56 @@ std::vector<std::size_t> warmup_and_measure(tridiagonal_solver& solver, const ma
 	return times;
 }
 
-void algorithms::measure(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
+void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto& solver = solvers_.at(alg);
+	auto inner_iterations = params.contains("inner_iterations") ? (std::size_t)params["inner_iterations"] : 10;
 
-	std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,x_time,y_time,z_time,x_std,y_std,z_std" << std::endl;
+	auto& solver = *solvers_.at(alg);
 
-	solver->prepare(problem);
+	solver.prepare(problem);
+	solver.tune(params);
 
 	std::size_t init_time_us;
+	std::vector<std::size_t> times_x, times_y, times_z;
+
 	{
 		auto start = std::chrono::high_resolution_clock::now();
 
-		solver->initialize();
+		solver.initialize();
 
 		auto end = std::chrono::high_resolution_clock::now();
 
 		init_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
 
-	auto x_times = warmup_and_measure(*solver, problem, params, warmup_time_s_, [&solver]() { solver->solve_x(); });
-	auto y_times = warmup_and_measure(*solver, problem, params, warmup_time_s_, [&solver]() { solver->solve_y(); });
-	auto z_times = warmup_and_measure(*solver, problem, params, warmup_time_s_, [&solver]() { solver->solve_z(); });
+	for (std::size_t i = 0; i < inner_iterations; i++)
+	{
+		{
+			auto start = std::chrono::high_resolution_clock::now();
+			solver.solve_x();
+			auto end = std::chrono::high_resolution_clock::now();
+
+			times_x.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+		}
+
+		if (problem.dims > 1)
+		{
+			auto start = std::chrono::high_resolution_clock::now();
+			solver.solve_y();
+			auto end = std::chrono::high_resolution_clock::now();
+
+			times_y.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+		}
+
+		if (problem.dims > 2)
+		{
+			auto start = std::chrono::high_resolution_clock::now();
+			solver.solve_z();
+			auto end = std::chrono::high_resolution_clock::now();
+
+			times_z.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+		}
+	}
 
 	auto compute_mean_and_std = [](const std::vector<std::size_t>& times) {
 		double mean = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
@@ -198,11 +226,45 @@ void algorithms::measure(const std::string& alg, const max_problem_t& problem, c
 		return std::make_pair(mean, std_dev);
 	};
 
-	auto [x_mean, x_std] = compute_mean_and_std(x_times);
-	auto [y_mean, y_std] = compute_mean_and_std(y_times);
-	auto [z_mean, z_std] = compute_mean_and_std(z_times);
+	auto [x_mean, x_std] = compute_mean_and_std(times_x);
+	auto [y_mean, y_std] = compute_mean_and_std(times_y);
+	auto [z_mean, z_std] = compute_mean_and_std(times_z);
 
 	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
 			  << "," << problem.nz << "," << init_time_us << "," << 10 << "," << x_mean << "," << y_mean << ","
 			  << z_mean << "," << x_std << "," << y_std << "," << z_std << std::endl;
+}
+
+void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
+{
+	auto& solver = solvers_.at(alg);
+
+	std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,x_time,y_time,z_time,x_std,y_std,z_std" << std::endl;
+
+	solver->prepare(problem);
+	solver->tune(params);
+	solver->initialize();
+
+	// warmup
+	{
+		auto warmup_time_s = params.contains("warmup_time") ? (double)params["warmup_time"] : 3.0;
+		auto start = std::chrono::high_resolution_clock::now();
+		auto end = start;
+		do
+		{
+			solver->initialize();
+			solver->solve_x();
+			solver->solve_y();
+			solver->solve_z();
+			end = std::chrono::high_resolution_clock::now();
+		} while ((double)std::chrono::duration_cast<std::chrono::seconds>(end - start).count() < warmup_time_s);
+	}
+
+	// measure outer
+	{
+		auto outer_iterations = params.contains("outer_iterations") ? (std::size_t)params["outer_iterations"] : 1;
+
+		for (std::size_t i = 0; i < outer_iterations; i++)
+			benchmark_inner(alg, problem, params);
+	}
 }
