@@ -58,6 +58,9 @@ void full_lapack_solver<real_t>::precompute_values()
 	{
 		auto single_substr_ab = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * (kd + 1));
 
+		std::fill(single_substr_ab.get(), single_substr_ab.get() + problem_.nx * problem_.ny * problem_.nz * (kd + 1),
+				  0);
+
 		for (index_t z = 0; z < problem_.nz; z++)
 			for (index_t y = 0; y < problem_.ny; y++)
 				for (index_t x = 0; x < problem_.nx; x++)
