@@ -3,9 +3,7 @@
 #include <fstream>
 #include <iostream>
 
-#include <noarr/traversers.hpp>
-
-#include "omp_helper.h"
+#include "solver_utils.h"
 
 template <typename real_t>
 void reference_thomas_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b,
@@ -56,11 +54,8 @@ void reference_thomas_solver<real_t>::prepare(const max_problem_t& problem)
 
 	auto substrates_layout = get_substrates_layout(problem_);
 
-	omp_trav_for_each(noarr::traverser(substrates_layout), [&](auto state) {
-		auto s_idx = noarr::get_index<'s'>(state);
-
-		(substrates_layout | noarr::get_at(substrates_.get(), state)) = problem_.initial_conditions[s_idx];
-	});
+	solver_utils::initialize_substrate_with_initial_conditions(substrates_layout, substrates_.get(),
+															   problem_.initial_conditions.data());
 }
 
 template <typename real_t>
