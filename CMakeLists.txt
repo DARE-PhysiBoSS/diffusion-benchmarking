@@ -48,8 +48,10 @@ target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
                   ${argparse_SOURCE_DIR}/include)
 
+target_link_libraries(diffuse nlohmann_json::nlohmann_json)
+
 find_package(OpenMP REQUIRED)
-target_link_libraries(diffuse OpenMP::OpenMP_CXX nlohmann_json::nlohmann_json)
+target_link_libraries(diffuse OpenMP::OpenMP_CXX)
 
 find_package(LAPACK REQUIRED)
 target_link_libraries(diffuse LAPACK::LAPACK)
