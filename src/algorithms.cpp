@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+#include "full_lapack_solver.h"
 #include "general_lapack_thomas_solver.h"
 #include "lapack_thomas_solver.h"
 #include "least_compute_thomas_solver.h"
@@ -19,6 +20,7 @@ std::map<std::string, std::unique_ptr<tridiagonal_solver>> get_solvers_map()
 	solvers.emplace("lstm", std::make_unique<least_memory_thomas_solver<real_t>>());
 	solvers.emplace("lapack", std::make_unique<lapack_thomas_solver<real_t>>());
 	solvers.emplace("lapack2", std::make_unique<general_lapack_thomas_solver<real_t>>());
+	solvers.emplace("full_lapack", std::make_unique<full_lapack_solver<real_t>>());
 
 	return solvers;
 }
