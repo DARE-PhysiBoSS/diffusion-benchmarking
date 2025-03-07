@@ -40,14 +40,7 @@ public:
             z_coord = begin_z + z * step_z;
         }
 
-		auto tmp1 = std::exp(-(x_coord * x_coord + y_coord * y_coord + z_coord * z_coord)
-							 / (4 * problem.diffusion_coefficients[s] * time));
-		auto tmp2 = std::exp(-problem.decay_rates[s] * time);
-		auto tmp3 = problem.initial_conditions[s]
-					/ std::pow(4 * M_PI * problem.diffusion_coefficients[s] * time, problem.dims / 2);
-		auto tmp4 = tmp1 * tmp2 * tmp3;
-
-		return std::exp(-(x_coord * x_coord + y_coord * y_coord + z_coord * z_coord)
+        return std::exp(-(x_coord * x_coord + y_coord * y_coord + z_coord * z_coord)
 						/ (4 * problem.diffusion_coefficients[s] * time))
 			   * std::exp(-problem.decay_rates[s] * time) * problem.initial_conditions[s]
 			   / std::pow(4 * M_PI * problem.diffusion_coefficients[s] * time, problem.dims / 2);
