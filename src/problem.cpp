@@ -58,5 +58,8 @@ max_problem_t problems::read_problem(const std::string& file)
 	if (problem.dims < 1 || problem.dims > 3)
 		throw std::runtime_error("dims must be in range [1, 3]");
 
+	if (j.contains("gaussian_pulse"))
+		problem.gaussian_pulse = j["gaussian_pulse"];
+
 	return problem;
 }

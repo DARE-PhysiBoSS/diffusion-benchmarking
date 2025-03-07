@@ -10,17 +10,18 @@ class algorithms
 {
 	std::map<std::string, std::unique_ptr<tridiagonal_solver>> solvers_;
 
+	bool verbose_;
+
 	static constexpr double relative_difference_print_threshold_ = 0.01;
+	static constexpr double absolute_difference_print_threshold_ = 1e-6;
 
-	double max_relative_diff_x_, max_relative_diff_y_, max_relative_diff_z_;
-
-	void common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_problem_t& problem,
-						 double& max_relative_difference);
+	std::pair<double, double> common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref,
+											  const max_problem_t& problem);
 
 	void benchmark_inner(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params);
 
 public:
-	algorithms(bool double_precision);
+	algorithms(bool double_precision, bool verbose);
 
 	// Run the algorithm on the given problem for specified number of iterations
 	void run(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,

@@ -20,5 +20,6 @@
     "initial_conditions": [
         1,
         10
-    ]
+    ],
+    "gaussian_pulse": true
 }

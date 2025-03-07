@@ -25,7 +25,7 @@ std::map<std::string, std::unique_ptr<tridiagonal_solver>> get_solvers_map()
 	return solvers;
 }
 
-algorithms::algorithms(bool double_precision)
+algorithms::algorithms(bool double_precision, bool verbose) : verbose_(verbose)
 {
 	if (double_precision)
 		solvers_ = get_solvers_map<double>();
@@ -68,9 +68,12 @@ void common_prepare(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_
 	ref.initialize();
 }
 
-void algorithms::common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_problem_t& problem,
-								 double& max_relative_difference)
+std::pair<double, double> algorithms::common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref,
+													  const max_problem_t& problem)
 {
+	double maximum_absolute_difference = 0.;
+	double rmse = 0.;
+
 	for (std::size_t z = 0; z < problem.nz; z++)
 		for (std::size_t y = 0; y < problem.ny; y++)
 			for (std::size_t x = 0; x < problem.nx; x++)
@@ -79,13 +82,20 @@ void algorithms::common_validate(tridiagonal_solver& alg, tridiagonal_solver& re
 					auto ref_val = ref.access(s, x, y, z);
 					auto val = alg.access(s, x, y, z);
 
-					auto relative_diff = std::abs(val - ref_val) / std::abs(ref_val);
-					max_relative_difference = std::max(max_relative_difference, relative_diff);
+					auto diff = std::abs(val - ref_val);
+					maximum_absolute_difference = std::max(maximum_absolute_difference, diff);
+					rmse += diff * diff;
 
-					if (relative_diff > relative_difference_print_threshold_)
+					auto relative_diff = diff / std::abs(ref_val);
+					if (diff > absolute_difference_print_threshold_
+						&& relative_diff > relative_difference_print_threshold_ && verbose_)
 						std::cout << "At [" << s << ", " << x << ", " << y << ", " << z << "]: " << val
-								  << " != " << ref_val << std::endl;
+								  << " is not close to the reference " << ref_val << std::endl;
 				}
+
+	rmse = std::sqrt(rmse / (problem.nz * problem.ny * problem.nx * problem.substrates_count));
+
+	return { maximum_absolute_difference, rmse };
 }
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
@@ -93,9 +103,13 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 	auto& solver = solvers_.at(alg);
 	auto& ref_solver = solvers_.at("ref");
 
-	max_relative_diff_x_ = 0.;
-	max_relative_diff_y_ = 0.;
-	max_relative_diff_z_ = 0.;
+	double max_absolute_diff_x = 0.;
+	double max_absolute_diff_y = 0.;
+	double max_absolute_diff_z = 0.;
+
+	double rmse_x = 0.;
+	double rmse_y = 0.;
+	double rmse_z = 0.;
 
 	// validate solve_x
 	{
@@ -103,7 +117,7 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 		solver->solve_x();
 		ref_solver->solve_x();
 
-		common_validate(*solver, *ref_solver, problem, max_relative_diff_x_);
+		std::tie(max_absolute_diff_x, rmse_x) = common_validate(*solver, *ref_solver, problem);
 	}
 
 	if (problem.dims > 1)
@@ -114,7 +128,7 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 			solver->solve_y();
 			ref_solver->solve_y();
 
-			common_validate(*solver, *ref_solver, problem, max_relative_diff_y_);
+			std::tie(max_absolute_diff_y, rmse_y) = common_validate(*solver, *ref_solver, problem);
 		}
 	}
 
@@ -126,13 +140,13 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 			solver->solve_z();
 			ref_solver->solve_z();
 
-			common_validate(*solver, *ref_solver, problem, max_relative_diff_z_);
+			std::tie(max_absolute_diff_z, rmse_z) = common_validate(*solver, *ref_solver, problem);
 		}
 	}
 
-	std::cout << "Maximal relative difference in x: " << max_relative_diff_x_ * 100 << "%" << std::endl;
-	std::cout << "Maximal relative difference in y: " << max_relative_diff_y_ * 100 << "%" << std::endl;
-	std::cout << "Maximal relative difference in z: " << max_relative_diff_z_ * 100 << "%" << std::endl;
+	std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE:" << rmse_x << std::endl;
+	std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE:" << rmse_y << std::endl;
+	std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE:" << rmse_z << std::endl;
 }
 
 template <typename func_t>

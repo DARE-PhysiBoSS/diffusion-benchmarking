@@ -25,6 +25,9 @@ int main(int argc, char** argv)
 	bool double_precision;
 	program.add_argument("--double").help("Use double precision").flag().store_into(double_precision);
 
+	bool verbose;
+	program.add_argument("-v").help("Add verbosity").flag().store_into(verbose);
+
 	auto& group = program.add_mutually_exclusive_group();
 
 	bool validate;
@@ -59,7 +62,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	algorithms algs(double_precision);
+	algorithms algs(double_precision, verbose);
 
 	max_problem_t problem;
 

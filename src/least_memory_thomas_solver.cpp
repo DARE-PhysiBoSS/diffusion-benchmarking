@@ -68,8 +68,7 @@ void least_memory_thomas_solver<real_t>::prepare(const max_problem_t& problem)
 
 	auto substrates_layout = get_substrates_layout<3>(problem_);
 
-	solver_utils::initialize_substrate_with_initial_conditions(substrates_layout, substrates_.get(),
-															   problem_.initial_conditions.data());
+	solver_utils::initialize_substrate(substrates_layout, substrates_.get(), problem_);
 }
 
 template <typename real_t>
