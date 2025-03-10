@@ -84,7 +84,7 @@ void lapack_thomas_solver<real_t>::precompute_values(std::vector<std::unique_ptr
 		pttrf(&n, single_substr_b.get(), single_substr_a.get(), &info);
 
 		if (info != 0)
-			throw std::runtime_error("LAPACK spttrf failed with error code " + std::to_string(info));
+			throw std::runtime_error("LAPACK pttrf failed with error code " + std::to_string(info));
 
 		a.emplace_back(std::move(single_substr_a));
 		b.emplace_back(std::move(single_substr_b));
@@ -146,7 +146,7 @@ void lapack_thomas_solver<real_t>::solve_x()
 				  &info);
 
 			if (info != 0)
-				throw std::runtime_error("LAPACK spttrs failed with error code " + std::to_string(info));
+				throw std::runtime_error("LAPACK pttrs failed with error code " + std::to_string(info));
 		}
 	}
 }
