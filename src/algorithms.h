@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
@@ -26,6 +27,8 @@ class algorithms
 
 	void benchmark_inner(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,
 						 benchmark_kind kind);
+
+	void append_params(std::ostream& os, const nlohmann::json& params, bool header);
 
 public:
 	algorithms(bool double_precision, bool verbose);

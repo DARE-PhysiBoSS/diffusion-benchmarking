@@ -33,6 +33,27 @@ algorithms::algorithms(bool double_precision, bool verbose) : verbose_(verbose)
 		solvers_ = get_solvers_map<float>();
 }
 
+void algorithms::append_params(std::ostream& os, const nlohmann::json& params, bool header)
+{
+	std::vector<std::string> keys_to_skip = { "warmup_time", "outer_iterations", "inner_iterations", "benchmark_kind" };
+	if (header)
+	{
+		for (auto it = params.begin(); it != params.end(); ++it)
+		{
+			if (std::find(keys_to_skip.begin(), keys_to_skip.end(), it.key()) == keys_to_skip.end())
+				os << it.key() << ",";
+		}
+	}
+	else
+	{
+		for (auto it = params.begin(); it != params.end(); ++it)
+		{
+			if (std::find(keys_to_skip.begin(), keys_to_skip.end(), it.key()) == keys_to_skip.end())
+				os << it.value() << ",";
+		}
+	}
+}
+
 void algorithms::run(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,
 					 const std::string& output_file)
 {
@@ -187,6 +208,12 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
+
+	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
+			  << "," << problem.nz << ",";
+	append_params(std::cout, params, false);
+	std::cout << init_time_us << ",";
+
 	if (auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);
 		adi_solver && kind == benchmark_kind::per_dimension)
 	{
@@ -225,9 +252,8 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		auto [y_mean, y_std] = compute_mean_and_std(times_y);
 		auto [z_mean, z_std] = compute_mean_and_std(times_z);
 
-		std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << ","
-				  << problem.ny << "," << problem.nz << "," << init_time_us << "," << 10 << "," << x_mean << ","
-				  << y_mean << "," << z_mean << "," << x_std << "," << y_std << "," << z_std << std::endl;
+		std::cout << x_mean << "," << y_mean << "," << z_mean << "," << x_std << "," << y_std << "," << z_std
+				  << std::endl;
 	}
 	else
 	{
@@ -244,9 +270,7 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 		auto [mean, std_dev] = compute_mean_and_std(times);
 
-		std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << ","
-				  << problem.ny << "," << problem.nz << "," << init_time_us << "," << 10 << "," << mean << ","
-				  << std_dev << std::endl;
+		std::cout << mean << "," << std_dev << std::endl;
 	}
 }
 
@@ -265,11 +289,16 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 			kind = benchmark_kind::per_dimension;
 	}
 
-	if (dynamic_cast<locally_onedimensional_solver*>(solver.get()) && kind == benchmark_kind::per_dimension)
-		std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,x_time,y_time,z_time,x_std,y_std,z_std"
-				  << std::endl;
-	else
-		std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,time,std_dev" << std::endl;
+	// make header
+	{
+		std::cout << "algorithm,dims,s,nx,ny,nz,";
+		append_params(std::cout, params, true);
+
+		if (dynamic_cast<locally_onedimensional_solver*>(solver.get()) && kind == benchmark_kind::per_dimension)
+			std::cout << "init_time,x_time,y_time,z_time,x_std,y_std,z_std" << std::endl;
+		else
+			std::cout << "init_time,time,std_dev" << std::endl;
+	}
 
 	solver->prepare(problem);
 	solver->tune(params);
