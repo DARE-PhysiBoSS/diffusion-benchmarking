@@ -94,10 +94,10 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto ref_solver = dynamic_cast<tridiagonal_solver*>(solvers_.at("ref").get());
+	auto ref_solver = dynamic_cast<locally_onedimensional_solver*>(solvers_.at("ref").get());
 	auto solver = solvers_.at(alg).get();
 
-	tridiagonal_solver* adi_solver = dynamic_cast<tridiagonal_solver*>(solver);
+	locally_onedimensional_solver* adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);
 
 	if (adi_solver)
 	{
@@ -187,7 +187,7 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
-	if (auto adi_solver = dynamic_cast<tridiagonal_solver*>(solver);
+	if (auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);
 		adi_solver && kind == benchmark_kind::per_dimension)
 	{
 		std::vector<std::size_t> times_x, times_y, times_z;
@@ -265,7 +265,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 			kind = benchmark_kind::per_dimension;
 	}
 
-	if (dynamic_cast<tridiagonal_solver*>(solver.get()) && kind == benchmark_kind::per_dimension)
+	if (dynamic_cast<locally_onedimensional_solver*>(solver.get()) && kind == benchmark_kind::per_dimension)
 		std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,x_time,y_time,z_time,x_std,y_std,z_std"
 				  << std::endl;
 	else

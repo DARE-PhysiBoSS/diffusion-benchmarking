@@ -5,7 +5,7 @@
 #include "tridiagonal_solver.h"
 
 template <typename real_t>
-class reference_thomas_solver : public tridiagonal_solver
+class reference_thomas_solver : public locally_onedimensional_solver
 {
 	using index_t = std::int32_t;
 

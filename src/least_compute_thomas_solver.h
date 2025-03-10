@@ -31,7 +31,7 @@ d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
 */
 
 template <typename real_t>
-class least_compute_thomas_solver : public tridiagonal_solver
+class least_compute_thomas_solver : public locally_onedimensional_solver
 {
 	using index_t = std::int32_t;
 
