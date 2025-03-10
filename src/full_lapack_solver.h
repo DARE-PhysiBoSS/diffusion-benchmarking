@@ -2,10 +2,10 @@
 
 #include <memory>
 
-#include "tridiagonal_solver.h"
+#include "diffusion_solver.h"
 
 template <typename real_t>
-class full_lapack_solver : public tridiagonal_solver
+class full_lapack_solver : public diffusion_solver
 {
 	using index_t = std::int32_t;
 
@@ -32,10 +32,7 @@ public:
 
 	void initialize() override;
 
-	void solve_x() override;
-	void solve_y() override;
-	void solve_z() override;
-
+	void solve() override;
 
 	void save(const std::string& file) const override;
 

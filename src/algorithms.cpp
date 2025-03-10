@@ -11,9 +11,9 @@
 #include "tridiagonal_solver.h"
 
 template <typename real_t>
-std::map<std::string, std::unique_ptr<tridiagonal_solver>> get_solvers_map()
+std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
 {
-	std::map<std::string, std::unique_ptr<tridiagonal_solver>> solvers;
+	std::map<std::string, std::unique_ptr<diffusion_solver>> solvers;
 
 	solvers.emplace("ref", std::make_unique<reference_thomas_solver<real_t>>());
 	solvers.emplace("lstc", std::make_unique<least_compute_thomas_solver<real_t>>());
@@ -44,19 +44,13 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 
 	for (std::size_t i = 0; i < problem.iterations; i++)
 	{
-		solver->solve_x();
-
-		if (problem.dims > 1)
-			solver->solve_y();
-
-		if (problem.dims > 2)
-			solver->solve_z();
+		solver->solve();
 	}
 
 	solver->save(output_file);
 }
 
-void common_prepare(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_problem_t& problem,
+void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_problem_t& problem,
 					const nlohmann::json& params)
 {
 	alg.prepare(problem);
@@ -68,7 +62,7 @@ void common_prepare(tridiagonal_solver& alg, tridiagonal_solver& ref, const max_
 	ref.initialize();
 }
 
-std::pair<double, double> algorithms::common_validate(tridiagonal_solver& alg, tridiagonal_solver& ref,
+std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, diffusion_solver& ref,
 													  const max_problem_t& problem)
 {
 	double maximum_absolute_difference = 0.;
@@ -100,139 +94,90 @@ std::pair<double, double> algorithms::common_validate(tridiagonal_solver& alg, t
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto& solver = solvers_.at(alg);
-	auto& ref_solver = solvers_.at("ref");
+	auto ref_solver = dynamic_cast<tridiagonal_solver*>(solvers_.at("ref").get());
+	auto solver = solvers_.at(alg).get();
 
-	double max_absolute_diff_x = 0.;
-	double max_absolute_diff_y = 0.;
-	double max_absolute_diff_z = 0.;
+	tridiagonal_solver* adi_solver = dynamic_cast<tridiagonal_solver*>(solver);
 
-	double rmse_x = 0.;
-	double rmse_y = 0.;
-	double rmse_z = 0.;
-
-	// validate solve_x
+	if (adi_solver)
 	{
-		common_prepare(*solver, *ref_solver, problem, params);
-		solver->solve_x();
-		ref_solver->solve_x();
+		double max_absolute_diff_x = 0.;
+		double max_absolute_diff_y = 0.;
+		double max_absolute_diff_z = 0.;
 
-		std::tie(max_absolute_diff_x, rmse_x) = common_validate(*solver, *ref_solver, problem);
-	}
+		double rmse_x = 0.;
+		double rmse_y = 0.;
+		double rmse_z = 0.;
 
-	if (problem.dims > 1)
-	{
-		// validate solve_y
+		// validate solve_x
 		{
 			common_prepare(*solver, *ref_solver, problem, params);
-			solver->solve_y();
-			ref_solver->solve_y();
+			adi_solver->solve_x();
+			ref_solver->solve_x();
 
-			std::tie(max_absolute_diff_y, rmse_y) = common_validate(*solver, *ref_solver, problem);
-		}
-	}
-
-	if (problem.dims > 2)
-	{
-		// validate solve_z
-		{
-			common_prepare(*solver, *ref_solver, problem, params);
-			solver->solve_z();
-			ref_solver->solve_z();
-
-			std::tie(max_absolute_diff_z, rmse_z) = common_validate(*solver, *ref_solver, problem);
-		}
-	}
-
-	std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE:" << rmse_x << std::endl;
-	std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE:" << rmse_y << std::endl;
-	std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE:" << rmse_z << std::endl;
-}
-
-template <typename func_t>
-std::vector<std::size_t> warmup_and_measure(tridiagonal_solver& solver, const max_problem_t& problem,
-											const nlohmann::json& params, double warmup_time_s, func_t&& func)
-{
-	// warmup
-	{
-		auto start = std::chrono::high_resolution_clock::now();
-		auto end = start;
-		do
-		{
-			func();
-			end = std::chrono::high_resolution_clock::now();
-		} while ((double)std::chrono::duration_cast<std::chrono::seconds>(end - start).count() < warmup_time_s);
-	}
-
-	// measure
-	std::vector<std::size_t> times;
-	{
-		for (std::size_t i = 0; i < 10; i++)
-		{
-			solver.prepare(problem);
-			solver.tune(params);
-			solver.initialize();
-
-			auto start = std::chrono::high_resolution_clock::now();
-			func();
-			auto end = std::chrono::high_resolution_clock::now();
-
-			times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
-		}
-	}
-
-	return times;
-}
-
-void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
-{
-	auto inner_iterations = params.contains("inner_iterations") ? (std::size_t)params["inner_iterations"] : 10;
-
-	auto& solver = *solvers_.at(alg);
-
-	solver.prepare(problem);
-	solver.tune(params);
-
-	std::size_t init_time_us;
-	std::vector<std::size_t> times_x, times_y, times_z;
-
-	{
-		auto start = std::chrono::high_resolution_clock::now();
-
-		solver.initialize();
-
-		auto end = std::chrono::high_resolution_clock::now();
-
-		init_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-	}
-
-	for (std::size_t i = 0; i < inner_iterations; i++)
-	{
-		{
-			auto start = std::chrono::high_resolution_clock::now();
-			solver.solve_x();
-			auto end = std::chrono::high_resolution_clock::now();
-
-			times_x.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+			std::tie(max_absolute_diff_x, rmse_x) = common_validate(*solver, *ref_solver, problem);
 		}
 
 		if (problem.dims > 1)
 		{
-			auto start = std::chrono::high_resolution_clock::now();
-			solver.solve_y();
-			auto end = std::chrono::high_resolution_clock::now();
+			// validate solve_y
+			{
+				common_prepare(*solver, *ref_solver, problem, params);
+				adi_solver->solve_y();
+				ref_solver->solve_y();
 
-			times_y.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+				std::tie(max_absolute_diff_y, rmse_y) = common_validate(*solver, *ref_solver, problem);
+			}
 		}
 
 		if (problem.dims > 2)
 		{
-			auto start = std::chrono::high_resolution_clock::now();
-			solver.solve_z();
-			auto end = std::chrono::high_resolution_clock::now();
+			// validate solve_z
+			{
+				common_prepare(*solver, *ref_solver, problem, params);
+				adi_solver->solve_z();
+				ref_solver->solve_z();
 
-			times_z.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+				std::tie(max_absolute_diff_z, rmse_z) = common_validate(*solver, *ref_solver, problem);
+			}
 		}
+
+		std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE:" << rmse_x << std::endl;
+		std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE:" << rmse_y << std::endl;
+		std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE:" << rmse_z << std::endl;
+	}
+	else
+	{
+		common_prepare(*solver, *ref_solver, problem, params);
+		solver->solve();
+		ref_solver->solve();
+
+		auto [max_absolute_diff, rmse] = common_validate(*solver, *ref_solver, problem);
+
+		std::cout << "Maximal absolute difference: " << max_absolute_diff << ", RMSE:" << rmse << std::endl;
+	}
+}
+
+void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,
+								 benchmark_kind kind)
+{
+	auto inner_iterations = params.contains("inner_iterations") ? (std::size_t)params["inner_iterations"] : 10;
+
+	auto solver = solvers_.at(alg).get();
+
+	solver->prepare(problem);
+	solver->tune(params);
+
+	std::size_t init_time_us;
+
+	{
+		auto start = std::chrono::high_resolution_clock::now();
+
+		solver->initialize();
+
+		auto end = std::chrono::high_resolution_clock::now();
+
+		init_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
 
 	auto compute_mean_and_std = [](const std::vector<std::size_t>& times) {
@@ -242,20 +187,89 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
-	auto [x_mean, x_std] = compute_mean_and_std(times_x);
-	auto [y_mean, y_std] = compute_mean_and_std(times_y);
-	auto [z_mean, z_std] = compute_mean_and_std(times_z);
+	if (auto adi_solver = dynamic_cast<tridiagonal_solver*>(solver);
+		adi_solver && kind == benchmark_kind::per_dimension)
+	{
+		std::vector<std::size_t> times_x, times_y, times_z;
 
-	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
-			  << "," << problem.nz << "," << init_time_us << "," << 10 << "," << x_mean << "," << y_mean << ","
-			  << z_mean << "," << x_std << "," << y_std << "," << z_std << std::endl;
+		for (std::size_t i = 0; i < inner_iterations; i++)
+		{
+			{
+				auto start = std::chrono::high_resolution_clock::now();
+				adi_solver->solve_x();
+				auto end = std::chrono::high_resolution_clock::now();
+
+				times_x.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+			}
+
+			if (problem.dims > 1)
+			{
+				auto start = std::chrono::high_resolution_clock::now();
+				adi_solver->solve_y();
+				auto end = std::chrono::high_resolution_clock::now();
+
+				times_y.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+			}
+
+			if (problem.dims > 2)
+			{
+				auto start = std::chrono::high_resolution_clock::now();
+				adi_solver->solve_z();
+				auto end = std::chrono::high_resolution_clock::now();
+
+				times_z.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+			}
+		}
+
+		auto [x_mean, x_std] = compute_mean_and_std(times_x);
+		auto [y_mean, y_std] = compute_mean_and_std(times_y);
+		auto [z_mean, z_std] = compute_mean_and_std(times_z);
+
+		std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << ","
+				  << problem.ny << "," << problem.nz << "," << init_time_us << "," << 10 << "," << x_mean << ","
+				  << y_mean << "," << z_mean << "," << x_std << "," << y_std << "," << z_std << std::endl;
+	}
+	else
+	{
+		std::vector<std::size_t> times;
+
+		for (std::size_t i = 0; i < inner_iterations; i++)
+		{
+			auto start = std::chrono::high_resolution_clock::now();
+			solver->solve();
+			auto end = std::chrono::high_resolution_clock::now();
+
+			times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+		}
+
+		auto [mean, std_dev] = compute_mean_and_std(times);
+
+		std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << ","
+				  << problem.ny << "," << problem.nz << "," << init_time_us << "," << 10 << "," << mean << ","
+				  << std_dev << std::endl;
+	}
 }
 
 void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
 	auto& solver = solvers_.at(alg);
 
-	std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,x_time,y_time,z_time,x_std,y_std,z_std" << std::endl;
+	benchmark_kind kind = benchmark_kind::per_dimension;
+
+	if (params.contains("benchmark_kind"))
+	{
+		auto kind_str = params["benchmark_kind"].get<std::string>();
+		if (kind_str == "full_solve")
+			kind = benchmark_kind::full_solve;
+		else if (kind_str == "per_dimension")
+			kind = benchmark_kind::per_dimension;
+	}
+
+	if (dynamic_cast<tridiagonal_solver*>(solver.get()) && kind == benchmark_kind::per_dimension)
+		std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,x_time,y_time,z_time,x_std,y_std,z_std"
+				  << std::endl;
+	else
+		std::cout << "algorithm,dims,s,nx,ny,nz,init_time,repetitions,time,std_dev" << std::endl;
 
 	solver->prepare(problem);
 	solver->tune(params);
@@ -269,9 +283,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 		do
 		{
 			solver->initialize();
-			solver->solve_x();
-			solver->solve_y();
-			solver->solve_z();
+			solver->solve();
 			end = std::chrono::high_resolution_clock::now();
 		} while ((double)std::chrono::duration_cast<std::chrono::seconds>(end - start).count() < warmup_time_s);
 	}
@@ -281,6 +293,6 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 		auto outer_iterations = params.contains("outer_iterations") ? (std::size_t)params["outer_iterations"] : 1;
 
 		for (std::size_t i = 0; i < outer_iterations; i++)
-			benchmark_inner(alg, problem, params);
+			benchmark_inner(alg, problem, params, kind);
 	}
 }

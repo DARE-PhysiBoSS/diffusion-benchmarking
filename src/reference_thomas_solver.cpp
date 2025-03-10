@@ -213,6 +213,26 @@ void reference_thomas_solver<real_t>::solve_z()
 }
 
 template <typename real_t>
+void reference_thomas_solver<real_t>::solve()
+{
+	if (problem_.dims == 1)
+	{
+		solve_x();
+	}
+	else if (problem_.dims == 2)
+	{
+		solve_x();
+		solve_y();
+	}
+	else if (problem_.dims == 3)
+	{
+		solve_x();
+		solve_y();
+		solve_z();
+	}
+}
+
+template <typename real_t>
 void reference_thomas_solver<real_t>::save(const std::string& file) const
 {
 	auto dens_l = get_substrates_layout(problem_);

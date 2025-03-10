@@ -422,6 +422,44 @@ void least_compute_thomas_solver<real_t>::solve_z()
 }
 
 template <typename real_t>
+void least_compute_thomas_solver<real_t>::solve()
+{
+	if (problem_.dims == 1)
+	{
+#pragma omp parallel
+		solve_slice_x_1d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+								  get_substrates_layout<1>(problem_), work_items_);
+	}
+	else if (problem_.dims == 2)
+	{
+#pragma omp parallel
+		{
+			solve_slice_x_2d_and_3d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+											 get_substrates_layout<2>(problem_) ^ noarr::rename<'y', 'm'>(),
+											 work_items_);
+#pragma omp barrier
+			solve_slice_y_2d<index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
+									  get_substrates_layout<2>(problem_), work_items_);
+		}
+	}
+	else if (problem_.dims == 3)
+	{
+#pragma omp parallel
+		{
+			solve_slice_x_2d_and_3d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+											 get_substrates_layout<3>(problem_) ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+											 work_items_);
+#pragma omp barrier
+			solve_slice_y_3d<index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
+									  get_substrates_layout<3>(problem_), work_items_);
+#pragma omp barrier
+			solve_slice_z_3d<index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(),
+									  get_substrates_layout<3>(problem_), work_items_);
+		}
+	}
+}
+
+template <typename real_t>
 void least_compute_thomas_solver<real_t>::save(const std::string& file) const
 {
 	auto dens_l = get_substrates_layout<3>(problem_);

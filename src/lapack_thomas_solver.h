@@ -40,6 +40,8 @@ public:
 	void solve_y() override;
 	void solve_z() override;
 
+	void solve() override;
+
 	void save(const std::string& file) const override;
 
 	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;

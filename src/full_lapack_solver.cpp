@@ -163,7 +163,7 @@ void full_lapack_solver<real_t>::tune(const nlohmann::json& params)
 }
 
 template <typename real_t>
-void full_lapack_solver<real_t>::solve_x()
+void full_lapack_solver<real_t>::solve()
 {
 	auto dens_l = get_substrates_layout(problem_);
 
@@ -183,14 +183,6 @@ void full_lapack_solver<real_t>::solve_x()
 			throw std::runtime_error("LAPACK pbtrs failed with error code " + std::to_string(info));
 	}
 }
-
-template <typename real_t>
-void full_lapack_solver<real_t>::solve_y()
-{}
-
-template <typename real_t>
-void full_lapack_solver<real_t>::solve_z()
-{}
 
 template <typename real_t>
 void full_lapack_solver<real_t>::save(const std::string& file) const

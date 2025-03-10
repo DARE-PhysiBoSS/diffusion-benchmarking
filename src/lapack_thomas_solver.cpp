@@ -153,11 +153,35 @@ void lapack_thomas_solver<real_t>::solve_x()
 
 template <typename real_t>
 void lapack_thomas_solver<real_t>::solve_y()
-{}
+{
+	throw std::runtime_error("Not implemented");
+}
 
 template <typename real_t>
 void lapack_thomas_solver<real_t>::solve_z()
-{}
+{
+	throw std::runtime_error("Not implemented");
+}
+
+template <typename real_t>
+void lapack_thomas_solver<real_t>::solve()
+{
+	if (problem_.dims == 1)
+	{
+		solve_x();
+	}
+	else if (problem_.dims == 2)
+	{
+		solve_x();
+		solve_y();
+	}
+	else if (problem_.dims == 3)
+	{
+		solve_x();
+		solve_y();
+		solve_z();
+	}
+}
 
 template <typename real_t>
 void lapack_thomas_solver<real_t>::save(const std::string& file) const
