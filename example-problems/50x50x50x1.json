@@ -13,7 +13,7 @@
         10000
     ],
     "decay_rates": [
-        10
+        0.1
     ],
     "initial_conditions": [
         1000
