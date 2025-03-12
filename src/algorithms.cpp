@@ -6,6 +6,7 @@
 #include "general_lapack_thomas_solver.h"
 #include "lapack_thomas_solver.h"
 #include "least_compute_thomas_solver.h"
+#include "least_compute_thomas_solver_trav.h"
 #include "least_memory_thomas_solver.h"
 #include "reference_thomas_solver.h"
 #include "tridiagonal_solver.h"
@@ -17,6 +18,7 @@ std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
 
 	solvers.emplace("ref", std::make_unique<reference_thomas_solver<real_t>>());
 	solvers.emplace("lstc", std::make_unique<least_compute_thomas_solver<real_t>>());
+	solvers.emplace("lstc_t", std::make_unique<least_compute_thomas_solver_trav<real_t>>());
 	solvers.emplace("lstm", std::make_unique<least_memory_thomas_solver<real_t>>());
 	solvers.emplace("lapack", std::make_unique<lapack_thomas_solver<real_t>>());
 	solvers.emplace("lapack2", std::make_unique<general_lapack_thomas_solver<real_t>>());
