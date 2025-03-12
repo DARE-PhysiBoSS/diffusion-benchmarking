@@ -39,9 +39,9 @@ class least_memory_thomas_solver : public locally_onedimensional_solver
 
 	std::unique_ptr<real_t[]> substrates_;
 
-	std::unique_ptr<real_t[]> ax_, b0x_, scratchpadx_;
-	std::unique_ptr<real_t[]> ay_, b0y_, scratchpady_;
-	std::unique_ptr<real_t[]> az_, b0z_, scratchpadz_;
+	std::unique_ptr<real_t[]> ax_, b1x_, bx_;
+	std::unique_ptr<real_t[]> ay_, b1y_, by_;
+	std::unique_ptr<real_t[]> az_, b1z_, bz_;
 
 	std::unique_ptr<index_t[]> threshold_indexx_, threshold_indexy_, threshold_indexz_;
 
@@ -52,8 +52,8 @@ class least_memory_thomas_solver : public locally_onedimensional_solver
 	template <std::size_t dims>
 	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
 
-	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0,
-						   std::unique_ptr<index_t[]>& threshold_index, index_t shape, index_t dims, index_t n);
+	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0, std::unique_ptr<real_t[]>& b,
+						   index_t shape, index_t dims, index_t n);
 
 public:
 	void prepare(const max_problem_t& problem) override;
