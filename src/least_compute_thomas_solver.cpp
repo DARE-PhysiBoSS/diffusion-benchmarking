@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <fstream>
 #include <iostream>
+#include <omp.h>
 
 #include "solver_utils.h"
 
@@ -85,7 +86,8 @@ void least_compute_thomas_solver<real_t>::prepare(const max_problem_t& problem)
 template <typename real_t>
 void least_compute_thomas_solver<real_t>::tune(const nlohmann::json& params)
 {
-	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"] : 1;
+	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"]
+												: (problem_.nx + omp_get_num_threads() - 1) / omp_get_num_threads();
 }
 
 template <typename real_t>
@@ -131,6 +133,8 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 				(dens_l | noarr::get_at<'x', 's'>(densities, i, s))
 				- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 					  * (dens_l | noarr::get_at<'x', 's'>(densities, i - 1, s));
+
+			// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 		}
 	}
 
@@ -139,6 +143,8 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 	{
 		(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) =
 			(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) * (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
+
+		// std::cout << "n-1: " << (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) << std::endl;
 	}
 
 	for (index_t i = n - 2; i >= 0; i--)
@@ -150,6 +156,8 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 				((dens_l | noarr::get_at<'x', 's'>(densities, i, s))
 				 - c[s] * (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)))
 				* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+
+			// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 		}
 	}
 }
@@ -164,12 +172,11 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 
 	auto diag_l = noarr::scalar<real_t>() ^ noarr::vector<'s'>(substrates_count) ^ noarr::vector<'i'>(n);
 
-#pragma omp for schedule(static, work_items)
+#pragma omp for schedule(static, work_items) nowait
 	for (index_t yz = 0; yz < m; yz++)
 	{
 		for (index_t i = 1; i < n; i++)
 		{
-#pragma omp simd
 			for (index_t s = 0; s < substrates_count; s++)
 			{
 				(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
@@ -179,7 +186,6 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 			}
 		}
 
-#pragma omp simd
 		for (index_t s = 0; s < substrates_count; s++)
 		{
 			(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 1, s)) =
@@ -189,7 +195,6 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 
 		for (index_t i = n - 2; i >= 0; i--)
 		{
-#pragma omp simd
 			for (index_t s = 0; s < substrates_count; s++)
 			{
 				(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
@@ -213,7 +218,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	for (index_t i = 1; i < n; i++)
 	{
-#pragma omp for collapse(2) schedule(static, work_items) nowait
+#pragma omp for schedule(static, work_items) nowait
 		for (index_t x = 0; x < x_len; x++)
 		{
 			for (index_t s = 0; s < substrates_count; s++)
@@ -226,7 +231,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 		}
 	}
 
-#pragma omp for collapse(2) schedule(static, work_items) nowait
+#pragma omp for schedule(static, work_items) nowait
 	for (index_t x = 0; x < x_len; x++)
 	{
 		for (index_t s = 0; s < substrates_count; s++)
@@ -239,7 +244,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	for (index_t i = n - 2; i >= 0; i--)
 	{
-#pragma omp for collapse(2) schedule(static, work_items) nowait
+#pragma omp for schedule(static, work_items) nowait
 		for (index_t x = 0; x < x_len; x++)
 		{
 			for (index_t s = 0; s < substrates_count; s++)
@@ -264,14 +269,13 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	auto diag_l = noarr::scalar<real_t>() ^ noarr::vector<'s'>(substrates_count) ^ noarr::vector<'i'>(n);
 
-#pragma omp for schedule(static, work_items)
+#pragma omp for schedule(static, work_items) nowait
 	for (index_t z = 0; z < z_len; z++)
 	{
 		for (index_t i = 1; i < n; i++)
 		{
 			for (index_t x = 0; x < x_len; x++)
 			{
-#pragma omp simd
 				for (index_t s = 0; s < substrates_count; s++)
 				{
 					(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, i, x, s)) =
@@ -284,7 +288,6 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 		for (index_t x = 0; x < x_len; x++)
 		{
-#pragma omp simd
 			for (index_t s = 0; s < substrates_count; s++)
 			{
 				(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, n - 1, x, s)) =
@@ -297,7 +300,6 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			for (index_t x = 0; x < x_len; x++)
 			{
-#pragma omp simd
 				for (index_t s = 0; s < substrates_count; s++)
 				{
 					(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, i, x, s)) =
@@ -323,7 +325,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	for (index_t i = 1; i < n; i++)
 	{
-#pragma omp for collapse(3) schedule(static, work_items) nowait
+#pragma omp for schedule(static, work_items) nowait
 		for (index_t y = 0; y < y_len; y++)
 		{
 			for (index_t x = 0; x < x_len; x++)
@@ -339,7 +341,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 		}
 	}
 
-#pragma omp for collapse(3) schedule(static, work_items) nowait
+#pragma omp for schedule(static, work_items) nowait
 	for (index_t y = 0; y < y_len; y++)
 	{
 		for (index_t x = 0; x < x_len; x++)
@@ -355,7 +357,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	for (index_t i = n - 2; i >= 0; i--)
 	{
-#pragma omp for collapse(3) schedule(static, work_items) nowait
+#pragma omp for schedule(static, work_items) nowait
 		for (index_t y = 0; y < y_len; y++)
 		{
 			for (index_t x = 0; x < x_len; x++)
