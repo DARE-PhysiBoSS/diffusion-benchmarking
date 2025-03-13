@@ -1,0 +1,33 @@
+{
+	"name": "CUDA",
+	"image": "gcc:latest",
+	"remoteUser": "${localEnv:USER}",
+	"mounts": [
+		"source=/home/${localEnv:USER}/.ssh,target=/home/${localEnv:USER}/.ssh,type=bind,readonly"
+	],
+	"features": {
+		"ghcr.io/devcontainers/features/python:1": {},
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"configureZshAsDefaultShell": true
+		},
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers-community/features/llvm:3": {},
+		"ghcr.io/devcontainers-extra/features/apt-get-packages:1": {
+			"packages": [
+				"libopenblas-dev",
+				"cmake",
+				"ninja-build"
+			]
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"llvm-vs-code-extensions.vscode-clangd",
+				"cheshirekow.cmake-format",
+				"ms-vscode.cpptools-extension-pack",
+				"ms-vscode.cmake-tools"
+			]
+		}
+	}
+}
