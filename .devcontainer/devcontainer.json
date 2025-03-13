@@ -1,5 +1,5 @@
 {
-	"name": "CUDA",
+	"name": "diffuse-dev",
 	"image": "gcc:latest",
 	"remoteUser": "${localEnv:USER}",
 	"mounts": [
