@@ -115,6 +115,45 @@ auto least_compute_thomas_solver_trav<real_t>::get_substrates_layout(const probl
 			   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nx, problem.ny, problem.nz);
 }
 
+template <typename index_t, typename real_t, typename density_layout_t>
+void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+					  const real_t* __restrict__ e, const density_layout_t dens_l, std::size_t work_items)
+{
+	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
+	const index_t n = dens_l | noarr::get_length<'x'>();
+
+	// since we are parallelizing over 's', we need to apply blocking also to the diag_l and c_l
+	// because they are 's' dependent
+	auto blocking = noarr::into_blocks_static<'s', 'b', 'P', 's'>(work_items);
+
+	auto diag_l = noarr::scalar<real_t>() ^ noarr::vector<'s'>(substrates_count) ^ noarr::vector<'x'>(n) ^ blocking;
+	auto c_l = noarr::scalar<real_t>() ^ noarr::vector<'s'>(substrates_count) ^ blocking;
+
+	auto para_dens_l = dens_l ^ blocking ^ noarr::step<'P'>(omp_get_thread_num(), omp_get_num_threads());
+
+	noarr::traverser(para_dens_l).order(noarr::shift<'x'>(noarr::lit<1>)).for_each([=](auto state) {
+		auto prev_state = noarr::neighbor<'x'>(state, -1);
+		(para_dens_l | noarr::get_at(densities, state)) =
+			(para_dens_l | noarr::get_at(densities, state))
+			- (diag_l | noarr::get_at(e, prev_state)) * (para_dens_l | noarr::get_at(densities, prev_state));
+	});
+
+	noarr::traverser(para_dens_l).order(noarr::fix<'x'>(n - 1)).for_each([=](auto state) {
+		(para_dens_l | noarr::get_at(densities, state)) =
+			(para_dens_l | noarr::get_at(densities, state)) * (diag_l | noarr::get_at(b, state));
+	});
+
+	noarr::traverser(para_dens_l)
+		.order(noarr::reverse<'x'>() ^ noarr::shift<'x'>(noarr::lit<1>))
+		.for_each([=](auto state) {
+			auto next_state = noarr::neighbor<'x'>(state, 1);
+			(para_dens_l | noarr::get_at(densities, state)) =
+				((para_dens_l | noarr::get_at(densities, state))
+				 - (c_l | noarr::get_at(c, state)) * (para_dens_l | noarr::get_at(densities, next_state)))
+				* (diag_l | noarr::get_at(b, state));
+		});
+}
+
 template <char slice_dim, char para_dim, typename index_t, typename real_t, typename density_layout_t>
 void solve_slice(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
 				 const real_t* __restrict__ e, const density_layout_t dens_l, std::size_t work_items)
@@ -157,8 +196,8 @@ void least_compute_thomas_solver_trav<real_t>::solve_x()
 	if (problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice<'x', 's', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-									   get_substrates_layout<1>(problem_), work_items_);
+		solve_slice_x_1d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+								  get_substrates_layout<1>(problem_), work_items_);
 	}
 	else if (problem_.dims == 2)
 	{
@@ -205,8 +244,8 @@ void least_compute_thomas_solver_trav<real_t>::solve()
 	if (problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice<'x', 's', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-									   get_substrates_layout<1>(problem_), work_items_);
+		solve_slice_x_1d<index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
+								  get_substrates_layout<1>(problem_), work_items_);
 	}
 	else if (problem_.dims == 2)
 	{
