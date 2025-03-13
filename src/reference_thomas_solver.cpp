@@ -84,14 +84,14 @@ void reference_thomas_solver<real_t>::solve_x()
 				{
 					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) -=
 						(ax_[s] / (diag_l | noarr::get_at<'s', 'i'>(bx_.get(), s, x - 1)))
-						* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x - 1, y, z));
+						* (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x - 1, y, z)); //substrates[x] -= ax/bx[x-1] *substrates[x-1]
 				}
 			}
 
 			for (index_t s = 0; s < problem_.substrates_count; s++)
 			{
 				(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, problem_.nx - 1, y, z)) /=
-					(diag_l | noarr::get_at<'s', 'i'>(bx_.get(), s, problem_.nx - 1));
+					(diag_l | noarr::get_at<'s', 'i'>(bx_.get(), s, problem_.nx - 1)); //substrates[x] /= bx[x]
 			}
 
 			for (index_t x = problem_.nx - 2; x >= 0; x--)
