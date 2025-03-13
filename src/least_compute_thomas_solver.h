@@ -51,6 +51,8 @@ class least_compute_thomas_solver : public locally_onedimensional_solver
 	template <std::size_t dims>
 	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
 
+	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
+
 public:
 	void prepare(const max_problem_t& problem) override;
 

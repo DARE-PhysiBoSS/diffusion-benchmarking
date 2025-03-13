@@ -52,6 +52,8 @@ class least_memory_thomas_solver : public locally_onedimensional_solver
 	template <std::size_t dims>
 	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
 
+	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
+
 	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0, std::unique_ptr<real_t[]>& b,
 						   index_t shape, index_t dims, index_t n);
 
