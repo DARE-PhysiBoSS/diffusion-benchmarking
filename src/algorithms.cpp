@@ -10,6 +10,8 @@
 #include "least_memory_thomas_solver.h"
 #include "reference_thomas_solver.h"
 #include "tridiagonal_solver.h"
+#include "simd.h"
+#include "biofvm.h"
 
 template <typename real_t>
 std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
@@ -23,7 +25,8 @@ std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
 	solvers.emplace("lapack", std::make_unique<lapack_thomas_solver<real_t>>());
 	solvers.emplace("lapack2", std::make_unique<general_lapack_thomas_solver<real_t>>());
 	solvers.emplace("full_lapack", std::make_unique<full_lapack_solver<real_t>>());
-
+	solvers.emplace("avx256d", std::make_unique<simd<double>>());
+	solvers.emplace("biofvm", std::make_unique<biofvm<double>>());
 	return solvers;
 }
 
@@ -65,12 +68,15 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 	solver->tune(params);
 	solver->initialize();
 
+
+	solver->save("ini_"+output_file);
+
 	for (std::size_t i = 0; i < problem.iterations; i++)
 	{
 		solver->solve();
 	}
 
-	solver->save(output_file);
+	solver->save("end_"+output_file);
 }
 
 void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_problem_t& problem,
@@ -117,7 +123,7 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto ref_solver = dynamic_cast<locally_onedimensional_solver*>(solvers_.at("ref").get());
+	auto ref_solver = dynamic_cast<locally_onedimensional_solver*>(solvers_.at("ref").get()); 
 	auto solver = solvers_.at(alg).get();
 
 	locally_onedimensional_solver* adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);

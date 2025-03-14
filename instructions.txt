@@ -10,4 +10,5 @@ Once cloned the repository
 
     $ cmake ../CMakeLists.txt
 
+Debug
     $

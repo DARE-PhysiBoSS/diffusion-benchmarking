@@ -1,6 +1,8 @@
 #include "simd.h"
 #include <immintrin.h>
-
+#include <fstream>
+#include <iostream>
+#include <vector>
 
 template <typename real_t>
 void simd<real_t>::precompute_values()
@@ -11,8 +13,8 @@ void simd<real_t>::precompute_values()
     thomas_k_jump = thomas_j_jump * problem_.ny;
 
 
-    std::unique_ptr<real_t[]> zero(problem_.substrates_count, 0.0);
-    std::unique_ptr<real_t[]> one(problem_.substrates_count, 1.0);
+    std::vector<real_t> zero(problem_.substrates_count, 0.0);
+    std::vector<real_t> one(problem_.substrates_count, 1.0);
     real_t dt = problem_.dt;
 
     //Thomas initialization
@@ -26,10 +28,10 @@ void simd<real_t>::precompute_values()
     cz_.resize(problem_.nz, zero);
 
     constant1 = problem_.diffusion_coefficients; // dt*D/dx^2
-    std::unique_ptr<real_t[]> constant1a = zero;                  // -dt*D/dx^2;
-    std::unique_ptr<real_t[]> constant2 = problem_.decay_rates;            // (1/3)* dt*lambda
-    std::unique_ptr<real_t[]> constant3 = one;                    // 1 + 2*constant1 + constant2;
-    std::unique_ptr<real_t[]> constant3a = one;                   // 1 + constant1 + constant2;
+    std::vector<real_t> constant1a = zero;                  // -dt*D/dx^2;
+    std::vector<real_t> constant2 = problem_.decay_rates;            // (1/3)* dt*lambda
+    std::vector<real_t> constant3 = one;                    // 1 + 2*constant1 + constant2;
+    std::vector<real_t> constant3a = one;                   // 1 + constant1 + constant2;
 
     for (index_t d = 0; d < problem_.substrates_count; d++)
     {
@@ -59,9 +61,14 @@ void simd<real_t>::precompute_values()
     bx_[0] = constant3a; 
     bx_[ problem_.nx-1 ] = constant3a; 
     if( problem_.nx == 1 )
-    { bx_[0] = one; bx_[0] += constant2; } 
+    { 
+        bx_[0] = one; 
+        for (index_t d = 0; d < problem_.substrates_count; d++)
+            bx_[0][d] += constant2[d]; 
+    } 
 
-    cx_[0] /= bx_[0]; 
+    for(index_t d = 0; d < problem_.substrates_count; d++)
+        cx_[0][d] /= bx_[0][d]; 
     for( index_t i=1 ; i <= problem_.nx-1 ; i++ )
     {
         for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -76,9 +83,14 @@ void simd<real_t>::precompute_values()
     by_[0] = constant3a; 
     by_[ problem_.ny-1 ] = constant3a; 
     if( problem_.ny == 1 )
-    { by_[0] = one; by_[0] += constant2; } 
+    { 
+        by_[0] = one;
+        for(int d = 0; d < problem_.substrates_count; d++) 
+            by_[0][d] += constant2[d]; 
+    } 
 
-    cy_[0] /= by_[0]; 
+    for(int d = 0; d < problem_.substrates_count; d++)
+        cy_[0][d] /= by_[0][d]; 
     for( index_t i=1 ; i <= problem_.ny-1 ; i++ )
     {
         for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -93,9 +105,14 @@ void simd<real_t>::precompute_values()
     bz_[0] = constant3a; 
     bz_[ problem_.nz-1 ] = constant3a; 
     if( problem_.nz == 1 )
-    { bz_[0] = one; bz_[0] += constant2; } 
+    { 
+        bz_[0] = one; 
+        for(index_t d = 0; d < problem_.substrates_count; d++)
+            bz_[0][d] += constant2[d]; 
+    } 
 
-    cz_[0] /= bz_[0]; 
+    for(index_t d = 0; d < problem_.substrates_count; d++)
+        cz_[0][d] /= bz_[0][d]; 
     for( index_t i=1 ; i <= problem_.nz-1 ; i++ )
     {
         for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -172,7 +189,16 @@ template <typename real_t>
 void simd<real_t>::initialize()
 {
 	precompute_values();
+    vl_ = 256 / (8 * sizeof(real_t)); // AVX-256 / sizeof(template)
+    precompute_values_vec(vl_);
 }
+template <typename real_t>
+auto simd<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
+{
+	return noarr::scalar<real_t>()
+		    ^ noarr::vectors<'z', 'y', 'x', 's'>(problem.nz, problem.ny, problem.nx, problem.substrates_count);
+}
+
 
 template <typename real_t>
 void simd<real_t>::prepare(const max_problem_t& problem)
@@ -185,10 +211,6 @@ void simd<real_t>::prepare(const max_problem_t& problem)
 	auto substrates_layout = get_substrates_layout(problem_); 
 
 	solver_utils::initialize_substrate(substrates_layout, substrates_.get(), problem_);
-
-    precompute_values();
-    vl_ = 256 / (8 * sizeof(real_t)); // AVX-256 / sizeof(template)
-    precompute_values_vec(vl_);
 }
 
 template <typename real_t>
@@ -215,17 +237,17 @@ void simd<real_t>::solve_x()
             }
 
             // should be an empty loop if mesh.z_coordinates.size() < 2
-            for (index_t i = 1; k < problem_.nx; i++)
+            for (index_t i = 1; i < problem_.nx; i++)
             {
 
                 index_t index_inc = index + thomas_i_jump;
                 // axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n - M.thomas_k_jump]);
-                for (int d = 0; d < problem_.substrates_count; d++)
+                for (index_t d = 0; d < problem_.substrates_count; d++)
                 {
                     substrates_[index_inc + d] += constant1[d] * substrates_[index + d]; 
                 }
                 //(*(*M.p_density_vectors))[n] /= M.thomas_denomz[k];
-                for (int d = 0; d < problem_.substrates_count; d++)
+                for (index_t d = 0; d < problem_.substrates_count; d++)
                 {
                     substrates_[index_inc + d] /= bx_[i][d];
                 }
@@ -233,14 +255,14 @@ void simd<real_t>::solve_x()
                 index = index_inc;
             }
 
-            index = k * thomas_k_jump + j * thomas_j_jump + thomas_i_jump * (problem_.nx - 1);
+            index = k * thomas_k_jump + j * thomas_j_jump + (thomas_i_jump * (problem_.nx - 1));
             for (index_t i = problem_.nx - 2; i >= 0; i--)
             {
                 index_t index_dec = index - thomas_i_jump;
                 // naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + M.thomas_k_jump]);
                 for (index_t d = 0; d < problem_.substrates_count; d++)
                 {
-                    substrates_[index_dec + d] -= cx_[k][d] * substrates_[index + d];
+                    substrates_[index_dec + d] -= cx_[i][d] * substrates_[index + d];
                 }
                 index = index_dec;
             }
@@ -290,7 +312,7 @@ void simd<real_t>::solve_y()
             gd = 0;
             for (zd = 0; zd + vl_ < thomas_j_jump; zd+=vl_)
             {
-                __m256d constant1 = _mm256_loadu_pd(&constant1[gd]);
+                __m256d constant1 = _mm256_loadu_pd(&vconstant1[gd]);
                 __m256d density_curr1 = _mm256_loadu_pd(&substrates_[index_base + zd]);
                 __m256d density_inc1 = _mm256_loadu_pd(&substrates_[index_inc + zd]);
                 __m256d denomy1 = _mm256_loadu_pd(&vby_[j][gd]);
@@ -361,6 +383,7 @@ void simd<real_t>::solve_y()
 template <typename real_t>
 void simd<real_t>::solve_z()
 {
+    
     //Forward Elimination
     index_t initial_index = 0;
     index_t limit = initial_index + thomas_k_jump;
@@ -456,3 +479,38 @@ void simd<real_t>::solve_z()
         }
     }
 }
+
+template <typename real_t>
+void simd<real_t>::save(const std::string& file) const
+{
+	auto dens_l = get_substrates_layout(problem_);
+
+	std::ofstream out(file);
+
+	for (index_t z = 0; z < problem_.nz; z++)
+		for (index_t y = 0; y < problem_.ny; y++)
+			for (index_t x = 0; x < problem_.nx; x++)
+			{
+                out << "(" << x << ", " << y << ", " << z << ")";
+				for (index_t s = 0; s < problem_.substrates_count; s++)
+					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
+				out << std::endl;
+			}
+
+	out.close();
+}
+
+template <typename real_t>
+double simd<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
+{
+    
+	auto dens_l = get_substrates_layout(problem_);
+
+	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
+    //return substrates_[z * thomas_k_jump + y * thomas_j_jump + x * thomas_i_jump + s];
+}
+template <typename real_t>
+void simd<real_t>::tune(const nlohmann::json& params) {}
+
+//template class simd<float>;
+template class simd<double>;

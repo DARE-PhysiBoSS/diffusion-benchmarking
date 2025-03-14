@@ -243,6 +243,7 @@ void reference_thomas_solver<real_t>::save(const std::string& file) const
 		for (index_t y = 0; y < problem_.ny; y++)
 			for (index_t x = 0; x < problem_.nx; x++)
 			{
+				out << "(" << x << ", " << y << ", " << z << ")";
 				for (index_t s = 0; s < problem_.substrates_count; s++)
 					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
 				out << std::endl;
