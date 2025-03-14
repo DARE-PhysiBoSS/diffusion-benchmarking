@@ -153,15 +153,11 @@ void lapack_thomas_solver<real_t>::solve_x()
 
 template <typename real_t>
 void lapack_thomas_solver<real_t>::solve_y()
-{
-	throw std::runtime_error("Not implemented");
-}
+{}
 
 template <typename real_t>
 void lapack_thomas_solver<real_t>::solve_z()
-{
-	throw std::runtime_error("Not implemented");
-}
+{}
 
 template <typename real_t>
 void lapack_thomas_solver<real_t>::solve()
