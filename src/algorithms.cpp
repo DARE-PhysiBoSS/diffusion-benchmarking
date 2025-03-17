@@ -2,16 +2,17 @@
 
 #include <iostream>
 
+#include "biofvm.h"
 #include "full_lapack_solver.h"
 #include "general_lapack_thomas_solver.h"
 #include "lapack_thomas_solver.h"
 #include "least_compute_thomas_solver.h"
+#include "least_compute_thomas_solver_s.h"
 #include "least_compute_thomas_solver_trav.h"
 #include "least_memory_thomas_solver.h"
 #include "reference_thomas_solver.h"
-#include "tridiagonal_solver.h"
 #include "simd.h"
-#include "biofvm.h"
+#include "tridiagonal_solver.h"
 
 template <typename real_t>
 std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
@@ -20,6 +21,7 @@ std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
 
 	solvers.emplace("ref", std::make_unique<reference_thomas_solver<real_t>>());
 	solvers.emplace("lstc", std::make_unique<least_compute_thomas_solver<real_t>>());
+	solvers.emplace("lstcs", std::make_unique<least_compute_thomas_solver_s<real_t>>());
 	solvers.emplace("lstc_t", std::make_unique<least_compute_thomas_solver_trav<real_t>>());
 	solvers.emplace("lstm", std::make_unique<least_memory_thomas_solver<real_t>>());
 	solvers.emplace("lapack", std::make_unique<lapack_thomas_solver<real_t>>());
