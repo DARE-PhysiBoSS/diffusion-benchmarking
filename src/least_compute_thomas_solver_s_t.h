@@ -7,11 +7,11 @@
 #include "tridiagonal_solver.h"
 
 /*
-The same as least_compute_thomas_solver, but substrate dimension is the outermost one.
+The same as least_compute_thomas_solver_s, but iteration in y and z dimension is carried out by slices of x.
 */
 
 template <typename real_t>
-class least_compute_thomas_solver_s : public locally_onedimensional_solver
+class least_compute_thomas_solver_s_t : public locally_onedimensional_solver
 {
 	using index_t = std::int32_t;
 
@@ -24,6 +24,7 @@ class least_compute_thomas_solver_s : public locally_onedimensional_solver
 	std::unique_ptr<real_t[]> bz_, cz_, ez_;
 
 	std::size_t work_items_;
+	std::size_t x_tile_size_;
 
 	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
 						   index_t shape, index_t dims, index_t n);
