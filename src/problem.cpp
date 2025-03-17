@@ -42,9 +42,21 @@ max_problem_t problems::read_problem(const std::string& file)
 	problem.substrates_count = j["substrates_count"];
 	problem.iterations = j["iterations"];
 	problem.dt = j["dt"];
-	problem.diffusion_coefficients = j["diffusion_coefficients"].get<std::vector<double>>();
-	problem.decay_rates = j["decay_rates"].get<std::vector<double>>();
-	problem.initial_conditions = j["initial_conditions"].get<std::vector<double>>();
+
+	if (j["diffusion_coefficients"].is_array())
+		problem.diffusion_coefficients = j["diffusion_coefficients"].get<std::vector<double>>();
+	else
+		problem.diffusion_coefficients = std::vector<double>(problem.substrates_count, j["diffusion_coefficients"]);
+
+	if (j["decay_rates"].is_array())
+		problem.decay_rates = j["decay_rates"].get<std::vector<double>>();
+	else
+		problem.decay_rates = std::vector<double>(problem.substrates_count, j["decay_rates"]);
+
+	if (j["initial_conditions"].is_array())
+		problem.initial_conditions = j["initial_conditions"].get<std::vector<double>>();
+	else
+		problem.initial_conditions = std::vector<double>(problem.substrates_count, j["initial_conditions"]);
 
 	if (problem.diffusion_coefficients.size() != problem.substrates_count)
 		throw std::runtime_error("diffusion_coefficients size does not match substrates_count");

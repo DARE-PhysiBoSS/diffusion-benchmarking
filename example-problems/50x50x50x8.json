@@ -9,35 +9,8 @@
     "substrates_count": 8,
     "iterations": 1,
     "dt": 0.01,
-    "diffusion_coefficients": [
-        10000,
-        10000,
-        10000,
-        10000,
-        10000,
-        10000,
-        10000,
-        10000
-    ],
-    "decay_rates": [
-        0.01,
-        0.01,
-        0.01,
-        0.01,
-        0.01,
-        0.01,
-        0.01,
-        0.01
-    ],
-    "initial_conditions": [
-        1000,
-        1000,
-        1000,
-        1000,
-        1000,
-        1000,
-        1000,
-        1000
-    ],
+    "diffusion_coefficients": 10000,
+    "decay_rates": 0.01,
+    "initial_conditions": 1000,
     "gaussian_pulse": true
 }
