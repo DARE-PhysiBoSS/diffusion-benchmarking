@@ -7,10 +7,10 @@
 #include "tridiagonal_solver.h"
 
 /*
-The same as least_compute_thomas_solver_s, but iteration in y and z dimension is carried out by slices of x.
+The same as least_compute_thomas_solver_s_t, but x is aligned.
 */
 
-template <typename real_t>
+template <typename real_t, bool aligned_x>
 class least_compute_thomas_solver_s_t : public locally_onedimensional_solver
 {
 	using index_t = std::int32_t;
@@ -25,12 +25,13 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver
 
 	std::size_t work_items_;
 	std::size_t x_tile_size_;
+	std::size_t alignment_size_;
 
 	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
 						   index_t shape, index_t dims, index_t n);
 
 	template <std::size_t dims>
-	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
+	auto get_substrates_layout(const problem_t<index_t, real_t>& problem) const;
 
 	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 

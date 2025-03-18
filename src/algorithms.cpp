@@ -23,7 +23,8 @@ std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
 	solvers.emplace("ref", std::make_unique<reference_thomas_solver<real_t>>());
 	solvers.emplace("lstc", std::make_unique<least_compute_thomas_solver<real_t>>());
 	solvers.emplace("lstcs", std::make_unique<least_compute_thomas_solver_s<real_t>>());
-	solvers.emplace("lstcst", std::make_unique<least_compute_thomas_solver_s_t<real_t>>());
+	solvers.emplace("lstcst", std::make_unique<least_compute_thomas_solver_s_t<real_t, false>>());
+	solvers.emplace("lstcsta", std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>());
 	solvers.emplace("lstc_t", std::make_unique<least_compute_thomas_solver_trav<real_t>>());
 	solvers.emplace("lstm", std::make_unique<least_memory_thomas_solver<real_t>>());
 	solvers.emplace("lapack", std::make_unique<lapack_thomas_solver<real_t>>());
@@ -68,8 +69,8 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 {
 	auto& solver = solvers_.at(alg);
 
-	solver->prepare(problem);
 	solver->tune(params);
+	solver->prepare(problem);
 	solver->initialize();
 
 
@@ -86,12 +87,12 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_problem_t& problem,
 					const nlohmann::json& params)
 {
-	alg.prepare(problem);
 	alg.tune(params);
+	alg.prepare(problem);
 	alg.initialize();
 
-	ref.prepare(problem);
 	ref.tune(params);
+	ref.prepare(problem);
 	ref.initialize();
 }
 
@@ -127,7 +128,7 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto ref_solver = dynamic_cast<locally_onedimensional_solver*>(solvers_.at("ref").get()); 
+	auto ref_solver = dynamic_cast<locally_onedimensional_solver*>(solvers_.at("ref").get());
 	auto solver = solvers_.at(alg).get();
 
 	locally_onedimensional_solver* adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);
@@ -198,8 +199,8 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 	auto solver = solvers_.at(alg).get();
 
-	solver->prepare(problem);
 	solver->tune(params);
+	solver->prepare(problem);
 
 	std::size_t init_time_us;
 
@@ -312,12 +313,12 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 			std::cout << "init_time,time,std_dev" << std::endl;
 	}
 
-	solver->prepare(problem);
-	solver->tune(params);
-	solver->initialize();
-
 	// warmup
 	{
+		solver->tune(params);
+		solver->prepare(problem);
+		solver->initialize();
+
 		auto warmup_time_s = params.contains("warmup_time") ? (double)params["warmup_time"] : 3.0;
 		auto start = std::chrono::high_resolution_clock::now();
 		auto end = start;

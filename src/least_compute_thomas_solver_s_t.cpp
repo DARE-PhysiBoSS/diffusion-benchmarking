@@ -10,11 +10,11 @@
 #include "noarr/structures/structs/setters.hpp"
 #include "solver_utils.h"
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::precompute_values(std::unique_ptr<real_t[]>& b,
-																std::unique_ptr<real_t[]>& c,
-																std::unique_ptr<real_t[]>& e, index_t shape,
-																index_t dims, index_t n)
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t[]>& b,
+																		   std::unique_ptr<real_t[]>& c,
+																		   std::unique_ptr<real_t[]>& e, index_t shape,
+																		   index_t dims, index_t n)
 {
 	b = std::make_unique<real_t[]>(n * problem_.substrates_count);
 	e = std::make_unique<real_t[]>(n * problem_.substrates_count);
@@ -62,29 +62,31 @@ void least_compute_thomas_solver_s_t<real_t>::precompute_values(std::unique_ptr<
 	}
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::prepare(const max_problem_t& problem)
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::prepare(const max_problem_t& problem)
 {
 	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
-
-	// Initialize substrates
 
 	auto substrates_layout = get_substrates_layout<3>(problem_);
+
+	substrates_ = std::make_unique<real_t[]>((substrates_layout | noarr::get_size()) / sizeof(real_t));
+
+	// Initialize substrates
 
 	solver_utils::initialize_substrate(substrates_layout, substrates_.get(), problem_);
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::tune(const nlohmann::json& params)
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
 	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"]
 												: (problem_.nx + omp_get_num_threads() - 1) / omp_get_num_threads();
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 1;
+	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::initialize()
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::initialize()
 {
 	if (problem_.dims >= 1)
 		precompute_values(bx_, cx_, ex_, problem_.dx, problem_.dims, problem_.nx);
@@ -94,22 +96,45 @@ void least_compute_thomas_solver_s_t<real_t>::initialize()
 		precompute_values(bz_, cz_, ez_, problem_.dz, problem_.dims, problem_.nz);
 }
 
-template <typename real_t>
+template <typename real_t, bool aligned_x>
 template <std::size_t dims>
-auto least_compute_thomas_solver_s_t<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
+auto least_compute_thomas_solver_s_t<real_t, aligned_x>::get_substrates_layout(
+	const problem_t<index_t, real_t>& problem) const
 {
-	if constexpr (dims == 1)
-		return noarr::scalar<real_t>() ^ noarr::vectors<'x', 's'>(problem.nx, problem.substrates_count);
-	else if constexpr (dims == 2)
-		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'x', 'y', 's'>(problem.nx, problem.ny, problem.substrates_count);
-	else if constexpr (dims == 3)
-		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'x', 'y', 'z', 's'>(problem.nx, problem.ny, problem.nz, problem.substrates_count);
+	if constexpr (!aligned_x)
+	{
+		if constexpr (dims == 1)
+			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 's'>(problem.nx, problem.substrates_count);
+		else if constexpr (dims == 2)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'x', 'y', 's'>(problem.nx, problem.ny, problem.substrates_count);
+		else if constexpr (dims == 3)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'x', 'y', 'z', 's'>(problem.nx, problem.ny, problem.nz, problem.substrates_count);
+	}
+	else
+	{
+		std::size_t x_size = problem.nx * sizeof(real_t);
+		std::size_t x_size_padded = (x_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		x_size_padded /= sizeof(real_t);
+
+		if constexpr (dims == 1)
+			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 's'>(x_size_padded, problem.substrates_count)
+				   ^ noarr::slice<'x'>(problem.nx);
+		else if constexpr (dims == 2)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'x', 'y', 's'>(x_size_padded, problem.ny, problem.substrates_count)
+				   ^ noarr::slice<'x'>(problem.nx);
+		else if constexpr (dims == 3)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'x', 'y', 'z', 's'>(x_size_padded, problem.ny, problem.nz, problem.substrates_count)
+				   ^ noarr::slice<'x'>(problem.nx);
+	}
 }
 
-template <typename real_t>
-auto least_compute_thomas_solver_s_t<real_t>::get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n)
+template <typename real_t, bool aligned_x>
+auto least_compute_thomas_solver_s_t<real_t, aligned_x>::get_diagonal_layout(const problem_t<index_t, real_t>& problem,
+																			 index_t n)
 {
 	return noarr::scalar<real_t>() ^ noarr::vectors<'i', 's'>(n, problem.substrates_count);
 }
@@ -495,8 +520,8 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 	}
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::solve_x()
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_x()
 {
 	if (problem_.dims == 1)
 	{
@@ -521,8 +546,8 @@ void least_compute_thomas_solver_s_t<real_t>::solve_x()
 	}
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::solve_y()
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_y()
 {
 	if (problem_.dims == 2)
 	{
@@ -540,16 +565,16 @@ void least_compute_thomas_solver_s_t<real_t>::solve_y()
 	}
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::solve_z()
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_z()
 {
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(problem_),
 							  get_diagonal_layout(problem_, problem_.nz), work_items_, x_tile_size_);
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::solve()
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 {
 	if (problem_.dims == 1)
 	{
@@ -590,8 +615,8 @@ void least_compute_thomas_solver_s_t<real_t>::solve()
 	}
 }
 
-template <typename real_t>
-void least_compute_thomas_solver_s_t<real_t>::save(const std::string& file) const
+template <typename real_t, bool aligned_x>
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::save(const std::string& file) const
 {
 	auto dens_l = get_substrates_layout<3>(problem_);
 
@@ -609,13 +634,17 @@ void least_compute_thomas_solver_s_t<real_t>::save(const std::string& file) cons
 	out.close();
 }
 
-template <typename real_t>
-double least_compute_thomas_solver_s_t<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
+template <typename real_t, bool aligned_x>
+double least_compute_thomas_solver_s_t<real_t, aligned_x>::access(std::size_t s, std::size_t x, std::size_t y,
+																  std::size_t z) const
 {
 	auto dens_l = get_substrates_layout<3>(problem_);
 
 	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
 }
 
-template class least_compute_thomas_solver_s_t<float>;
-template class least_compute_thomas_solver_s_t<double>;
+template class least_compute_thomas_solver_s_t<float, false>;
+template class least_compute_thomas_solver_s_t<double, false>;
+
+template class least_compute_thomas_solver_s_t<float, true>;
+template class least_compute_thomas_solver_s_t<double, true>;
