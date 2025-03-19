@@ -8,6 +8,11 @@
 
 int main(int argc, char** argv)
 {
+	// #define CSR_FLUSH_TO_ZERO (1 << 15)
+	// 	unsigned csr = __builtin_ia32_stmxcsr();
+	// 	csr |= CSR_FLUSH_TO_ZERO;
+	// 	__builtin_ia32_ldmxcsr(csr);
+
 	argparse::ArgumentParser program("diffuse");
 
 	std::string alg;
@@ -51,8 +56,8 @@ int main(int argc, char** argv)
 
 	try
 	{
-		// program.parse_args({ "./diffuse", "--alg", "lstc", "--problem", "../example-problems/toy.json", "--validate"
-		// });
+		// program.parse_args({ "./diffuse", "--alg", "full_lapack", "--problem", "../example-problems/toy.json",
+		// "--validate"});
 		program.parse_args(argc, argv);
 	}
 	catch (const std::exception& err)
@@ -90,17 +95,25 @@ int main(int argc, char** argv)
 		ifs >> params;
 	}
 
-	if (validate)
+	try
 	{
-		algs.validate(alg, problem, params);
+		if (validate)
+		{
+			algs.validate(alg, problem, params);
+		}
+		else if (!output_file.empty())
+		{
+			algs.run(alg, problem, params, output_file);
+		}
+		else if (benchmark)
+		{
+			algs.benchmark(alg, problem, params);
+		}
 	}
-	else if (!output_file.empty())
+	catch (const std::exception& err)
 	{
-		algs.run(alg, problem, params, output_file);
-	}
-	else if (benchmark)
-	{
-		algs.benchmark(alg, problem, params);
+		std::cerr << err.what() << std::endl;
+		return 1;
 	}
 
 	return 0;

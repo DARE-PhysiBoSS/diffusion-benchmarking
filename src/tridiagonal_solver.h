@@ -2,7 +2,7 @@
 
 #include "diffusion_solver.h"
 
-class locally_onedimensional_solver : public diffusion_solver
+class locally_onedimensional_solver : public virtual diffusion_solver
 {
 public:
 	virtual void solve_x() = 0;

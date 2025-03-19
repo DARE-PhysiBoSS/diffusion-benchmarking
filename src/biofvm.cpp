@@ -1,9 +1,10 @@
 #include "biofvm.h"
 
-#include <fstream>
 #include <immintrin.h>
 #include <iostream>
 #include <vector>
+
+#include "solver_utils.h"
 
 template <typename real_t>
 void biofvm<real_t>::precompute_values()
@@ -305,11 +306,9 @@ void biofvm<real_t>::solve_z()
 }
 
 template <typename real_t>
-void biofvm<real_t>::save(const std::string& file) const
+void biofvm<real_t>::save(std::ostream& out) const
 {
 	auto dens_l = get_substrates_layout(problem_);
-
-	std::ofstream out(file);
 
 	for (index_t z = 0; z < problem_.nz; z++)
 		for (index_t y = 0; y < problem_.ny; y++)
@@ -320,8 +319,6 @@ void biofvm<real_t>::save(const std::string& file) const
 					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
 				out << std::endl;
 			}
-
-	out.close();
 }
 
 template <typename real_t>

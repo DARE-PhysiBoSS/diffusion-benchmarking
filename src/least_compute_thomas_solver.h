@@ -1,9 +1,7 @@
 #pragma once
 
-#include <memory>
-
-#include <noarr/structures_extended.hpp>
-
+#include "base_solver.h"
+#include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
 
 /*
@@ -31,13 +29,11 @@ d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
 */
 
 template <typename real_t>
-class least_compute_thomas_solver : public locally_onedimensional_solver
+class least_compute_thomas_solver : public locally_onedimensional_solver,
+									public base_solver<real_t, least_compute_thomas_solver<real_t>>
 {
+protected:
 	using index_t = std::int32_t;
-
-	problem_t<index_t, real_t> problem_;
-
-	std::unique_ptr<real_t[]> substrates_;
 
 	std::unique_ptr<real_t[]> bx_, cx_, ex_;
 	std::unique_ptr<real_t[]> by_, cy_, ey_;
@@ -48,13 +44,14 @@ class least_compute_thomas_solver : public locally_onedimensional_solver
 	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
 						   index_t shape, index_t dims, index_t n, index_t copies);
 
-	template <std::size_t dims>
-	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
-
 	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
 public:
-	void prepare(const max_problem_t& problem) override;
+	template <std::size_t dims = 3>
+	auto get_substrates_layout() const
+	{
+		return substrate_layouts::get_sxyz_layout<dims>(this->problem_);
+	}
 
 	void tune(const nlohmann::json& params) override;
 
@@ -65,8 +62,4 @@ public:
 	void solve_z() override;
 
 	void solve() override;
-
-	void save(const std::string& file) const override;
-
-	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 };

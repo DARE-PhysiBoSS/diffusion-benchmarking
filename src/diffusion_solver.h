@@ -22,7 +22,7 @@ public:
 	// Saves data to a file in human readable format with the following structure:
 	// Each line contains a space-separated list of values for a single point in the grid (so all substrates)
 	// The points are ordered in x, y, z order
-	virtual void save(const std::string& file) const = 0;
+	virtual void save(std::ostream& out) const = 0;
 
 	// Accesses the value at the given coordinates
 	virtual double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const = 0;

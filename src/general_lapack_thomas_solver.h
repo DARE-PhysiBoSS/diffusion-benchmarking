@@ -1,17 +1,14 @@
 #pragma once
 
-#include <memory>
-
+#include "base_solver.h"
+#include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
 
 template <typename real_t>
-class general_lapack_thomas_solver : public locally_onedimensional_solver
+class general_lapack_thomas_solver : public locally_onedimensional_solver,
+									 public base_solver<real_t, general_lapack_thomas_solver<real_t>>
 {
 	using index_t = std::int32_t;
-
-	problem_t<index_t, real_t> problem_;
-
-	std::unique_ptr<real_t[]> substrates_;
 
 	std::vector<std::unique_ptr<real_t[]>> dlx_, dx_, dux_, du2x_;
 	std::vector<std::unique_ptr<real_t[]>> dly_, dy_, duy_, du2y_;
@@ -20,8 +17,6 @@ class general_lapack_thomas_solver : public locally_onedimensional_solver
 	std::vector<std::unique_ptr<int[]>> ipivx_, ipivy_, ipivz_;
 
 	std::size_t work_items_;
-
-	static auto get_substrates_layout(const problem_t<index_t, real_t>& problem);
 
 	void precompute_values(std::vector<std::unique_ptr<real_t[]>>& dls, std::vector<std::unique_ptr<real_t[]>>& ds,
 						   std::vector<std::unique_ptr<real_t[]>>& dus, std::vector<std::unique_ptr<real_t[]>>& du2s,
@@ -32,7 +27,7 @@ class general_lapack_thomas_solver : public locally_onedimensional_solver
 			   const real_t* du2, const int* ipiv, real_t* b, const int* ldb, int* info);
 
 public:
-	void prepare(const max_problem_t& problem) override;
+	auto get_substrates_layout() const { return substrate_layouts::get_xyzs_layout<3>(this->problem_); }
 
 	void initialize() override;
 
@@ -43,8 +38,4 @@ public:
 	void solve_z() override;
 
 	void solve() override;
-
-	void save(const std::string& file) const override;
-
-	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 };

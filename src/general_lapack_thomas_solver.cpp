@@ -1,10 +1,5 @@
 #include "general_lapack_thomas_solver.h"
 
-#include <fstream>
-#include <iostream>
-
-#include "solver_utils.h"
-
 extern "C"
 {
 	extern void sgttrf_(const int* n, float* dl, float* d, float* du, float* du2, int* ipiv, int* info);
@@ -54,7 +49,7 @@ void general_lapack_thomas_solver<real_t>::precompute_values(std::vector<std::un
 															 std::vector<std::unique_ptr<int[]>>& ipivs, index_t shape,
 															 index_t dims, index_t n)
 {
-	for (index_t s_idx = 0; s_idx < problem_.substrates_count; s_idx++)
+	for (index_t s_idx = 0; s_idx < this->problem_.substrates_count; s_idx++)
 	{
 		auto dl = std::make_unique<real_t[]>(n - 1);
 		auto d = std::make_unique<real_t[]>(n);
@@ -65,15 +60,15 @@ void general_lapack_thomas_solver<real_t>::precompute_values(std::vector<std::un
 		{
 			if (i != n - 1)
 			{
-				dl[i] = -problem_.dt * problem_.diffusion_coefficients[s_idx] / (shape * shape);
-				du[i] = -problem_.dt * problem_.diffusion_coefficients[s_idx] / (shape * shape);
+				dl[i] = -this->problem_.dt * this->problem_.diffusion_coefficients[s_idx] / (shape * shape);
+				du[i] = -this->problem_.dt * this->problem_.diffusion_coefficients[s_idx] / (shape * shape);
 			}
 
-			d[i] = 1 + problem_.dt * problem_.decay_rates[s_idx] / dims
-				   + 2 * problem_.dt * problem_.diffusion_coefficients[s_idx] / (shape * shape);
+			d[i] = 1 + this->problem_.dt * this->problem_.decay_rates[s_idx] / dims
+				   + 2 * this->problem_.dt * this->problem_.diffusion_coefficients[s_idx] / (shape * shape);
 
 			if (i == 0 || i == n - 1)
-				d[i] -= problem_.dt * problem_.diffusion_coefficients[s_idx] / (shape * shape);
+				d[i] -= this->problem_.dt * this->problem_.diffusion_coefficients[s_idx] / (shape * shape);
 		}
 
 		int info;
@@ -91,34 +86,14 @@ void general_lapack_thomas_solver<real_t>::precompute_values(std::vector<std::un
 }
 
 template <typename real_t>
-auto general_lapack_thomas_solver<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
-{
-	return noarr::scalar<real_t>()
-		   ^ noarr::vectors<'x', 'y', 'z', 's'>(problem.nx, problem.ny, problem.nz, problem.substrates_count);
-}
-
-template <typename real_t>
-void general_lapack_thomas_solver<real_t>::prepare(const max_problem_t& problem)
-{
-	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
-
-	// Initialize substrates
-
-	auto substrates_layout = get_substrates_layout(problem_);
-
-	solver_utils::initialize_substrate(substrates_layout, substrates_.get(), problem_);
-}
-
-template <typename real_t>
 void general_lapack_thomas_solver<real_t>::initialize()
 {
-	if (problem_.dims >= 1)
-		precompute_values(dlx_, dx_, dux_, du2x_, ipivx_, problem_.dx, problem_.dims, problem_.nx);
-	if (problem_.dims >= 2)
-		precompute_values(dly_, dy_, duy_, du2y_, ipivy_, problem_.dy, problem_.dims, problem_.ny);
-	if (problem_.dims >= 3)
-		precompute_values(dlz_, dz_, duz_, du2z_, ipivz_, problem_.dz, problem_.dims, problem_.nz);
+	if (this->problem_.dims >= 1)
+		precompute_values(dlx_, dx_, dux_, du2x_, ipivx_, this->problem_.dx, this->problem_.dims, this->problem_.nx);
+	if (this->problem_.dims >= 2)
+		precompute_values(dly_, dy_, duy_, du2y_, ipivy_, this->problem_.dy, this->problem_.dims, this->problem_.ny);
+	if (this->problem_.dims >= 3)
+		precompute_values(dlz_, dz_, duz_, du2z_, ipivz_, this->problem_.dz, this->problem_.dims, this->problem_.nz);
 }
 
 template <typename real_t>
@@ -130,21 +105,21 @@ void general_lapack_thomas_solver<real_t>::tune(const nlohmann::json& params)
 template <typename real_t>
 void general_lapack_thomas_solver<real_t>::solve_x()
 {
-	auto dens_l = get_substrates_layout(problem_) ^ noarr::merge_blocks<'y', 'z', 'm'>();
+	auto dens_l = get_substrates_layout() ^ noarr::merge_blocks<'y', 'z', 'm'>();
 
-	for (index_t s = 0; s < problem_.substrates_count; s++)
+	for (index_t s = 0; s < this->problem_.substrates_count; s++)
 	{
 #pragma omp for schedule(static, 1) nowait
-		for (index_t yz = 0; yz < problem_.ny * problem_.nz; yz += work_items_)
+		for (index_t yz = 0; yz < this->problem_.ny * this->problem_.nz; yz += work_items_)
 		{
 			const index_t begin_offset = (dens_l | noarr::offset<'x', 'm', 's'>(0, yz, s)) / sizeof(real_t);
 
 			int info;
-			int rhs = std::min((int)work_items_, problem_.ny * problem_.nz - yz);
+			int rhs = std::min((int)work_items_, this->problem_.ny * this->problem_.nz - yz);
 
 			char c = 'N';
-			gttrs(&c, &problem_.nx, &rhs, dlx_[s].get(), dx_[s].get(), dux_[s].get(), du2x_[s].get(), ipivx_[s].get(),
-				  substrates_.get() + begin_offset, &problem_.nx, &info);
+			gttrs(&c, &this->problem_.nx, &rhs, dlx_[s].get(), dx_[s].get(), dux_[s].get(), du2x_[s].get(),
+				  ipivx_[s].get(), this->substrates_ + begin_offset, &this->problem_.nx, &info);
 
 			if (info != 0)
 				throw std::runtime_error("LAPACK spttrs failed with error code " + std::to_string(info));
@@ -163,48 +138,21 @@ void general_lapack_thomas_solver<real_t>::solve_z()
 template <typename real_t>
 void general_lapack_thomas_solver<real_t>::solve()
 {
-	if (problem_.dims == 1)
+	if (this->problem_.dims == 1)
 	{
 		solve_x();
 	}
-	else if (problem_.dims == 2)
+	else if (this->problem_.dims == 2)
 	{
 		solve_x();
 		solve_y();
 	}
-	else if (problem_.dims == 3)
+	else if (this->problem_.dims == 3)
 	{
 		solve_x();
 		solve_y();
 		solve_z();
 	}
-}
-
-template <typename real_t>
-void general_lapack_thomas_solver<real_t>::save(const std::string& file) const
-{
-	auto dens_l = get_substrates_layout(problem_);
-
-	std::ofstream out(file);
-
-	for (index_t z = 0; z < problem_.nz; z++)
-		for (index_t y = 0; y < problem_.ny; y++)
-			for (index_t x = 0; x < problem_.nx; x++)
-			{
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
-				out << std::endl;
-			}
-
-	out.close();
-}
-
-template <typename real_t>
-double general_lapack_thomas_solver<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
-{
-	auto dens_l = get_substrates_layout(problem_);
-
-	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
 }
 
 template class general_lapack_thomas_solver<float>;

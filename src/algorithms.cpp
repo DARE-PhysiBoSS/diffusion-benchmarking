@@ -1,5 +1,6 @@
 #include "algorithms.h"
 
+#include <fstream>
 #include <iostream>
 
 #include "biofvm.h"
@@ -23,15 +24,15 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("ref", []() { return std::make_unique<reference_thomas_solver<real_t>>(); });
 	solvers.emplace("lstc", []() { return std::make_unique<least_compute_thomas_solver<real_t>>(); });
 	solvers.emplace("lstcs", []() { return std::make_unique<least_compute_thomas_solver_s<real_t>>(); });
-	solvers.emplace("lstcst", []() { return std::make_unique<least_compute_thomas_solver_s_t<float, false>>(); });
-	solvers.emplace("lstcsta", []() { return std::make_unique<least_compute_thomas_solver_s_t<float, true>>(); });
+	solvers.emplace("lstcst", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, false>>(); });
+	solvers.emplace("lstcsta", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>(); });
 	solvers.emplace("lstc_t", []() { return std::make_unique<least_compute_thomas_solver_trav<real_t>>(); });
 	solvers.emplace("lstm", []() { return std::make_unique<least_memory_thomas_solver<real_t>>(); });
 	solvers.emplace("lapack", []() { return std::make_unique<lapack_thomas_solver<real_t>>(); });
 	solvers.emplace("lapack2", []() { return std::make_unique<general_lapack_thomas_solver<real_t>>(); });
 	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
 	solvers.emplace("avx256d", []() { return std::make_unique<simd<double>>(); });
-	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<double>>(); });
+	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
 	return solvers;
 }
 
@@ -81,6 +82,14 @@ void algorithms::append_params(std::ostream& os, const nlohmann::json& params, b
 	}
 }
 
+std::ofstream open_file(const std::string& file_name)
+{
+	std::ofstream file(file_name);
+	if (!file.is_open())
+		throw std::runtime_error("Cannot open file " + file_name);
+	return file;
+}
+
 void algorithms::run(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,
 					 const std::string& output_file)
 {
@@ -90,15 +99,19 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 	solver->prepare(problem);
 	solver->initialize();
 
+	std::filesystem::path output_path(output_file);
+	auto init_output_path = (output_path.parent_path() / ("initial_" + output_path.filename().string()));
 
-	solver->save("ini_"+output_file);
+	auto init_output = open_file(init_output_path.string());
+	solver->save(init_output);
 
 	for (std::size_t i = 0; i < problem.iterations; i++)
 	{
 		solver->solve();
 	}
 
-	solver->save("end_"+output_file);
+	auto output = open_file(output_file);
+	solver->save(output);
 }
 
 void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_problem_t& problem,

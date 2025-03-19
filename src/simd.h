@@ -48,7 +48,7 @@ public:
 
 	void solve() override; //done
 
-	void save(const std::string& file) const override; //done
+	void save(std::ostream& out) const override; //done
 
 	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override; //
 };

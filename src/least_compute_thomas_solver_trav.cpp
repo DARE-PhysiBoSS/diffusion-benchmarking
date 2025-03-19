@@ -1,119 +1,7 @@
 #include "least_compute_thomas_solver_trav.h"
 
-#include <array>
 #include <cstddef>
-#include <fstream>
-#include <iostream>
 #include <omp.h>
-
-#include "solver_utils.h"
-
-template <typename real_t>
-void least_compute_thomas_solver_trav<real_t>::precompute_values(std::unique_ptr<real_t[]>& b,
-																 std::unique_ptr<real_t[]>& c,
-																 std::unique_ptr<real_t[]>& e, index_t shape,
-																 index_t dims, index_t n, index_t copies)
-{
-	b = std::make_unique<real_t[]>(n * problem_.substrates_count * copies);
-	e = std::make_unique<real_t[]>((n - 1) * problem_.substrates_count * copies);
-	c = std::make_unique<real_t[]>(problem_.substrates_count * copies);
-
-	auto layout = noarr::scalar<real_t>() ^ noarr::vector<'s'>(problem_.substrates_count) ^ noarr::vector<'x'>(copies)
-				  ^ noarr::vector<'i'>(n);
-
-	auto b_diag = noarr::make_bag(layout, b.get());
-	auto e_diag = noarr::make_bag(layout, e.get());
-
-	// compute c_i
-	for (index_t x = 0; x < copies; x++)
-		for (index_t s = 0; s < problem_.substrates_count; s++)
-			c[x * problem_.substrates_count + s] = -problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
-
-	// compute b_i
-	{
-		std::array<index_t, 2> indices = { 0, n - 1 };
-
-		for (index_t i : indices)
-			for (index_t x = 0; x < copies; x++)
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-					b_diag.template at<'i', 'x', 's'>(i, x, s) =
-						1 + problem_.decay_rates[s] * problem_.dt / dims
-						+ problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
-
-		for (index_t i = 1; i < n - 1; i++)
-			for (index_t x = 0; x < copies; x++)
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-					b_diag.template at<'i', 'x', 's'>(i, x, s) =
-						1 + problem_.decay_rates[s] * problem_.dt / dims
-						+ 2 * problem_.dt * problem_.diffusion_coefficients[s] / (shape * shape);
-	}
-
-	// compute b_i' and e_i
-	{
-		for (index_t x = 0; x < copies; x++)
-			for (index_t s = 0; s < problem_.substrates_count; s++)
-				b_diag.template at<'i', 'x', 's'>(0, x, s) = 1 / b_diag.template at<'i', 'x', 's'>(0, x, s);
-
-		for (index_t i = 1; i < n; i++)
-			for (index_t x = 0; x < copies; x++)
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-				{
-					b_diag.template at<'i', 'x', 's'>(i, x, s) =
-						1
-						/ (b_diag.template at<'i', 'x', 's'>(i, x, s)
-						   - c[x * problem_.substrates_count + s] * c[x * problem_.substrates_count + s]
-								 * b_diag.template at<'i', 'x', 's'>(i - 1, x, s));
-
-					e_diag.template at<'i', 'x', 's'>(i - 1, x, s) =
-						c[x * problem_.substrates_count + s] * b_diag.template at<'i', 'x', 's'>(i - 1, x, s);
-				}
-	}
-}
-
-template <typename real_t>
-void least_compute_thomas_solver_trav<real_t>::prepare(const max_problem_t& problem)
-{
-	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
-
-	// Initialize substrates
-
-	auto substrates_layout = get_substrates_layout<3>(problem_);
-
-	solver_utils::initialize_substrate(substrates_layout, substrates_.get(), problem_);
-}
-
-template <typename real_t>
-void least_compute_thomas_solver_trav<real_t>::tune(const nlohmann::json& params)
-{
-	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"]
-												: (problem_.nx + omp_get_num_threads() - 1) / omp_get_num_threads();
-}
-
-template <typename real_t>
-void least_compute_thomas_solver_trav<real_t>::initialize()
-{
-	if (problem_.dims >= 1)
-		precompute_values(bx_, cx_, ex_, problem_.dx, problem_.dims, problem_.nx, 1);
-	if (problem_.dims >= 2)
-		precompute_values(by_, cy_, ey_, problem_.dy, problem_.dims, problem_.ny, 1);
-	if (problem_.dims >= 3)
-		precompute_values(bz_, cz_, ez_, problem_.dz, problem_.dims, problem_.nz, 1);
-}
-
-template <typename real_t>
-template <std::size_t dims>
-auto least_compute_thomas_solver_trav<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
-{
-	if constexpr (dims == 1)
-		return noarr::scalar<real_t>() ^ noarr::vectors<'s', 'x'>(problem.substrates_count, problem.nx);
-	else if constexpr (dims == 2)
-		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'s', 'x', 'y'>(problem.substrates_count, problem.nx, problem.ny);
-	else if constexpr (dims == 3)
-		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nx, problem.ny, problem.nz);
-}
 
 template <typename real_t>
 template <char dim>
@@ -162,45 +50,45 @@ void solve_slice(real_t* __restrict__ densities, const real_t* __restrict__ b, c
 template <typename real_t>
 void least_compute_thomas_solver_trav<real_t>::solve_x()
 {
-	if (problem_.dims == 1)
+	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice<'x', 's', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-									   get_substrates_layout<1>(problem_),
-									   get_diagonal_layout<'x'>(problem_, problem_.nx), work_items_);
+		solve_slice<'x', 's', index_t>(this->substrates_, this->bx_.get(), this->cx_.get(), this->ex_.get(),
+									   get_substrates_layout<1>(),
+									   get_diagonal_layout<'x'>(this->problem_, this->problem_.nx), this->work_items_);
 	}
-	else if (problem_.dims == 2)
+	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice<'x', 'y', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-									   get_substrates_layout<2>(problem_),
-									   get_diagonal_layout<'x'>(problem_, problem_.nx), work_items_);
+		solve_slice<'x', 'y', index_t>(this->substrates_, this->bx_.get(), this->cx_.get(), this->ex_.get(),
+									   get_substrates_layout<2>(),
+									   get_diagonal_layout<'x'>(this->problem_, this->problem_.nx), this->work_items_);
 	}
-	else if (problem_.dims == 3)
+	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice<'x', 'z', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-									   get_substrates_layout<3>(problem_),
-									   get_diagonal_layout<'x'>(problem_, problem_.nx), work_items_);
+		solve_slice<'x', 'z', index_t>(this->substrates_, this->bx_.get(), this->cx_.get(), this->ex_.get(),
+									   get_substrates_layout<3>(),
+									   get_diagonal_layout<'x'>(this->problem_, this->problem_.nx), this->work_items_);
 	}
 }
 
 template <typename real_t>
 void least_compute_thomas_solver_trav<real_t>::solve_y()
 {
-	if (problem_.dims == 2)
+	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice<'y', 'x', index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
-									   get_substrates_layout<2>(problem_),
-									   get_diagonal_layout<'y'>(problem_, problem_.ny), work_items_);
+		solve_slice<'y', 'x', index_t>(this->substrates_, this->by_.get(), this->cy_.get(), this->ey_.get(),
+									   get_substrates_layout<2>(),
+									   get_diagonal_layout<'y'>(this->problem_, this->problem_.ny), this->work_items_);
 	}
-	else if (problem_.dims == 3)
+	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice<'y', 'z', index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
-									   get_substrates_layout<3>(problem_),
-									   get_diagonal_layout<'y'>(problem_, problem_.ny), work_items_);
+		solve_slice<'y', 'z', index_t>(this->substrates_, this->by_.get(), this->cy_.get(), this->ey_.get(),
+									   get_substrates_layout<3>(),
+									   get_diagonal_layout<'y'>(this->problem_, this->problem_.ny), this->work_items_);
 	}
 }
 
@@ -208,79 +96,51 @@ template <typename real_t>
 void least_compute_thomas_solver_trav<real_t>::solve_z()
 {
 #pragma omp parallel
-	solve_slice<'z', 'y', index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(),
-								   get_substrates_layout<3>(problem_), get_diagonal_layout<'z'>(problem_, problem_.nz),
-								   work_items_);
+	solve_slice<'z', 'y', index_t>(this->substrates_, this->bz_.get(), this->cz_.get(), this->ez_.get(),
+								   get_substrates_layout<3>(),
+								   get_diagonal_layout<'z'>(this->problem_, this->problem_.nz), this->work_items_);
 }
 
 template <typename real_t>
 void least_compute_thomas_solver_trav<real_t>::solve()
 {
-	if (problem_.dims == 1)
+	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice<'x', 's', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-									   get_substrates_layout<1>(problem_),
-									   get_diagonal_layout<'x'>(problem_, problem_.nx), work_items_);
+		solve_slice<'x', 's', index_t>(this->substrates_, this->bx_.get(), this->cx_.get(), this->ex_.get(),
+									   get_substrates_layout<1>(),
+									   get_diagonal_layout<'x'>(this->problem_, this->problem_.nx), this->work_items_);
 	}
-	else if (problem_.dims == 2)
-	{
-#pragma omp parallel
-		{
-			solve_slice<'x', 'y', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-										   get_substrates_layout<2>(problem_),
-										   get_diagonal_layout<'x'>(problem_, problem_.nx), work_items_);
-#pragma omp barrier
-			solve_slice<'y', 'x', index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
-										   get_substrates_layout<2>(problem_),
-										   get_diagonal_layout<'y'>(problem_, problem_.ny), work_items_);
-		}
-	}
-	else if (problem_.dims == 3)
+	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
 		{
-			solve_slice<'x', 'z', index_t>(substrates_.get(), bx_.get(), cx_.get(), ex_.get(),
-										   get_substrates_layout<3>(problem_),
-										   get_diagonal_layout<'x'>(problem_, problem_.nx), work_items_);
+			solve_slice<'x', 'y', index_t>(
+				this->substrates_, this->bx_.get(), this->cx_.get(), this->ex_.get(), get_substrates_layout<2>(),
+				get_diagonal_layout<'x'>(this->problem_, this->problem_.nx), this->work_items_);
 #pragma omp barrier
-			solve_slice<'y', 'x', index_t>(substrates_.get(), by_.get(), cy_.get(), ey_.get(),
-										   get_substrates_layout<3>(problem_),
-										   get_diagonal_layout<'y'>(problem_, problem_.ny), work_items_);
-#pragma omp barrier
-			solve_slice<'z', 'y', index_t>(substrates_.get(), bz_.get(), cz_.get(), ez_.get(),
-										   get_substrates_layout<3>(problem_),
-										   get_diagonal_layout<'z'>(problem_, problem_.nz), work_items_);
+			solve_slice<'y', 'x', index_t>(
+				this->substrates_, this->by_.get(), this->cy_.get(), this->ey_.get(), get_substrates_layout<2>(),
+				get_diagonal_layout<'y'>(this->problem_, this->problem_.ny), this->work_items_);
 		}
 	}
-}
-
-template <typename real_t>
-void least_compute_thomas_solver_trav<real_t>::save(const std::string& file) const
-{
-	auto dens_l = get_substrates_layout<3>(problem_);
-
-	std::ofstream out(file);
-
-	for (index_t z = 0; z < problem_.nz; z++)
-		for (index_t y = 0; y < problem_.ny; y++)
-			for (index_t x = 0; x < problem_.nx; x++)
-			{
-				for (index_t s = 0; s < problem_.substrates_count; s++)
-					out << (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z)) << " ";
-				out << std::endl;
-			}
-
-	out.close();
-}
-
-template <typename real_t>
-double least_compute_thomas_solver_trav<real_t>::access(std::size_t s, std::size_t x, std::size_t y,
-														std::size_t z) const
-{
-	auto dens_l = get_substrates_layout<3>(problem_);
-
-	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
+	else if (this->problem_.dims == 3)
+	{
+#pragma omp parallel
+		{
+			solve_slice<'x', 'z', index_t>(
+				this->substrates_, this->bx_.get(), this->cx_.get(), this->ex_.get(), get_substrates_layout<3>(),
+				get_diagonal_layout<'x'>(this->problem_, this->problem_.nx), this->work_items_);
+#pragma omp barrier
+			solve_slice<'y', 'x', index_t>(
+				this->substrates_, this->by_.get(), this->cy_.get(), this->ey_.get(), get_substrates_layout<3>(),
+				get_diagonal_layout<'y'>(this->problem_, this->problem_.ny), this->work_items_);
+#pragma omp barrier
+			solve_slice<'z', 'y', index_t>(
+				this->substrates_, this->bz_.get(), this->cz_.get(), this->ez_.get(), get_substrates_layout<3>(),
+				get_diagonal_layout<'z'>(this->problem_, this->problem_.nz), this->work_items_);
+		}
+	}
 }
 
 template class least_compute_thomas_solver_trav<float>;
