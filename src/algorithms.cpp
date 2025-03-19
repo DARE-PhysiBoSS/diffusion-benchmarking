@@ -16,22 +16,22 @@
 #include "tridiagonal_solver.h"
 
 template <typename real_t>
-std::map<std::string, std::unique_ptr<diffusion_solver>> get_solvers_map()
+std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_solvers_map()
 {
-	std::map<std::string, std::unique_ptr<diffusion_solver>> solvers;
+	std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> solvers;
 
-	solvers.emplace("ref", std::make_unique<reference_thomas_solver<real_t>>());
-	solvers.emplace("lstc", std::make_unique<least_compute_thomas_solver<real_t>>());
-	solvers.emplace("lstcs", std::make_unique<least_compute_thomas_solver_s<real_t>>());
-	solvers.emplace("lstcst", std::make_unique<least_compute_thomas_solver_s_t<real_t, false>>());
-	solvers.emplace("lstcsta", std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>());
-	solvers.emplace("lstc_t", std::make_unique<least_compute_thomas_solver_trav<real_t>>());
-	solvers.emplace("lstm", std::make_unique<least_memory_thomas_solver<real_t>>());
-	solvers.emplace("lapack", std::make_unique<lapack_thomas_solver<real_t>>());
-	solvers.emplace("lapack2", std::make_unique<general_lapack_thomas_solver<real_t>>());
-	solvers.emplace("full_lapack", std::make_unique<full_lapack_solver<real_t>>());
-	solvers.emplace("avx256d", std::make_unique<simd<double>>());
-	solvers.emplace("biofvm", std::make_unique<biofvm<double>>());
+	solvers.emplace("ref", []() { return std::make_unique<reference_thomas_solver<real_t>>(); });
+	solvers.emplace("lstc", []() { return std::make_unique<least_compute_thomas_solver<real_t>>(); });
+	solvers.emplace("lstcs", []() { return std::make_unique<least_compute_thomas_solver_s<real_t>>(); });
+	solvers.emplace("lstcst", []() { return std::make_unique<least_compute_thomas_solver_s_t<float, false>>(); });
+	solvers.emplace("lstcsta", []() { return std::make_unique<least_compute_thomas_solver_s_t<float, true>>(); });
+	solvers.emplace("lstc_t", []() { return std::make_unique<least_compute_thomas_solver_trav<real_t>>(); });
+	solvers.emplace("lstm", []() { return std::make_unique<least_memory_thomas_solver<real_t>>(); });
+	solvers.emplace("lapack", []() { return std::make_unique<lapack_thomas_solver<real_t>>(); });
+	solvers.emplace("lapack2", []() { return std::make_unique<general_lapack_thomas_solver<real_t>>(); });
+	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
+	solvers.emplace("avx256d", []() { return std::make_unique<simd<double>>(); });
+	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<double>>(); });
 	return solvers;
 }
 
@@ -41,6 +41,23 @@ algorithms::algorithms(bool double_precision, bool verbose) : verbose_(verbose)
 		solvers_ = get_solvers_map<double>();
 	else
 		solvers_ = get_solvers_map<float>();
+}
+
+std::unique_ptr<diffusion_solver> algorithms::get_solver(const std::string& alg)
+{
+	auto solver = solvers_.at(alg)();
+	return solver;
+}
+
+std::unique_ptr<locally_onedimensional_solver> algorithms::try_get_adi_solver(const std::string& alg)
+{
+	auto solver = get_solver(alg);
+	auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver.release());
+	if (!adi_solver)
+	{
+		return nullptr;
+	}
+	return std::unique_ptr<locally_onedimensional_solver>(adi_solver);
 }
 
 void algorithms::append_params(std::ostream& os, const nlohmann::json& params, bool header)
@@ -67,7 +84,7 @@ void algorithms::append_params(std::ostream& os, const nlohmann::json& params, b
 void algorithms::run(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,
 					 const std::string& output_file)
 {
-	auto& solver = solvers_.at(alg);
+	auto solver = get_solver(alg);
 
 	solver->tune(params);
 	solver->prepare(problem);
@@ -128,12 +145,7 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto ref_solver = dynamic_cast<locally_onedimensional_solver*>(solvers_.at("ref").get());
-	auto solver = solvers_.at(alg).get();
-
-	locally_onedimensional_solver* adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);
-
-	if (adi_solver)
+	if (try_get_adi_solver(alg))
 	{
 		double max_absolute_diff_x = 0.;
 		double max_absolute_diff_y = 0.;
@@ -145,22 +157,30 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 
 		// validate solve_x
 		{
-			common_prepare(*solver, *ref_solver, problem, params);
+			auto ref_solver = try_get_adi_solver("ref");
+			auto adi_solver = try_get_adi_solver(alg);
+
+			common_prepare(*adi_solver, *ref_solver, problem, params);
+
 			adi_solver->solve_x();
 			ref_solver->solve_x();
 
-			std::tie(max_absolute_diff_x, rmse_x) = common_validate(*solver, *ref_solver, problem);
+			std::tie(max_absolute_diff_x, rmse_x) = common_validate(*adi_solver, *ref_solver, problem);
 		}
 
 		if (problem.dims > 1)
 		{
 			// validate solve_y
 			{
-				common_prepare(*solver, *ref_solver, problem, params);
+				auto ref_solver = try_get_adi_solver("ref");
+				auto adi_solver = try_get_adi_solver(alg);
+
+				common_prepare(*adi_solver, *ref_solver, problem, params);
+
 				adi_solver->solve_y();
 				ref_solver->solve_y();
 
-				std::tie(max_absolute_diff_y, rmse_y) = common_validate(*solver, *ref_solver, problem);
+				std::tie(max_absolute_diff_y, rmse_y) = common_validate(*adi_solver, *ref_solver, problem);
 			}
 		}
 
@@ -168,11 +188,15 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 		{
 			// validate solve_z
 			{
-				common_prepare(*solver, *ref_solver, problem, params);
+				auto ref_solver = try_get_adi_solver("ref");
+				auto adi_solver = try_get_adi_solver(alg);
+
+				common_prepare(*adi_solver, *ref_solver, problem, params);
+
 				adi_solver->solve_z();
 				ref_solver->solve_z();
 
-				std::tie(max_absolute_diff_z, rmse_z) = common_validate(*solver, *ref_solver, problem);
+				std::tie(max_absolute_diff_z, rmse_z) = common_validate(*adi_solver, *ref_solver, problem);
 			}
 		}
 
@@ -182,7 +206,11 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 	}
 	else
 	{
+		auto ref_solver = get_solver("ref");
+		auto solver = get_solver(alg);
+
 		common_prepare(*solver, *ref_solver, problem, params);
+
 		solver->solve();
 		ref_solver->solve();
 
@@ -197,7 +225,7 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 {
 	auto inner_iterations = params.contains("inner_iterations") ? (std::size_t)params["inner_iterations"] : 10;
 
-	auto solver = solvers_.at(alg).get();
+	auto solver = get_solver(alg);
 
 	solver->tune(params);
 	solver->prepare(problem);
@@ -221,13 +249,12 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
-
 	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
 			  << "," << problem.nz << ",";
 	append_params(std::cout, params, false);
 	std::cout << init_time_us << ",";
 
-	if (auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver);
+	if (auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver.get());
 		adi_solver && kind == benchmark_kind::per_dimension)
 	{
 		std::vector<std::size_t> times_x, times_y, times_z;
@@ -289,8 +316,6 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	auto& solver = solvers_.at(alg);
-
 	benchmark_kind kind = benchmark_kind::per_dimension;
 
 	if (params.contains("benchmark_kind"))
@@ -307,7 +332,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 		std::cout << "algorithm,dims,s,nx,ny,nz,";
 		append_params(std::cout, params, true);
 
-		if (dynamic_cast<locally_onedimensional_solver*>(solver.get()) && kind == benchmark_kind::per_dimension)
+		if (try_get_adi_solver(alg) && kind == benchmark_kind::per_dimension)
 			std::cout << "init_time,x_time,y_time,z_time,x_std,y_std,z_std" << std::endl;
 		else
 			std::cout << "init_time,time,std_dev" << std::endl;
@@ -315,6 +340,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 
 	// warmup
 	{
+		auto solver = get_solver(alg);
 		solver->tune(params);
 		solver->prepare(problem);
 		solver->initialize();

@@ -1,11 +1,13 @@
 #pragma once
 
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <string>
 
 #include "diffusion_solver.h"
+#include "tridiagonal_solver.h"
 
 enum class benchmark_kind
 {
@@ -15,7 +17,7 @@ enum class benchmark_kind
 
 class algorithms
 {
-	std::map<std::string, std::unique_ptr<diffusion_solver>> solvers_;
+	std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> solvers_;
 
 	bool verbose_;
 
@@ -29,6 +31,9 @@ class algorithms
 						 benchmark_kind kind);
 
 	void append_params(std::ostream& os, const nlohmann::json& params, bool header);
+
+	std::unique_ptr<diffusion_solver> get_solver(const std::string& alg);
+	std::unique_ptr<locally_onedimensional_solver> try_get_adi_solver(const std::string& alg);
 
 public:
 	algorithms(bool double_precision, bool verbose);
