@@ -32,8 +32,6 @@ class biofvm : public locally_onedimensional_solver
 public:
 	void prepare(const max_problem_t& problem) override;
 
-	void tune(const nlohmann::json& params) override;
-
 	void initialize() override; //done
 
 	void solve_x() override;

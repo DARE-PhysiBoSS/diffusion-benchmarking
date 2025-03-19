@@ -196,7 +196,7 @@ template <typename real_t>
 auto simd<real_t>::get_substrates_layout(const problem_t<index_t, real_t>& problem)
 {
 	return noarr::scalar<real_t>()
-		    ^ noarr::vectors<'z', 'y', 'x', 's'>(problem.nz, problem.ny, problem.nx, problem.substrates_count);
+		   ^ noarr::vectors<'s', 'x', 'y', 'z'>(problem.substrates_count, problem.nx, problem.ny, problem.nz);
 }
 
 
@@ -509,8 +509,6 @@ double simd<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::si
 	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
     //return substrates_[z * thomas_k_jump + y * thomas_j_jump + x * thomas_i_jump + s];
 }
-template <typename real_t>
-void simd<real_t>::tune(const nlohmann::json& params) {}
 
 //template class simd<float>;
 template class simd<double>;
