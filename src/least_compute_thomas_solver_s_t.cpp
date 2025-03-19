@@ -69,7 +69,11 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::prepare(const max_probl
 
 	auto substrates_layout = get_substrates_layout<3>(problem_);
 
-	substrates_ = std::make_unique<real_t[]>((substrates_layout | noarr::get_size()) / sizeof(real_t));
+	if (aligned_x)
+		substrates_ = std::unique_ptr<real_t[]>(
+			(real_t*)std::aligned_alloc(alignment_size_, (substrates_layout | noarr::get_size())));
+	else
+		substrates_ = std::make_unique<real_t[]>((substrates_layout | noarr::get_size()) / sizeof(real_t));
 
 	// Initialize substrates
 
