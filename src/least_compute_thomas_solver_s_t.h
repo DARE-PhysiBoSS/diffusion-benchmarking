@@ -17,7 +17,7 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver
 
 	problem_t<index_t, real_t> problem_;
 
-	std::unique_ptr<real_t[]> substrates_;
+	real_t* substrates_;
 
 	std::unique_ptr<real_t[]> bx_, cx_, ex_;
 	std::unique_ptr<real_t[]> by_, cy_, ey_;
@@ -51,4 +51,6 @@ public:
 	void save(const std::string& file) const override;
 
 	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
+
+	~least_compute_thomas_solver_s_t();
 };
