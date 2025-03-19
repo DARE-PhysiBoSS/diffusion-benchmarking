@@ -53,12 +53,12 @@ std::unique_ptr<diffusion_solver> algorithms::get_solver(const std::string& alg)
 std::unique_ptr<locally_onedimensional_solver> algorithms::try_get_adi_solver(const std::string& alg)
 {
 	auto solver = get_solver(alg);
-	auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver.release());
-	if (!adi_solver)
+	if (dynamic_cast<locally_onedimensional_solver*>(solver.get()))
 	{
-		return nullptr;
+		return std::unique_ptr<locally_onedimensional_solver>(
+			dynamic_cast<locally_onedimensional_solver*>(solver.release()));
 	}
-	return std::unique_ptr<locally_onedimensional_solver>(adi_solver);
+	return nullptr;
 }
 
 void algorithms::append_params(std::ostream& os, const nlohmann::json& params, bool header)
