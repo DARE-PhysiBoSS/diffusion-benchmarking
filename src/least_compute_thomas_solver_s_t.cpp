@@ -25,7 +25,7 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::precompute_values(std::
 
 	// compute c_i
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
-		c[s] = -this->problem_.dt * this->problem_.diffusion_coefficients[s] / (shape * shape);
+		c[s] = -1 * -this->problem_.dt * this->problem_.diffusion_coefficients[s] / (shape * shape);
 
 	// compute b_i
 	{
@@ -119,7 +119,7 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
 				(dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-				- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+				+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 					  * (dens_l | noarr::get_at<'x', 's'>(densities, i - 1, s));
 
 			// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
@@ -137,7 +137,7 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 		{
 			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
 				((dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-				 - c[s] * (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)))
+				 + c[s] * (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)))
 				* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
 
 			// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
@@ -200,13 +200,13 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
 
 				row0 = tr0;
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 0, s))), tr1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 1, s))), tr2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 2, s))), tr3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 3, s))), tr4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 4, s))), tr5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 5, s))), tr6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, 6, s))), tr7);
+				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 0, s))), tr1);
+				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 1, s))), tr2);
+				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 2, s))), tr3);
+				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 3, s))), tr4);
+				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 4, s))), tr5);
+				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 5, s))), tr6);
+				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 6, s))), tr7);
 
 				prev = row7;
 
@@ -285,14 +285,14 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
 				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
 
-				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))), tr0);
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i, s))), tr1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i + 1, s))), tr2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i + 2, s))), tr3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i + 3, s))), tr4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i + 4, s))), tr5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i + 5, s))), tr6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, i + 6, s))), tr7);
+				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))), tr0);
+				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i, s))), tr1);
+				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 1, s))), tr2);
+				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 2, s))), tr3);
+				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 3, s))), tr4);
+				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 4, s))), tr5);
+				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 5, s))), tr6);
+				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 6, s))), tr7);
 
 				prev = row7;
 
@@ -337,7 +337,7 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 			// {
 			// 	(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
 			// 		(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s))
-			// 		- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+			// 		+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 			// 			  * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i - 1, s));
 			// }
 
@@ -379,16 +379,17 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
 				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
 
-				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 9, s))), tr0);
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 8, s))), tr1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 7, s))), tr2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 6, s))), tr3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 5, s))), tr4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 4, s))), tr5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 3, s))), tr6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps(-(diag_l | noarr::get_at<'i', 's'>(e, n - 2, s))), tr7);
+				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 9, s))), tr0);
+				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 8, s))), tr1);
+				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 7, s))), tr2);
+				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 6, s))), tr3);
+				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 5, s))), tr4);
+				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 4, s))), tr5);
+				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 3, s))), tr6);
+				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 2, s))), tr7);
 
-				__m256 cs = _mm256_set1_ps(-c[s]);
+				__m256 cs = _mm256_set1_ps(c[s]);
+				
 				row7 = _mm256_mul_ps(row7, _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 1, s)));
 				row6 = _mm256_mul_ps(_mm256_fmadd_ps(row7, cs, row6),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 2, s)));
@@ -488,7 +489,7 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
 				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
 
-				__m256 cs = _mm256_set1_ps(-c[s]);
+				__m256 cs = _mm256_set1_ps(c[s]);
 
 				row7 = _mm256_mul_ps(_mm256_fmadd_ps(prev, cs, tr7),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 7, s)));
@@ -550,7 +551,7 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 			// {
 			// 	(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
 			// 		((dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s))
-			// 		 - c[s] * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i + 1, s)))
+			// 		 + c[s] * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i + 1, s)))
 			// 		* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
 			// }
 		}
@@ -575,7 +576,7 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 			{
 				(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
 					(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s))
-					- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+					+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 						  * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i - 1, s));
 			}
 
@@ -589,7 +590,7 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 			{
 				(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
 					((dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s))
-					 - c[s] * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i + 1, s)))
+					 + c[s] * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i + 1, s)))
 					* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
 			}
 		}
@@ -623,7 +624,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 					{
 						(body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, X, x, s)) =
 							(body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, X, x, s))
-							- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+							+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 								  * (body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i - 1, X, x, s));
 					}
 				}
@@ -641,7 +642,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 					{
 						(body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, X, x, s)) =
 							((body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, X, x, s))
-							 - c[s] * (body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i + 1, X, x, s)))
+							 + c[s] * (body_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i + 1, X, x, s)))
 							* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
 					}
 				}
@@ -660,7 +661,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 				{
 					(border_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, noarr::lit<0>, x, s)) =
 						(border_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, noarr::lit<0>, x, s))
-						- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+						+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 							  * (border_dens_l
 								 | noarr::get_at<'y', 'X', 'x', 's'>(densities, i - 1, noarr::lit<0>, x, s));
 				}
@@ -679,7 +680,7 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 				{
 					(border_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, noarr::lit<0>, x, s)) =
 						((border_dens_l | noarr::get_at<'y', 'X', 'x', 's'>(densities, i, noarr::lit<0>, x, s))
-						 - c[s]
+						 + c[s]
 							   * (border_dens_l
 								  | noarr::get_at<'y', 'X', 'x', 's'>(densities, i + 1, noarr::lit<0>, x, s)))
 						* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
@@ -719,7 +720,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						{
 							(body_dens_l | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, X, x, s)) =
 								(body_dens_l | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, X, x, s))
-								- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+								+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 									  * (body_dens_l
 										 | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i - 1, X, x, s));
 						}
@@ -738,7 +739,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						{
 							(body_dens_l | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, X, x, s)) =
 								((body_dens_l | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, X, x, s))
-								 - c[s]
+								 + c[s]
 									   * (body_dens_l
 										  | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i + 1, X, x, s)))
 								* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
@@ -759,7 +760,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						(border_dens_l | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, noarr::lit<0>, x, s)) =
 							(border_dens_l
 							 | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, noarr::lit<0>, x, s))
-							- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+							+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 								  * (border_dens_l
 									 | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i - 1, noarr::lit<0>, x,
 																			  s));
@@ -781,7 +782,7 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						(border_dens_l | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, noarr::lit<0>, x, s)) =
 							((border_dens_l
 							  | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i, noarr::lit<0>, x, s))
-							 - c[s]
+							 + c[s]
 								   * (border_dens_l
 									  | noarr::get_at<'z', 'y', 'X', 'x', 's'>(densities, z, i + 1, noarr::lit<0>, x,
 																			   s)))
@@ -823,7 +824,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						{
 							(body_dens_l | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, X, i, y, x, s)) =
 								(body_dens_l | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, X, i, y, x, s))
-								- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+								+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 									  * (body_dens_l
 										 | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, X, i - 1, y, x, s));
 						}
@@ -842,7 +843,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						{
 							(body_dens_l | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, X, i, y, x, s)) =
 								((body_dens_l | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, X, i, y, x, s))
-								 - c[s]
+								 + c[s]
 									   * (body_dens_l
 										  | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, X, i + 1, y, x, s)))
 								* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
@@ -863,7 +864,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						(border_dens_l | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, noarr::lit<0>, i, y, x, s)) =
 							(border_dens_l
 							 | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, noarr::lit<0>, i, y, x, s))
-							- (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
+							+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
 								  * (border_dens_l
 									 | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, noarr::lit<0>, i - 1, y, x,
 																			  s));
@@ -885,7 +886,7 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 						(border_dens_l | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, noarr::lit<0>, i, y, x, s)) =
 							((border_dens_l
 							  | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, noarr::lit<0>, i, y, x, s))
-							 - c[s]
+							 + c[s]
 								   * (border_dens_l
 									  | noarr::get_at<'X', 'z', 'y', 'x', 's'>(densities, noarr::lit<0>, i + 1, y, x,
 																			   s)))
