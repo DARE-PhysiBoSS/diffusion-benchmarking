@@ -105,18 +105,18 @@ void general_lapack_thomas_solver<real_t>::tune(const nlohmann::json& params)
 template <typename real_t>
 void general_lapack_thomas_solver<real_t>::solve_x()
 {
-	auto dens_l = get_substrates_layout() ^ noarr::merge_blocks<'y', 'z', 'm'>();
+	auto dens_l = get_substrates_layout() ^ noarr::merge_blocks<'z', 'y', 'm'>();
+	auto yz_len = dens_l | noarr::get_length<'m'>();
 
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
 	{
 #pragma omp for schedule(static, 1) nowait
-		for (index_t yz = 0; yz < this->problem_.ny * this->problem_.nz; yz += work_items_)
+		for (std::size_t yz = 0; yz < yz_len; yz += work_items_)
 		{
 			const index_t begin_offset = (dens_l | noarr::offset<'x', 'm', 's'>(0, yz, s)) / sizeof(real_t);
 
 			int info;
-			int rhs = std::min((int)work_items_, this->problem_.ny * this->problem_.nz - yz);
-
+			int rhs = yz + work_items_ > yz_len ? yz_len - yz : work_items_;
 			char c = 'N';
 			gttrs(&c, &this->problem_.nx, &rhs, dlx_[s].get(), dx_[s].get(), dux_[s].get(), du2x_[s].get(),
 				  ipivx_[s].get(), this->substrates_ + begin_offset, &this->problem_.nx, &info);
