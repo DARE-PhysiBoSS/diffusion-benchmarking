@@ -20,6 +20,24 @@ struct substrate_layouts
 	}
 
 	template <std::size_t dims, typename index_t, typename real_t>
+	static auto get_sxyz_aligned_layout(const problem_t<index_t, real_t>& problem, std::size_t alignment_size)
+	{
+		std::size_t x_size = problem.nx * problem.substrates_count * sizeof(real_t);
+		std::size_t x_size_padded = (x_size + alignment_size - 1) / alignment_size * alignment_size;
+		x_size_padded /= sizeof(real_t);
+
+		if constexpr (dims == 1)
+			return noarr::scalar<real_t>() ^ noarr::vectors<'x'>(x_size_padded)
+				   ^ noarr::into_blocks<'x', 'x', 's'>(problem.substrates_count);
+		else if constexpr (dims == 2)
+			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 'y'>(x_size_padded, problem.ny)
+				   ^ noarr::into_blocks<'x', 'x', 's'>(problem.substrates_count);
+		else if constexpr (dims == 3)
+			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 'y', 'z'>(x_size_padded, problem.ny, problem.nz)
+				   ^ noarr::into_blocks<'x', 'x', 's'>(problem.substrates_count);
+	}
+
+	template <std::size_t dims, typename index_t, typename real_t>
 	static auto get_xyzs_layout(const problem_t<index_t, real_t>& problem)
 	{
 		if constexpr (dims == 1)
