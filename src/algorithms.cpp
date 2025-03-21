@@ -10,6 +10,7 @@
 #include "least_compute_thomas_solver.h"
 #include "least_compute_thomas_solver_s.h"
 #include "least_compute_thomas_solver_s_t.h"
+#include "least_compute_thomas_solver_t.h"
 #include "least_memory_thomas_solver.h"
 #include "reference_thomas_solver.h"
 #include "simd.h"
@@ -22,6 +23,8 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 
 	solvers.emplace("ref", []() { return std::make_unique<reference_thomas_solver<real_t>>(); });
 	solvers.emplace("lstc", []() { return std::make_unique<least_compute_thomas_solver<real_t>>(); });
+	solvers.emplace("lstct", []() { return std::make_unique<least_compute_thomas_solver_t<real_t, false>>(); });
+	solvers.emplace("lstcta", []() { return std::make_unique<least_compute_thomas_solver_t<real_t, true>>(); });
 	solvers.emplace("lstcs", []() { return std::make_unique<least_compute_thomas_solver_s<real_t>>(); });
 	solvers.emplace("lstcst", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, false>>(); });
 	solvers.emplace("lstcsta", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>(); });
