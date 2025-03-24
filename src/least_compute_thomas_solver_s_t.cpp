@@ -105,9 +105,9 @@ auto least_compute_thomas_solver_s_t<real_t, aligned_x>::get_diagonal_layout(con
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -146,10 +146,10 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ b,
-									   const real_t* __restrict__ c, const real_t* __restrict__ e,
-									   const density_layout_t dens_l, const diagonal_layout_t diag_l,
-									   std::size_t work_items)
+static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ b,
+											  const real_t* __restrict__ c, const real_t* __restrict__ e,
+											  const density_layout_t dens_l, const diagonal_layout_t diag_l,
+											  std::size_t work_items)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -559,9 +559,10 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-							 const real_t* __restrict__ e, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t work_items)
+static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ b,
+									const real_t* __restrict__ c, const real_t* __restrict__ e,
+									const density_layout_t dens_l, const diagonal_layout_t diag_l,
+									std::size_t work_items)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -598,9 +599,9 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t x_tile_size)
+static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t x_tile_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
@@ -691,9 +692,9 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items, std::size_t x_tile_size)
+static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items, std::size_t x_tile_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
@@ -795,9 +796,9 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items, std::size_t x_tile_size)
+static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items, std::size_t x_tile_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'z'>();

@@ -146,9 +146,9 @@ auto get_diagonal_layout_c(const problem_t<index_t, real_t>& problem, index_t n,
 
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -192,9 +192,10 @@ void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-							 const real_t* __restrict__ e, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t work_items)
+static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ b,
+									const real_t* __restrict__ c, const real_t* __restrict__ e,
+									const density_layout_t dens_l, const diagonal_layout_t diag_l,
+									std::size_t work_items)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -235,9 +236,9 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c_,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ b,
+							 const real_t* __restrict__ c_, const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items)
 {
 	const index_t n = dens_l | noarr::get_length<'y'>();
 
@@ -322,9 +323,9 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items)
 {
 	const index_t n = dens_l | noarr::get_length<'y'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
@@ -411,9 +412,9 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
-					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+							 const real_t* __restrict__ e, const density_layout_t dens_l,
+							 const diagonal_layout_t diag_l, std::size_t work_items)
 {
 	const index_t n = dens_l | noarr::get_length<'z'>();
 	const index_t y_len = dens_l | noarr::get_length<'y'>();

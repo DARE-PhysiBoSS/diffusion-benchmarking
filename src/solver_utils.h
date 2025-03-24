@@ -17,30 +17,30 @@ public:
 	{
 		real_t x_coord = 0, y_coord = 0, z_coord = 0;
 		// 1D
-        {
+		{
 			real_t length_x = problem.dx * problem.nx;
 			real_t begin_x = -length_x / 2;
 			real_t step_x = length_x / (problem.nx - 1);
 			x_coord = begin_x + x * step_x;
 		}
-        // 2D
-        if (problem.dims >= 2)
-        {
-            real_t length_y = problem.dy * problem.ny;
-            real_t begin_y = -length_y / 2;
-            real_t step_y = length_y / (problem.ny - 1);
-            y_coord = begin_y + y * step_y;
-        }
-        // 3D
-        if (problem.dims >= 3)
-        {
-            real_t length_z = problem.dz * problem.nz;
-            real_t begin_z = -length_z / 2;
-            real_t step_z = length_z / (problem.nz - 1);
-            z_coord = begin_z + z * step_z;
-        }
+		// 2D
+		if (problem.dims >= 2)
+		{
+			real_t length_y = problem.dy * problem.ny;
+			real_t begin_y = -length_y / 2;
+			real_t step_y = length_y / (problem.ny - 1);
+			y_coord = begin_y + y * step_y;
+		}
+		// 3D
+		if (problem.dims >= 3)
+		{
+			real_t length_z = problem.dz * problem.nz;
+			real_t begin_z = -length_z / 2;
+			real_t step_z = length_z / (problem.nz - 1);
+			z_coord = begin_z + z * step_z;
+		}
 
-        return std::exp(-(x_coord * x_coord + y_coord * y_coord + z_coord * z_coord)
+		return std::exp(-(x_coord * x_coord + y_coord * y_coord + z_coord * z_coord)
 						/ (4 * problem.diffusion_coefficients[s] * time))
 			   * std::exp(-problem.decay_rates[s] * time) * problem.initial_conditions[s]
 			   / std::pow(4 * M_PI * problem.diffusion_coefficients[s] * time, problem.dims / 2);
