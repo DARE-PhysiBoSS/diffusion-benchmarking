@@ -29,8 +29,8 @@ d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
 */
 
 template <typename real_t, bool aligned_x>
-class least_compute_thomas_solver_t : public locally_onedimensional_solver,
-									  public base_solver<real_t, least_compute_thomas_solver_t<real_t, aligned_x>>
+class least_compute_thomas_solver_m : public locally_onedimensional_solver,
+									  public base_solver<real_t, least_compute_thomas_solver_m<real_t, aligned_x>>
 {
 protected:
 	using index_t = std::int32_t;
@@ -40,7 +40,7 @@ protected:
 	std::unique_ptr<real_t[]> bz_, cz_, ez_;
 
 	std::size_t work_items_;
-	std::size_t xs_tile_size_;
+	std::size_t vector_register_size_;
 	std::size_t substrate_copies_;
 	std::size_t alignment_size_;
 

@@ -389,7 +389,7 @@ void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const rea
 				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 2, s))), tr7);
 
 				__m256 cs = _mm256_set1_ps(c[s]);
-				
+
 				row7 = _mm256_mul_ps(row7, _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 1, s)));
 				row6 = _mm256_mul_ps(_mm256_fmadd_ps(row7, cs, row6),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 2, s)));
@@ -567,7 +567,7 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 	const index_t n = dens_l | noarr::get_length<'x'>();
 	const index_t m = dens_l | noarr::get_length<'m'>();
 
-#pragma omp for schedule(static, work_items) nowait collapse(2)
+#pragma omp for schedule(static) nowait collapse(2)
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		for (index_t yz = 0; yz < m; yz++)
@@ -701,9 +701,9 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
 
+#pragma omp for schedule(static) collapse(2) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-#pragma omp for schedule(static, work_items) nowait
 		for (index_t z = 0; z < z_len; z++)
 		{
 			// body
@@ -805,9 +805,9 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
 
+#pragma omp for schedule(static) collapse(2) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-#pragma omp for schedule(static, work_items) nowait
 		for (index_t y = 0; y < y_len; y++)
 		{
 			// body

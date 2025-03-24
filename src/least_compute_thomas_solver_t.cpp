@@ -90,7 +90,7 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json
 					  ? (std::size_t)params["work_items"]
 					  : (this->problem_.nx + omp_get_num_threads() - 1) / omp_get_num_threads();
 
-	vector_register_size_ = params.contains("vector_register_size") ? (std::size_t)params["vector_register_size"] : 512;
+	xs_tile_size_ = params.contains("xs_tile_size") ? (std::size_t)params["xs_tile_size"] : 48;
 
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 }
@@ -98,30 +98,7 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::initialize()
 {
-	auto lcm = [](std::size_t a, std::size_t b) {
-		std::size_t high = std::max(a, b);
-		std::size_t low = std::min(a, b);
-
-		std::size_t ret = high;
-
-		while (ret % low != 0)
-			ret += high;
-
-		return ret;
-	};
-
-	// Here we try to find the least common multiple of substrates size in bits and size of a vector register (we assume
-	// 512 bits). Thanks to this factor, we can reorganize loops in diffusion so they are automatically vectorized.
-	// Finding least common multiple is the most optimal, as the loop has no remainder wrt vector registers.
-	// But we want to limit it - when substrates size is much higher than 512 bits, multiplying it will not benefit much
-
-	std::size_t substrates_size = this->problem_.substrates_count * sizeof(real_t) * 8;
-	std::size_t multiple = lcm(substrates_size, vector_register_size_);
-
-	while (multiple > 10 * vector_register_size_ && multiple > substrates_size)
-		multiple -= substrates_size;
-
-	substrate_copies_ = multiple / substrates_size;
+	substrate_copies_ = (xs_tile_size_ + this->problem_.substrates_count - 1) / this->problem_.substrates_count;
 
 	if (this->problem_.dims >= 1)
 		precompute_values(bx_, cx_, ex_, this->problem_.dx, this->problem_.dims, this->problem_.nx, 1);
@@ -200,7 +177,7 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 	const index_t n = dens_l | noarr::get_length<'x'>();
 	const index_t m = dens_l | noarr::get_length<'m'>();
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t yz = 0; yz < m; yz++)
 	{
 		for (index_t i = 1; i < n; i++)
@@ -237,173 +214,405 @@ void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __res
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c_,
 					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+					  std::size_t work_items, std::size_t s_copies, std::size_t xs_tile_size)
 {
+	const index_t substrate_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
 
 	auto blocked_dens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>()
-						  ^ noarr::into_blocks_static<'c', 'b', 'X', 'c'>(diag_l | noarr::get_length<'c'>());
+						  ^ noarr::into_blocks_static<'c', 'b', 'x', 's'>(substrate_count * s_copies)
+						  ^ noarr::into_blocks_static<'s', 'p', 'S', 's'>(xs_tile_size);
 
 	// body
 	{
 		auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-		const index_t X_len = body_dens_l | noarr::get_length<'X'>();
-		const index_t c_len = body_dens_l | noarr::get_length<'c'>();
+		const index_t x_len = body_dens_l | noarr::get_length<'x'>();
 
 #pragma omp for schedule(static, work_items) nowait
-		for (index_t X = 0; X < X_len; X++)
+		for (index_t x = 0; x < x_len; x++)
 		{
-			for (index_t i = 1; i < n; i++)
+			// body
 			{
+				auto body_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<0>);
+				const index_t S_len = body_body_dens_l | noarr::get_length<'S'>();
+				const index_t s_len = body_body_dens_l | noarr::get_length<'s'>();
+
+				for (index_t S = 0; S < S_len; S++)
 				{
-					for (index_t c = 0; c < c_len; c++)
+					for (index_t i = 1; i < n; i++)
 					{
-						(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c)) =
-							(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c))
-							+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, c))
-								  * (body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i - 1, X, c));
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+									  * (body_body_dens_l
+										 | noarr::get_at<'y', 'x', 'S', 's'>(densities, i - 1, x, S, s));
+						}
+					}
+					for (index_t s = 0; s < s_len; s++)
+					{
+						(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s)) =
+							(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s))
+							* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+					}
+					for (index_t i = n - 2; i >= 0; i--)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								((body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								 + c_[s]
+									   * (body_body_dens_l
+										  | noarr::get_at<'y', 'x', 'S', 's'>(densities, i + 1, x, S, s)))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+						}
 					}
 				}
 			}
-			for (index_t c = 0; c < c_len; c++)
+
+			// remainder
 			{
-				(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, X, c)) =
-					(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, X, c))
-					* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, c));
-			}
-			for (index_t i = n - 2; i >= 0; i--)
-			{
-				for (index_t c = 0; c < c_len; c++)
+				auto border_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<1>);
+				const index_t S_len = border_body_dens_l | noarr::get_length<'S'>();
+				const index_t s_len = border_body_dens_l | noarr::get_length<'s'>();
+
+				for (index_t S = 0; S < S_len; S++)
 				{
-					(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c)) =
-						((body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c))
-						 + c_[c] * (body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i + 1, X, c)))
-						* (diag_l | noarr::get_at<'i', 'c'>(b, i, c));
+					for (index_t i = 1; i < n; i++)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+									  * (border_body_dens_l
+										 | noarr::get_at<'y', 'x', 'S', 's'>(densities, i - 1, x, S, s));
+						}
+					}
+					for (index_t s = 0; s < s_len; s++)
+					{
+						(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s)) =
+							(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s))
+							* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+					}
+					for (index_t i = n - 2; i >= 0; i--)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								((border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								 + c_[s]
+									   * (border_body_dens_l
+										  | noarr::get_at<'y', 'x', 'S', 's'>(densities, i + 1, x, S, s)))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+						}
+					}
 				}
 			}
 		}
 	}
 
-	// remainder
-#pragma omp single
-	{
-		auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-		const index_t c_len = border_dens_l | noarr::get_length<'c'>();
 
-		for (index_t i = 1; i < n; i++)
+	// remainder
+	{
+		auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+		const index_t x_len = body_dens_l | noarr::get_length<'x'>();
+
+#pragma omp for schedule(static, work_items) nowait
+		for (index_t x = 0; x < x_len; x++)
 		{
+			// body
 			{
-				for (index_t c = 0; c < c_len; c++)
+				auto body_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<0>);
+				const index_t S_len = body_body_dens_l | noarr::get_length<'S'>();
+				const index_t s_len = body_body_dens_l | noarr::get_length<'s'>();
+
+				for (index_t S = 0; S < S_len; S++)
 				{
-					(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c)) =
-						(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c))
-						+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, c))
-							  * (border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i - 1, noarr::lit<0>, c));
+					for (index_t i = 1; i < n; i++)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+									  * (body_body_dens_l
+										 | noarr::get_at<'y', 'x', 'S', 's'>(densities, i - 1, x, S, s));
+						}
+					}
+					for (index_t s = 0; s < s_len; s++)
+					{
+						(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s)) =
+							(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s))
+							* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+					}
+					for (index_t i = n - 2; i >= 0; i--)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								((body_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								 + c_[s]
+									   * (body_body_dens_l
+										  | noarr::get_at<'y', 'x', 'S', 's'>(densities, i + 1, x, S, s)))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+						}
+					}
 				}
 			}
-		}
-		for (index_t c = 0; c < c_len; c++)
-		{
-			(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, noarr::lit<0>, c)) =
-				(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, noarr::lit<0>, c))
-				* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, c));
-		}
-		for (index_t i = n - 2; i >= 0; i--)
-		{
-			for (index_t c = 0; c < c_len; c++)
+
+			// remainder
 			{
-				(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c)) =
-					((border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c))
-					 + c_[c] * (border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i + 1, noarr::lit<0>, c)))
-					* (diag_l | noarr::get_at<'i', 'c'>(b, i, c));
+				auto border_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<1>);
+				const index_t S_len = border_body_dens_l | noarr::get_length<'S'>();
+				const index_t s_len = border_body_dens_l | noarr::get_length<'s'>();
+
+				for (index_t S = 0; S < S_len; S++)
+				{
+					for (index_t i = 1; i < n; i++)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+									  * (border_body_dens_l
+										 | noarr::get_at<'y', 'x', 'S', 's'>(densities, i - 1, x, S, s));
+						}
+					}
+					for (index_t s = 0; s < s_len; s++)
+					{
+						(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s)) =
+							(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, n - 1, x, S, s))
+							* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+					}
+					for (index_t i = n - 2; i >= 0; i--)
+					{
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s)) =
+								((border_body_dens_l | noarr::get_at<'y', 'x', 'S', 's'>(densities, i, x, S, s))
+								 + c_[s]
+									   * (border_body_dens_l
+										  | noarr::get_at<'y', 'x', 'S', 's'>(densities, i + 1, x, S, s)))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+						}
+					}
+				}
 			}
 		}
 	}
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c_,
 					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+					  std::size_t work_items, std::size_t s_copies, std::size_t xs_tile_size)
 {
+	const index_t substrate_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 
 	auto blocked_dens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>()
-						  ^ noarr::into_blocks_static<'c', 'b', 'X', 'c'>(diag_l | noarr::get_length<'c'>());
+						  ^ noarr::into_blocks_static<'c', 'b', 'x', 's'>(substrate_count * s_copies)
+						  ^ noarr::into_blocks_static<'s', 'p', 'S', 's'>(xs_tile_size);
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t z = 0; z < z_len; z++)
 	{
 		// body
 		{
 			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-			const index_t c_len = body_dens_l | noarr::get_length<'c'>();
-			const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+			const index_t x_len = body_dens_l | noarr::get_length<'x'>();
 
-			for (index_t X = 0; X < X_len; X++)
+			for (index_t x = 0; x < x_len; x++)
 			{
-				for (index_t i = 1; i < n; i++)
+				// body
 				{
-					for (index_t s = 0; s < c_len; s++)
+					auto body_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<0>);
+					const index_t S_len = body_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = body_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
 					{
-						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s)) =
-							(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s))
-							+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
-								  * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i - 1, X, s));
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									(body_body_dens_l
+									 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (body_body_dens_l
+											 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s)) =
+								(body_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									((body_body_dens_l
+									  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									 + c_[s]
+										   * (body_body_dens_l
+											  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
 					}
 				}
-				for (index_t s = 0; s < c_len; s++)
+
+				// remainder
 				{
-					(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, X, s)) =
-						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, X, s))
-						* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
-				}
-				for (index_t i = n - 2; i >= 0; i--)
-				{
-					for (index_t s = 0; s < c_len; s++)
+					auto border_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<1>);
+					const index_t S_len = border_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = border_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
 					{
-						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s)) =
-							((body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s))
-							 + c[s] * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i + 1, X, s)))
-							* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									(border_body_dens_l
+									 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (border_body_dens_l
+											 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l
+							 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s)) =
+								(border_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									((border_body_dens_l
+									  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									 + c_[s]
+										   * (border_body_dens_l
+											  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
 					}
 				}
 			}
 		}
 
-		// border
+		// remainder
 		{
-			auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-			const index_t c_len = border_dens_l | noarr::get_length<'c'>();
+			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+			const index_t x_len = body_dens_l | noarr::get_length<'x'>();
 
-			for (index_t i = 1; i < n; i++)
+			for (index_t x = 0; x < x_len; x++)
 			{
-				for (index_t s = 0; s < c_len; s++)
+				// body
 				{
-					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s)) =
-						(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s))
-						+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
-							  * (border_dens_l
-								 | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i - 1, noarr::lit<0>, s));
+					auto body_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<0>);
+					const index_t S_len = body_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = body_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
+					{
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									(body_body_dens_l
+									 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (body_body_dens_l
+											 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s)) =
+								(body_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									((body_body_dens_l
+									  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									 + c_[s]
+										   * (body_body_dens_l
+											  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
+					}
 				}
-			}
-			for (index_t s = 0; s < c_len; s++)
-			{
-				(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, noarr::lit<0>, s)) =
-					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, noarr::lit<0>, s))
-					* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
-			}
-			for (index_t i = n - 2; i >= 0; i--)
-			{
-				for (index_t s = 0; s < c_len; s++)
+
+				// remainder
 				{
-					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s)) =
-						((border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s))
-						 + c[s]
-							   * (border_dens_l
-								  | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i + 1, noarr::lit<0>, s)))
-						* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+					auto border_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<1>);
+					const index_t S_len = border_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = border_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
+					{
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									(border_body_dens_l
+									 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (border_body_dens_l
+											 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l
+							 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s)) =
+								(border_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s)) =
+									((border_body_dens_l
+									  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i, x, S, s))
+									 + c_[s]
+										   * (border_body_dens_l
+											  | noarr::get_at<'z', 'y', 'x', 'S', 's'>(densities, z, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
+					}
 				}
 			}
 		}
@@ -411,88 +620,213 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
+void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c_,
 					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
-					  std::size_t work_items)
+					  std::size_t work_items, std::size_t s_copies, std::size_t xs_tile_size)
 {
+	const index_t substrate_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'z'>();
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 
 	auto blocked_dens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>()
-						  ^ noarr::into_blocks_static<'c', 'b', 'X', 'c'>(diag_l | noarr::get_length<'c'>());
+						  ^ noarr::into_blocks_static<'c', 'b', 'x', 's'>(substrate_count * s_copies)
+						  ^ noarr::into_blocks_static<'s', 'p', 'S', 's'>(xs_tile_size);
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t y = 0; y < y_len; y++)
 	{
 		// body
 		{
 			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-			const index_t c_len = body_dens_l | noarr::get_length<'c'>();
-			const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+			const index_t x_len = body_dens_l | noarr::get_length<'x'>();
 
-			for (index_t X = 0; X < X_len; X++)
+			for (index_t x = 0; x < x_len; x++)
 			{
-				for (index_t i = 1; i < n; i++)
+				// body
 				{
-					for (index_t s = 0; s < c_len; s++)
+					auto body_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<0>);
+					const index_t S_len = body_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = body_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
 					{
-						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s)) =
-							(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s))
-							+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
-								  * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i - 1, y, X, s));
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									(body_body_dens_l
+									 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (body_body_dens_l
+											 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s)) =
+								(body_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									((body_body_dens_l
+									  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									 + c_[s]
+										   * (body_body_dens_l
+											  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
 					}
 				}
-				for (index_t s = 0; s < c_len; s++)
+
+				// remainder
 				{
-					(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, X, s)) =
-						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, X, s))
-						* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
-				}
-				for (index_t i = n - 2; i >= 0; i--)
-				{
-					for (index_t s = 0; s < c_len; s++)
+					auto border_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<1>);
+					const index_t S_len = border_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = border_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
 					{
-						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s)) =
-							((body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s))
-							 + c[s] * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i + 1, y, X, s)))
-							* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									(border_body_dens_l
+									 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (border_body_dens_l
+											 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l
+							 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s)) =
+								(border_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									((border_body_dens_l
+									  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									 + c_[s]
+										   * (border_body_dens_l
+											  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
 					}
 				}
 			}
 		}
 
-		// border
+		// remainder
 		{
-			auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-			const index_t c_len = border_dens_l | noarr::get_length<'c'>();
+			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+			const index_t x_len = body_dens_l | noarr::get_length<'x'>();
 
-			for (index_t i = 1; i < n; i++)
+			for (index_t x = 0; x < x_len; x++)
 			{
-				for (index_t s = 0; s < c_len; s++)
+				// body
 				{
-					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s)) =
-						(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s))
-						+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
-							  * (border_dens_l
-								 | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i - 1, y, noarr::lit<0>, s));
+					auto body_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<0>);
+					const index_t S_len = body_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = body_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
+					{
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									(body_body_dens_l
+									 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (body_body_dens_l
+											 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(body_body_dens_l | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s)) =
+								(body_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(body_body_dens_l | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									((body_body_dens_l
+									  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									 + c_[s]
+										   * (body_body_dens_l
+											  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
+					}
 				}
-			}
-			for (index_t s = 0; s < c_len; s++)
-			{
-				(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, noarr::lit<0>, s)) =
-					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, noarr::lit<0>, s))
-					* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
-			}
-			for (index_t i = n - 2; i >= 0; i--)
-			{
-				for (index_t s = 0; s < c_len; s++)
+
+				// remainder
 				{
-					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s)) =
-						((border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s))
-						 + c[s]
-							   * (border_dens_l
-								  | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i + 1, y, noarr::lit<0>, s)))
-						* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+					auto border_body_dens_l = body_dens_l ^ noarr::fix<'p'>(noarr::lit<1>);
+					const index_t S_len = border_body_dens_l | noarr::get_length<'S'>();
+					const index_t s_len = border_body_dens_l | noarr::get_length<'s'>();
+
+					for (index_t S = 0; S < S_len; S++)
+					{
+						for (index_t i = 1; i < n; i++)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									(border_body_dens_l
+									 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+										  * (border_body_dens_l
+											 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i - 1, x, S, s));
+							}
+						}
+						for (index_t s = 0; s < s_len; s++)
+						{
+							(border_body_dens_l
+							 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s)) =
+								(border_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, n - 1, x, S, s))
+								* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+						}
+						for (index_t i = n - 2; i >= 0; i--)
+						{
+							for (index_t s = 0; s < s_len; s++)
+							{
+								(border_body_dens_l
+								 | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s)) =
+									((border_body_dens_l
+									  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i, x, S, s))
+									 + c_[s]
+										   * (border_body_dens_l
+											  | noarr::get_at<'y', 'z', 'x', 'S', 's'>(densities, y, i + 1, x, S, s)))
+									* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+							}
+						}
+					}
 				}
 			}
 		}
@@ -532,14 +866,14 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve_y()
 #pragma omp parallel
 		solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
 								  get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_),
-								  work_items_);
+								  work_items_, substrate_copies_, xs_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
 		solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
 								  get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_),
-								  work_items_);
+								  work_items_, substrate_copies_, xs_tile_size_);
 	}
 }
 
@@ -549,7 +883,7 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve_z()
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
 							  get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_),
-							  work_items_);
+							  work_items_, substrate_copies_, xs_tile_size_);
 }
 
 template <typename real_t, bool aligned_x>
@@ -571,7 +905,8 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 #pragma omp barrier
 			solve_slice_y_2d<index_t>(
 				this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
-				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_), work_items_);
+				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_), work_items_,
+				substrate_copies_, xs_tile_size_);
 		}
 	}
 	else if (this->problem_.dims == 3)
@@ -584,11 +919,13 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 #pragma omp barrier
 			solve_slice_y_3d<index_t>(
 				this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
-				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_), work_items_);
+				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_), work_items_,
+				substrate_copies_, xs_tile_size_);
 #pragma omp barrier
 			solve_slice_z_3d<index_t>(
 				this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
-				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_), work_items_);
+				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_), work_items_,
+				substrate_copies_, xs_tile_size_);
 		}
 	}
 }
