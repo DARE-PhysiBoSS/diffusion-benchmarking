@@ -145,7 +145,7 @@ void full_lapack_solver<real_t>::solve()
 #pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
 	{
-		const index_t begin_offset = (dens_l | noarr::offset<'x', 'y', 'z', 's'>(0, 0, 0, s)) / sizeof(real_t);
+		const std::size_t begin_offset = (dens_l | noarr::offset<'x', 'y', 'z', 's'>(0, 0, 0, s)) / sizeof(real_t);
 
 		int info;
 		int n = this->problem_.nx * this->problem_.ny * this->problem_.nz;

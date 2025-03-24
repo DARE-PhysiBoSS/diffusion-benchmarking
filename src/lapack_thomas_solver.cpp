@@ -103,7 +103,7 @@ void lapack_thomas_solver<real_t>::initialize()
 template <typename real_t>
 void lapack_thomas_solver<real_t>::tune(const nlohmann::json& params)
 {
-	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"] : 1;
+	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"] : 10;
 }
 
 template <typename real_t>
@@ -117,7 +117,7 @@ void lapack_thomas_solver<real_t>::solve_x()
 #pragma omp for schedule(static) nowait
 		for (std::size_t yz = 0; yz < yz_len; yz += work_items_)
 		{
-			const index_t begin_offset = (dens_l | noarr::offset<'x', 'm', 's'>(0, yz, s)) / sizeof(real_t);
+			const std::size_t begin_offset = (dens_l | noarr::offset<'x', 'm', 's'>(0, yz, s)) / sizeof(real_t);
 
 			int info;
 			int rhs = yz + work_items_ > yz_len ? yz_len - yz : work_items_;
