@@ -74,7 +74,7 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::prepare(const max_probl
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_s_t<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
-	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 1;
+	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 }
 
