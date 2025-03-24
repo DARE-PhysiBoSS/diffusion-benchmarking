@@ -1,7 +1,6 @@
 {
-    "work_items": 1,
-    "inner_iterations": 500,
-    "outer_iterations": 10,
+    "inner_iterations": 10,
+    "outer_iterations": 5,
     "warmup_time": 1,
     "benchmark_kind": "per_dimension"
 }
