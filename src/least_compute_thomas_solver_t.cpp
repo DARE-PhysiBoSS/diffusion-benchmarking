@@ -239,51 +239,82 @@ void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__
 					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
 					  std::size_t work_items)
 {
-	// const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
-	// const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-	const index_t c_len = diag_l | noarr::get_length<'c'>();
+	auto blocked_dens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>()
+						  ^ noarr::into_blocks_static<'c', 'b', 'X', 'c'>(diag_l | noarr::get_length<'c'>());
 
-	auto ddens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>() ^ noarr::into_blocks<'c', 'X', 'c'>(c_len);
-	const index_t X_len = ddens_l | noarr::get_length<'X'>();
-
-	for (index_t i = 1; i < n; i++)
+	// body
 	{
+		auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
+		const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+		const index_t c_len = body_dens_l | noarr::get_length<'c'>();
+
 #pragma omp for schedule(static, work_items) nowait
 		for (index_t X = 0; X < X_len; X++)
 		{
+			for (index_t i = 1; i < n; i++)
+			{
+				{
+					for (index_t c = 0; c < c_len; c++)
+					{
+						(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c)) =
+							(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c))
+							+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, c))
+								  * (body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i - 1, X, c));
+					}
+				}
+			}
 			for (index_t c = 0; c < c_len; c++)
 			{
-				(ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c)) =
-					(ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c))
-					+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, c))
-						  * (ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, i - 1, X, c));
+				(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, X, c)) =
+					(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, X, c))
+					* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, c));
+			}
+			for (index_t i = n - 2; i >= 0; i--)
+			{
+				for (index_t c = 0; c < c_len; c++)
+				{
+					(body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c)) =
+						((body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c))
+						 + c_[c] * (body_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i + 1, X, c)))
+						* (diag_l | noarr::get_at<'i', 'c'>(b, i, c));
+				}
 			}
 		}
 	}
 
-#pragma omp for schedule(static, work_items) nowait
-	for (index_t X = 0; X < X_len; X++)
+	// remainder
+#pragma omp single
 	{
+		auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+		const index_t c_len = border_dens_l | noarr::get_length<'c'>();
+
+		for (index_t i = 1; i < n; i++)
+		{
+			{
+				for (index_t c = 0; c < c_len; c++)
+				{
+					(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c)) =
+						(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c))
+						+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, c))
+							  * (border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i - 1, noarr::lit<0>, c));
+				}
+			}
+		}
 		for (index_t c = 0; c < c_len; c++)
 		{
-			(ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, X, c)) =
-				(ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, X, c))
+			(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, noarr::lit<0>, c)) =
+				(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, n - 1, noarr::lit<0>, c))
 				* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, c));
 		}
-	}
-
-	for (index_t i = n - 2; i >= 0; i--)
-	{
-#pragma omp for schedule(static, work_items) nowait
-		for (index_t X = 0; X < X_len; X++)
+		for (index_t i = n - 2; i >= 0; i--)
 		{
 			for (index_t c = 0; c < c_len; c++)
 			{
-				(ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c)) =
-					((ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, X, c))
-					 + c_[c] * (ddens_l | noarr::get_at<'y', 'X', 'c'>(densities, i + 1, X, c)))
+				(border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c)) =
+					((border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i, noarr::lit<0>, c))
+					 + c_[c] * (border_dens_l | noarr::get_at<'y', 'X', 'c'>(densities, i + 1, noarr::lit<0>, c)))
 					* (diag_l | noarr::get_at<'i', 'c'>(b, i, c));
 			}
 		}
@@ -295,45 +326,83 @@ void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__
 					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
 					  std::size_t work_items)
 {
-	// const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
-	// const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-	const index_t c_len = diag_l | noarr::get_length<'c'>();
-
-	auto ddens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>() ^ noarr::into_blocks<'c', 'X', 'c'>(c_len);
-	const index_t X_len = ddens_l | noarr::get_length<'X'>();
+	auto blocked_dens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>()
+						  ^ noarr::into_blocks_static<'c', 'b', 'X', 'c'>(diag_l | noarr::get_length<'c'>());
 
 #pragma omp for schedule(static, work_items) nowait
 	for (index_t z = 0; z < z_len; z++)
 	{
-		for (index_t X = 0; X < X_len; X++)
+		// body
 		{
+			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
+			const index_t c_len = body_dens_l | noarr::get_length<'c'>();
+			const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+
+			for (index_t X = 0; X < X_len; X++)
+			{
+				for (index_t i = 1; i < n; i++)
+				{
+					for (index_t s = 0; s < c_len; s++)
+					{
+						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s)) =
+							(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s))
+							+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+								  * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i - 1, X, s));
+					}
+				}
+				for (index_t s = 0; s < c_len; s++)
+				{
+					(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, X, s)) =
+						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, X, s))
+						* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+				}
+				for (index_t i = n - 2; i >= 0; i--)
+				{
+					for (index_t s = 0; s < c_len; s++)
+					{
+						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s)) =
+							((body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s))
+							 + c[s] * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i + 1, X, s)))
+							* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+					}
+				}
+			}
+		}
+
+		// border
+		{
+			auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+			const index_t c_len = border_dens_l | noarr::get_length<'c'>();
+
 			for (index_t i = 1; i < n; i++)
 			{
 				for (index_t s = 0; s < c_len; s++)
 				{
-					(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s)) =
-						(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s))
+					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s)) =
+						(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s))
 						+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
-							  * (ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i - 1, X, s));
+							  * (border_dens_l
+								 | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i - 1, noarr::lit<0>, s));
 				}
 			}
 			for (index_t s = 0; s < c_len; s++)
 			{
-				(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, X, s)) =
-					(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, X, s))
+				(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, noarr::lit<0>, s)) =
+					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, n - 1, noarr::lit<0>, s))
 					* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
 			}
-
 			for (index_t i = n - 2; i >= 0; i--)
 			{
 				for (index_t s = 0; s < c_len; s++)
 				{
-					(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s)) =
-						((ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, X, s))
-						 + c[s] * (ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i + 1, X, s)))
+					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s)) =
+						((border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i, noarr::lit<0>, s))
+						 + c[s]
+							   * (border_dens_l
+								  | noarr::get_at<'z', 'y', 'X', 'c'>(densities, z, i + 1, noarr::lit<0>, s)))
 						* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
 				}
 			}
@@ -346,46 +415,83 @@ void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__
 					  const real_t* __restrict__ e, const density_layout_t dens_l, const diagonal_layout_t diag_l,
 					  std::size_t work_items)
 {
-	// const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'z'>();
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
-	// const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-	const index_t c_len = diag_l | noarr::get_length<'c'>();
-
-	auto ddens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>() ^ noarr::into_blocks<'c', 'X', 'c'>(c_len);
-	const index_t X_len = ddens_l | noarr::get_length<'X'>();
+	auto blocked_dens_l = dens_l ^ noarr::merge_blocks<'x', 's', 'c'>()
+						  ^ noarr::into_blocks_static<'c', 'b', 'X', 'c'>(diag_l | noarr::get_length<'c'>());
 
 #pragma omp for schedule(static, work_items) nowait
 	for (index_t y = 0; y < y_len; y++)
 	{
-		for (index_t X = 0; X < X_len; X++)
+		// body
 		{
+			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
+			const index_t c_len = body_dens_l | noarr::get_length<'c'>();
+			const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+
+			for (index_t X = 0; X < X_len; X++)
+			{
+				for (index_t i = 1; i < n; i++)
+				{
+					for (index_t s = 0; s < c_len; s++)
+					{
+						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s)) =
+							(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s))
+							+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
+								  * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i - 1, y, X, s));
+					}
+				}
+				for (index_t s = 0; s < c_len; s++)
+				{
+					(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, X, s)) =
+						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, X, s))
+						* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
+				}
+				for (index_t i = n - 2; i >= 0; i--)
+				{
+					for (index_t s = 0; s < c_len; s++)
+					{
+						(body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s)) =
+							((body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s))
+							 + c[s] * (body_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i + 1, y, X, s)))
+							* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
+					}
+				}
+			}
+		}
+
+		// border
+		{
+			auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+			const index_t c_len = border_dens_l | noarr::get_length<'c'>();
+
 			for (index_t i = 1; i < n; i++)
 			{
 				for (index_t s = 0; s < c_len; s++)
 				{
-					(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s)) =
-						(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s))
+					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s)) =
+						(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s))
 						+ (diag_l | noarr::get_at<'i', 'c'>(e, i - 1, s))
-							  * (ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i - 1, y, X, s));
+							  * (border_dens_l
+								 | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i - 1, y, noarr::lit<0>, s));
 				}
 			}
-
 			for (index_t s = 0; s < c_len; s++)
 			{
-				(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, X, s)) =
-					(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, X, s))
+				(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, noarr::lit<0>, s)) =
+					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, n - 1, y, noarr::lit<0>, s))
 					* (diag_l | noarr::get_at<'i', 'c'>(b, n - 1, s));
 			}
-
 			for (index_t i = n - 2; i >= 0; i--)
 			{
 				for (index_t s = 0; s < c_len; s++)
 				{
-					(ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s)) =
-						((ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, X, s))
-						 + c[s] * (ddens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i + 1, y, X, s)))
+					(border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s)) =
+						((border_dens_l | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i, y, noarr::lit<0>, s))
+						 + c[s]
+							   * (border_dens_l
+								  | noarr::get_at<'z', 'y', 'X', 'c'>(densities, i + 1, y, noarr::lit<0>, s)))
 						* (diag_l | noarr::get_at<'i', 'c'>(b, i, s));
 				}
 			}
