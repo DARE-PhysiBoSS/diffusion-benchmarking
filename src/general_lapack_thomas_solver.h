@@ -4,6 +4,23 @@
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
 
+/*
+The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
+For dimension x:
+a_i  == -dt*diffusion_coefs/dx^2                              1 <= i <= n
+b_1  == 1 + dt*decay_rates/dims + dt*diffusion_coefs/dx^2
+b_i  == 1 + dt*decay_rates/dims + 2*dt*diffusion_coefs/dx^2   1 <  i <  n
+b_n  == 1 + dt*decay_rates/dims + dt*diffusion_coefs/dx^2
+c_i  == -dt*diffusion_coefs/dx^2                              1 <= i <= n
+d_i  == current diffusion rates
+For dimension y/z (if they exist):
+substitute dx accordingly to dy/dz
+
+This algorithm uses LAPACK gttrf+gttrs routines to solve the tridiagonal matrix system.
+NOTE: Currently, only x dimension is implemented. The y and z dimensions require transposition of the matrix, because
+LAPACK uses column-major order.
+*/
+
 template <typename real_t>
 class general_lapack_thomas_solver : public locally_onedimensional_solver,
 									 public base_solver<real_t, general_lapack_thomas_solver<real_t>>

@@ -1,9 +1,5 @@
 #include "least_compute_thomas_solver.h"
 
-#include <array>
-#include <cstddef>
-#include <omp.h>
-
 template <typename real_t>
 void least_compute_thomas_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c,
 															std::unique_ptr<real_t[]>& e, index_t shape, index_t dims,
@@ -67,14 +63,6 @@ void least_compute_thomas_solver<real_t>::precompute_values(std::unique_ptr<real
 }
 
 template <typename real_t>
-void least_compute_thomas_solver<real_t>::tune(const nlohmann::json& params)
-{
-	work_items_ = params.contains("work_items")
-					  ? (std::size_t)params["work_items"]
-					  : (this->problem_.nx + omp_get_num_threads() - 1) / omp_get_num_threads();
-}
-
-template <typename real_t>
 void least_compute_thomas_solver<real_t>::initialize()
 {
 	if (this->problem_.dims >= 1)
@@ -94,14 +82,14 @@ auto least_compute_thomas_solver<real_t>::get_diagonal_layout(const problem_t<in
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
 							 const real_t* __restrict__ e, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t work_items)
+							 const diagonal_layout_t diag_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
 
 	for (index_t i = 1; i < n; i++)
 	{
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 		for (index_t s = 0; s < substrates_count; s++)
 		{
 			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
@@ -113,7 +101,7 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 		}
 	}
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		(dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) =
@@ -124,7 +112,7 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 
 	for (index_t i = n - 2; i >= 0; i--)
 	{
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 		for (index_t s = 0; s < substrates_count; s++)
 		{
 			(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
@@ -140,14 +128,13 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ b,
 									const real_t* __restrict__ c, const real_t* __restrict__ e,
-									const density_layout_t dens_l, const diagonal_layout_t diag_l,
-									std::size_t work_items)
+									const density_layout_t dens_l, const diagonal_layout_t diag_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
 	const index_t m = dens_l | noarr::get_length<'m'>();
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t yz = 0; yz < m; yz++)
 	{
 		for (index_t i = 1; i < n; i++)
@@ -184,7 +171,7 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
 							 const real_t* __restrict__ e, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t work_items)
+							 const diagonal_layout_t diag_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
@@ -192,7 +179,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 
 	for (index_t i = 1; i < n; i++)
 	{
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 		for (index_t x = 0; x < x_len; x++)
 		{
 			for (index_t s = 0; s < substrates_count; s++)
@@ -205,7 +192,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 		}
 	}
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t x = 0; x < x_len; x++)
 	{
 		for (index_t s = 0; s < substrates_count; s++)
@@ -218,7 +205,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 
 	for (index_t i = n - 2; i >= 0; i--)
 	{
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 		for (index_t x = 0; x < x_len; x++)
 		{
 			for (index_t s = 0; s < substrates_count; s++)
@@ -235,14 +222,14 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
 							 const real_t* __restrict__ e, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t work_items)
+							 const diagonal_layout_t diag_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t z = 0; z < z_len; z++)
 	{
 		for (index_t i = 1; i < n; i++)
@@ -288,7 +275,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ b, const real_t* __restrict__ c,
 							 const real_t* __restrict__ e, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t work_items)
+							 const diagonal_layout_t diag_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'z'>();
@@ -297,7 +284,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 
 	for (index_t i = 1; i < n; i++)
 	{
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) collapse(2) nowait
 		for (index_t y = 0; y < y_len; y++)
 		{
 			for (index_t x = 0; x < x_len; x++)
@@ -313,7 +300,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 		}
 	}
 
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) collapse(2) nowait
 	for (index_t y = 0; y < y_len; y++)
 	{
 		for (index_t x = 0; x < x_len; x++)
@@ -329,7 +316,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 
 	for (index_t i = n - 2; i >= 0; i--)
 	{
-#pragma omp for schedule(static, work_items) nowait
+#pragma omp for schedule(static) collapse(2) nowait
 		for (index_t y = 0; y < y_len; y++)
 		{
 			for (index_t x = 0; x < x_len; x++)
@@ -353,21 +340,21 @@ void least_compute_thomas_solver<real_t>::solve_x()
 	{
 #pragma omp parallel
 		solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
-								  get_diagonal_layout(this->problem_, this->problem_.nx), work_items_);
+								  get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
 		solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-										 get_diagonal_layout(this->problem_, this->problem_.nx), work_items_);
+										 get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
 		solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-										 get_diagonal_layout(this->problem_, this->problem_.nx), work_items_);
+										 get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 }
 
@@ -378,13 +365,13 @@ void least_compute_thomas_solver<real_t>::solve_y()
 	{
 #pragma omp parallel
 		solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
-								  get_diagonal_layout(this->problem_, this->problem_.ny), work_items_);
+								  get_diagonal_layout(this->problem_, this->problem_.ny));
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
 		solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
-								  get_diagonal_layout(this->problem_, this->problem_.ny), work_items_);
+								  get_diagonal_layout(this->problem_, this->problem_.ny));
 	}
 }
 
@@ -393,7 +380,7 @@ void least_compute_thomas_solver<real_t>::solve_z()
 {
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
-							  get_diagonal_layout(this->problem_, this->problem_.nz), work_items_);
+							  get_diagonal_layout(this->problem_, this->problem_.nz));
 }
 
 template <typename real_t>
@@ -403,7 +390,7 @@ void least_compute_thomas_solver<real_t>::solve()
 	{
 #pragma omp parallel
 		solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
-								  get_diagonal_layout(this->problem_, this->problem_.nx), work_items_);
+								  get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 2)
 	{
@@ -411,10 +398,10 @@ void least_compute_thomas_solver<real_t>::solve()
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-											 get_diagonal_layout(this->problem_, this->problem_.nx), work_items_);
+											 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
 			solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
-									  get_diagonal_layout(this->problem_, this->problem_.ny), work_items_);
+									  get_diagonal_layout(this->problem_, this->problem_.ny));
 		}
 	}
 	else if (this->problem_.dims == 3)
@@ -423,13 +410,13 @@ void least_compute_thomas_solver<real_t>::solve()
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-											 get_diagonal_layout(this->problem_, this->problem_.nx), work_items_);
+											 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
 			solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
-									  get_diagonal_layout(this->problem_, this->problem_.ny), work_items_);
+									  get_diagonal_layout(this->problem_, this->problem_.ny));
 #pragma omp barrier
 			solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
-									  get_diagonal_layout(this->problem_, this->problem_.nz), work_items_);
+									  get_diagonal_layout(this->problem_, this->problem_.nz));
 		}
 	}
 }

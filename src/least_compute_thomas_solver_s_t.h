@@ -5,7 +5,35 @@
 #include "tridiagonal_solver.h"
 
 /*
-The same as least_compute_thomas_solver_s_t, but x is aligned.
+The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
+For dimension x:
+a_i  == -dt*diffusion_coefs/dx^2                              1 <= i <= n
+b_1  == 1 + dt*decay_rates/dims + dt*diffusion_coefs/dx^2
+b_i  == 1 + dt*decay_rates/dims + 2*dt*diffusion_coefs/dx^2   1 <  i <  n
+b_n  == 1 + dt*decay_rates/dims + dt*diffusion_coefs/dx^2
+c_i  == -dt*diffusion_coefs/dx^2                              1 <= i <= n
+d_i  == current diffusion rates
+For dimension y/z (if they exist):
+substitute dx accordingly to dy/dz
+
+Since the matrix is constant for multiple right hand sides, we precompute its values in the following way:
+a_i' = c_i' = -a_i
+b_1'  == 1/b_1
+b_i'  == 1/(b_i - a_i'*c_i'*b_(i-1)')                         1 <  i <= n
+e_i   == a_i'*b_(i-1)'                                        1 <  i <= n
+
+Then, the forward substitution is as follows (n FMAs):
+d_i'  == d_i + e_i*d_(i-1)                                    1 <  i <= n
+The backpropagation (n multiplications + n FMAs):
+d_n'' == d_n'/b_n'
+d_i'' == (d_i' + c_i*d_(i+1)'')*b_i'                          n >  i >= 1
+
+Optimizations:
+- Precomputed a_i, b_i', e_i
+- Substrate dimension is now outermost, so longer systems can fit into the same cache size
+- Aligned memory for x dimension (tunable by 'alignment_size')
+- Better temporal locality of memory accesses - x dimension is divided into smaller tiles (tunable by 'x_tile_size') and
+y/z dimensions are solved alongside tiled x dimension
 */
 
 template <typename real_t, bool aligned_x>
@@ -18,7 +46,6 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver,
 	std::unique_ptr<real_t[]> by_, cy_, ey_;
 	std::unique_ptr<real_t[]> bz_, cz_, ez_;
 
-	std::size_t work_items_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 

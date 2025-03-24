@@ -3,14 +3,18 @@
 #include "base_solver.h"
 #include "substrate_layouts.h"
 
+/*
+The diffusion is the problem of solving 3/5/7-diagonal matrix system, depending on the dimensionality of the problem.
+
+This algorithm uses LAPACK pbtrf+pbtrs routines to solve the X-diagonal matrix system.
+*/
+
 template <typename real_t>
 class full_lapack_solver : public base_solver<real_t, full_lapack_solver<real_t>>
 {
 	using index_t = std::int32_t;
 
 	std::vector<std::unique_ptr<real_t[]>> ab_;
-
-	std::size_t work_items_;
 
 	void precompute_values();
 
@@ -20,8 +24,6 @@ class full_lapack_solver : public base_solver<real_t, full_lapack_solver<real_t>
 
 public:
 	auto get_substrates_layout() const { return substrate_layouts::get_xyzs_layout<3>(this->problem_); }
-
-	void tune(const nlohmann::json& params) override;
 
 	void initialize() override;
 

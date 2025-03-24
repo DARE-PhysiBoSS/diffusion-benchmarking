@@ -138,17 +138,11 @@ void full_lapack_solver<real_t>::initialize()
 }
 
 template <typename real_t>
-void full_lapack_solver<real_t>::tune(const nlohmann::json& params)
-{
-	work_items_ = params.contains("work_items") ? (std::size_t)params["work_items"] : 1;
-}
-
-template <typename real_t>
 void full_lapack_solver<real_t>::solve()
 {
 	auto dens_l = get_substrates_layout();
 
-#pragma omp for schedule(static, 1) nowait
+#pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
 	{
 		const index_t begin_offset = (dens_l | noarr::offset<'x', 'y', 'z', 's'>(0, 0, 0, s)) / sizeof(real_t);

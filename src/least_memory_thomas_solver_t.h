@@ -26,6 +26,13 @@ d_i'  == d_i - e_i*d_(i-1)                                    1 <  i <= n
 The backpropagation (2n multiplications + n subtractions):
 d_n'' == d_n'/b_n'
 d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
+
+Optimizations:
+- Precomputed a_i, b_1, b_i'
+- Minimized memory accesses by computing e_i on the fly
+- Aligned memory for x dimension (tunable by 'alignment_size')
+- Better temporal locality of memory accesses - x dimension is divided into smaller tiles (tunable by 'x_tile_size') and
+y/z dimensions are solved alongside tiled x dimension
 */
 
 template <typename real_t, bool aligned_x>
@@ -39,7 +46,6 @@ class least_memory_thomas_solver_t : public locally_onedimensional_solver,
 	std::unique_ptr<real_t[]> ay_, b1y_, by_;
 	std::unique_ptr<real_t[]> az_, b1z_, bz_;
 
-	std::size_t work_items_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 

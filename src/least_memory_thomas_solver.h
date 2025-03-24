@@ -26,6 +26,10 @@ d_i'  == d_i - e_i*d_(i-1)                                    1 <  i <= n
 The backpropagation (2n multiplications + n subtractions):
 d_n'' == d_n'/b_n'
 d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
+
+Optimizations:
+- Precomputed a_i, b_1, b_i'
+- Minimized memory accesses by computing e_i on the fly
 */
 
 template <typename real_t>
@@ -39,11 +43,9 @@ class least_memory_thomas_solver : public locally_onedimensional_solver,
 	std::unique_ptr<real_t[]> ay_, b1y_, by_;
 	std::unique_ptr<real_t[]> az_, b1z_, bz_;
 
-	std::size_t work_items_;
-
 	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
-	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0, std::unique_ptr<real_t[]>& b,
+	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b1, std::unique_ptr<real_t[]>& b,
 						   index_t shape, index_t dims, index_t n);
 
 public:
@@ -52,8 +54,6 @@ public:
 	{
 		return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
-
-	void tune(const nlohmann::json& params) override;
 
 	void initialize() override;
 

@@ -114,7 +114,7 @@ void lapack_thomas_solver<real_t>::solve_x()
 
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
 	{
-#pragma omp for schedule(static, 1) nowait
+#pragma omp for schedule(static) nowait
 		for (std::size_t yz = 0; yz < yz_len; yz += work_items_)
 		{
 			const index_t begin_offset = (dens_l | noarr::offset<'x', 'm', 's'>(0, yz, s)) / sizeof(real_t);
