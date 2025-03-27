@@ -51,7 +51,7 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver,
 	std::size_t alignment_size_;
 
 	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
-						   index_t shape, index_t dims, index_t n);
+						   index_t shape, index_t dims, index_t n, bool prepended_e);
 
 	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
