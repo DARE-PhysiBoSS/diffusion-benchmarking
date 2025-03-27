@@ -642,7 +642,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 					// actual forward substitution (vectorized)
 					{
-						auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, i, s)));
+						auto e_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(e, i, s)));
 
 						rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
 						static_for<1, simd_length>()(
@@ -680,7 +680,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 					// the rest of forward part
 					{
-						auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, full_n - simd_length, s)));
+						auto e_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(e, full_n - simd_length, s)));
 
 						rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
 						for (index_t v = 1; v < remainder_work; v++)
@@ -693,7 +693,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					// the begin of backward part
 					{
 						auto cs = hn::Set(d, c[s]);
-						auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, full_n - simd_length, s)));
+						auto b_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(b, full_n - simd_length, s)));
 
 						rows[simd_length - 1] =
 							hn::Mul(rows[simd_length - 1], hn::BroadcastLane<simd_length - 1>(b_tmp));
@@ -734,7 +734,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					// backward propagation
 					{
 						auto cs = hn::Set(d, c[s]);
-						auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
+						auto b_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
 
 						rows[simd_length - 1] = hn::Mul(hn::MulAdd(prev, cs, rows[simd_length - 1]),
 														hn::BroadcastLane<simd_length - 1>(b_tmp));
