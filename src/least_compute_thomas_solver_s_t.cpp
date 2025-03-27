@@ -322,10 +322,9 @@ void transpose(hn::Vec<hn::FixedTag<double, 4>> rows[4])
 	rows[3] = hn::InterleaveUpper(d, t2, t3);
 }
 
-template <typename real_t>
-void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
+void transpose(hn::Vec<hn::FixedTag<float, 2>> rows[2])
 {
-	hn::FixedTag<real_t, 2> d;
+	hn::FixedTag<float, 2> d;
 
 	auto t0 = hn::InterleaveLower(d, rows[0], rows[1]);
 	auto t1 = hn::InterleaveUpper(d, rows[0], rows[1]);
@@ -334,136 +333,16 @@ void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
 	rows[1] = t1;
 }
 
-#define TRANSPOSE_8x8__(row0, row1, row2, row3, row4, row5, row6, row7)                                                \
-	do                                                                                                                 \
-	{                                                                                                                  \
-		__m256 t0 = _mm256_unpacklo_ps(row0, row1);                                                                    \
-		__m256 t1 = _mm256_unpackhi_ps(row0, row1);                                                                    \
-		__m256 t2 = _mm256_unpacklo_ps(row2, row3);                                                                    \
-		__m256 t3 = _mm256_unpackhi_ps(row2, row3);                                                                    \
-		__m256 t4 = _mm256_unpacklo_ps(row4, row5);                                                                    \
-		__m256 t5 = _mm256_unpackhi_ps(row4, row5);                                                                    \
-		__m256 t6 = _mm256_unpacklo_ps(row6, row7);                                                                    \
-		__m256 t7 = _mm256_unpackhi_ps(row6, row7);                                                                    \
-                                                                                                                       \
-		__m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44);                                                                  \
-		__m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);                                                                  \
-		__m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);                                                                  \
-		__m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);                                                                  \
-		__m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);                                                                  \
-		__m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);                                                                  \
-		__m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);                                                                  \
-		__m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);                                                                  \
-                                                                                                                       \
-		row0 = _mm256_permute2f128_ps(tt0, tt4, 0x20);                                                                 \
-		row1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);                                                                 \
-		row2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);                                                                 \
-		row3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);                                                                 \
-		row4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);                                                                 \
-		row5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);                                                                 \
-		row6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);                                                                 \
-		row7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);                                                                 \
-	} while (0)
+void transpose(hn::Vec<hn::FixedTag<double, 2>> rows[2])
+{
+	hn::FixedTag<double, 2> d;
 
-#define TRANSPOSE_8x8_(row0, row1, row2, row3, row4, row5, row6, row7)                                                 \
-	do                                                                                                                 \
-	{                                                                                                                  \
-		__m256 t0 = _mm256_permute2f128_ps(row0, row4, 0x20);                                                          \
-		__m256 t1 = _mm256_permute2f128_ps(row1, row5, 0x20);                                                          \
-		__m256 t2 = _mm256_permute2f128_ps(row2, row6, 0x20);                                                          \
-		__m256 t3 = _mm256_permute2f128_ps(row3, row7, 0x20);                                                          \
-		__m256 t4 = _mm256_permute2f128_ps(row0, row4, 0x31);                                                          \
-		__m256 t5 = _mm256_permute2f128_ps(row1, row5, 0x31);                                                          \
-		__m256 t6 = _mm256_permute2f128_ps(row2, row6, 0x31);                                                          \
-		__m256 t7 = _mm256_permute2f128_ps(row3, row7, 0x31);                                                          \
-                                                                                                                       \
-		__m256 tt0 = _mm256_unpacklo_ps(t0, t2);                                                                       \
-		__m256 tt1 = _mm256_unpacklo_ps(t1, t3);                                                                       \
-		__m256 tt2 = _mm256_unpackhi_ps(t0, t2);                                                                       \
-		__m256 tt3 = _mm256_unpackhi_ps(t1, t3);                                                                       \
-		__m256 tt4 = _mm256_unpacklo_ps(t4, t6);                                                                       \
-		__m256 tt5 = _mm256_unpacklo_ps(t5, t7);                                                                       \
-		__m256 tt6 = _mm256_unpackhi_ps(t4, t6);                                                                       \
-		__m256 tt7 = _mm256_unpackhi_ps(t5, t7);                                                                       \
-                                                                                                                       \
-		row0 = _mm256_unpacklo_ps(tt0, tt1);                                                                           \
-		row1 = _mm256_unpackhi_ps(tt0, tt1);                                                                           \
-		row2 = _mm256_unpacklo_ps(tt2, tt3);                                                                           \
-		row3 = _mm256_unpackhi_ps(tt2, tt3);                                                                           \
-		row4 = _mm256_unpacklo_ps(tt4, tt5);                                                                           \
-		row5 = _mm256_unpackhi_ps(tt4, tt5);                                                                           \
-		row6 = _mm256_unpacklo_ps(tt6, tt7);                                                                           \
-		row7 = _mm256_unpackhi_ps(tt6, tt7);                                                                           \
-	} while (0)
+	auto t0 = hn::InterleaveLower(d, rows[0], rows[1]);
+	auto t1 = hn::InterleaveUpper(d, rows[0], rows[1]);
 
-#define TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7)                                                  \
-	do                                                                                                                 \
-	{                                                                                                                  \
-		auto t0 = hn::InterleaveEvenBlocks(d, row0, row4);                                                             \
-		auto t1 = hn::InterleaveEvenBlocks(d, row1, row5);                                                             \
-		auto t2 = hn::InterleaveEvenBlocks(d, row2, row6);                                                             \
-		auto t3 = hn::InterleaveEvenBlocks(d, row3, row7);                                                             \
-		auto t4 = hn::InterleaveOddBlocks(d, row0, row4);                                                              \
-		auto t5 = hn::InterleaveOddBlocks(d, row1, row5);                                                              \
-		auto t6 = hn::InterleaveOddBlocks(d, row2, row6);                                                              \
-		auto t7 = hn::InterleaveOddBlocks(d, row3, row7);                                                              \
-                                                                                                                       \
-		auto u0 = hn::InterleaveLower(d, t0, t2);                                                                      \
-		auto u1 = hn::InterleaveLower(d, t1, t3);                                                                      \
-		auto u2 = hn::InterleaveUpper(d, t0, t2);                                                                      \
-		auto u3 = hn::InterleaveUpper(d, t1, t3);                                                                      \
-		auto u4 = hn::InterleaveLower(d, t4, t6);                                                                      \
-		auto u5 = hn::InterleaveLower(d, t5, t7);                                                                      \
-		auto u6 = hn::InterleaveUpper(d, t4, t6);                                                                      \
-		auto u7 = hn::InterleaveUpper(d, t5, t7);                                                                      \
-                                                                                                                       \
-		row0 = hn::InterleaveLower(d, u0, u1);                                                                         \
-		row1 = hn::InterleaveUpper(d, u0, u1);                                                                         \
-		row2 = hn::InterleaveLower(d, u2, u3);                                                                         \
-		row3 = hn::InterleaveUpper(d, u2, u3);                                                                         \
-		row4 = hn::InterleaveLower(d, u4, u5);                                                                         \
-		row5 = hn::InterleaveUpper(d, u4, u5);                                                                         \
-		row6 = hn::InterleaveLower(d, u6, u7);                                                                         \
-		row7 = hn::InterleaveUpper(d, u6, u7);                                                                         \
-	} while (0)
-
-
-#define TRANSPOSE_8x8_____(row0, row1, row2, row3, row4, row5, row6, row7)                                             \
-	do                                                                                                                 \
-	{                                                                                                                  \
-		auto t0 = hn::InterleaveLower(d, row0, row1);                                                                  \
-		auto t1 = hn::InterleaveUpper(d, row0, row1);                                                                  \
-		auto t2 = hn::InterleaveLower(d, row2, row3);                                                                  \
-		auto t3 = hn::InterleaveUpper(d, row2, row3);                                                                  \
-		auto t4 = hn::InterleaveLower(d, row4, row5);                                                                  \
-		auto t5 = hn::InterleaveUpper(d, row4, row5);                                                                  \
-		auto t6 = hn::InterleaveLower(d, row6, row7);                                                                  \
-		auto t7 = hn::InterleaveUpper(d, row6, row7);                                                                  \
-                                                                                                                       \
-		auto u0 = hn::InterleaveLower(d, t0, t2);                                                                      \
-		auto u1 = hn::InterleaveLower(d, t1, t3);                                                                      \
-		auto u2 = hn::InterleaveUpper(d, t0, t2);                                                                      \
-		auto u3 = hn::InterleaveUpper(d, t1, t3);                                                                      \
-		auto u4 = hn::InterleaveLower(d, t4, t6);                                                                      \
-		auto u5 = hn::InterleaveLower(d, t5, t7);                                                                      \
-		auto u6 = hn::InterleaveUpper(d, t4, t6);                                                                      \
-		auto u7 = hn::InterleaveUpper(d, t5, t7);                                                                      \
-                                                                                                                       \
-		row0 = hn::InterleaveEvenBlocks(d, u0, u4);                                                                    \
-		row1 = hn::InterleaveEvenBlocks(d, u1, u5);                                                                    \
-		row2 = hn::InterleaveEvenBlocks(d, u2, u6);                                                                    \
-		row3 = hn::InterleaveEvenBlocks(d, u3, u7);                                                                    \
-		row4 = hn::InterleaveOddBlocks(d, u0, u4);                                                                     \
-		row5 = hn::InterleaveOddBlocks(d, u1, u5);                                                                     \
-		row6 = hn::InterleaveOddBlocks(d, u2, u6);                                                                     \
-		row7 = hn::InterleaveOddBlocks(d, u3, u7);                                                                     \
-	} while (0)
-
-#define TRANSPOSE_8x8____(row0, row1, row2, row3, row4, row5, row6, row7)                                              \
-	do                                                                                                                 \
-	{                                                                                                                  \
-	} while (0)
-
+	rows[0] = t0;
+	rows[1] = t1;
+}
 
 template <int First, int Last>
 struct static_for
@@ -517,7 +396,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
 
-	using simd_tag = hn::FixedTag<real_t, 8>;
+	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;
 	constexpr index_t simd_length = hn::Lanes(d);
 	using simd_t = hn::Vec<simd_tag>;
@@ -1286,7 +1165,7 @@ least_compute_thomas_solver_s_t<real_t, aligned_x>::~least_compute_thomas_solver
 }
 
 template class least_compute_thomas_solver_s_t<float, false>;
-// template class least_compute_thomas_solver_s_t<double, false>;
+template class least_compute_thomas_solver_s_t<double, false>;
 
 template class least_compute_thomas_solver_s_t<float, true>;
-// template class least_compute_thomas_solver_s_t<double, true>;
+template class least_compute_thomas_solver_s_t<double, true>;
