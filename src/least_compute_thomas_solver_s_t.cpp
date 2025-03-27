@@ -218,7 +218,7 @@ void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
 	rows[1] = t1;
 }
 
-#define TRANSPOSE_8x8__(row0, row1, row2, row3, row4, row5, row6, row7)                                                 \
+#define TRANSPOSE_8x8__(row0, row1, row2, row3, row4, row5, row6, row7)                                                \
 	do                                                                                                                 \
 	{                                                                                                                  \
 		__m256 t0 = _mm256_unpacklo_ps(row0, row1);                                                                    \
@@ -249,7 +249,7 @@ void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
 		row7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);                                                                 \
 	} while (0)
 
-#define TRANSPOSE_8x8_(row0, row1, row2, row3, row4, row5, row6, row7)                                                \
+#define TRANSPOSE_8x8_(row0, row1, row2, row3, row4, row5, row6, row7)                                                 \
 	do                                                                                                                 \
 	{                                                                                                                  \
 		__m256 t0 = _mm256_permute2f128_ps(row0, row4, 0x20);                                                          \
@@ -280,7 +280,7 @@ void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
 		row7 = _mm256_unpackhi_ps(tt6, tt7);                                                                           \
 	} while (0)
 
-#define TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7)                                               \
+#define TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7)                                                  \
 	do                                                                                                                 \
 	{                                                                                                                  \
 		auto t0 = hn::InterleaveEvenBlocks(d, row0, row4);                                                             \
@@ -350,202 +350,6 @@ void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
 
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_x_2d_and_3d_transpose2(real_t* __restrict__ densities, const real_t* __restrict__ b,
-											   const real_t* __restrict__ c, const real_t* __restrict__ e,
-											   const density_layout_t dens_l, const diagonal_layout_t diag_l)
-{
-	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
-	const index_t n = dens_l | noarr::get_length<'x'>();
-	const index_t m = dens_l | noarr::get_length<'m'>();
-
-#pragma omp for schedule(static) nowait collapse(2)
-	for (index_t s = 0; s < substrates_count; s++)
-	{
-		for (index_t yz = 0; yz < m; yz += 8)
-		{
-			// begin
-			__m256 prev;
-			{
-				__m256 row0 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, 0, s)));
-				__m256 row1 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)));
-				__m256 row2 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)));
-				__m256 row3 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)));
-				__m256 row4 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)));
-				__m256 row5 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)));
-				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)));
-				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)));
-
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 0, s))), row1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 1, s))), row2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 2, s))), row3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 3, s))), row4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 4, s))), row5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 5, s))), row6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 6, s))), row7);
-
-				prev = row7;
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, 0, s)), row0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)), row1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)), row2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)), row3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)), row4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)), row5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)), row6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)), row7);
-			}
-
-			for (index_t i = 8; i < n - 8; i += 8)
-			{
-				__m256 row0 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)));
-				__m256 row1 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
-				__m256 row2 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
-				__m256 row3 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
-				__m256 row4 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
-				__m256 row5 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
-				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
-				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
-
-				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))), row0);
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i, s))), row1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 1, s))), row2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 2, s))), row3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 3, s))), row4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 4, s))), row5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 5, s))), row6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 6, s))), row7);
-
-				prev = row7;
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)), row0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)), row1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)), row2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)), row3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)), row4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)), row5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)), row6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)), row7);
-			}
-
-			// for (index_t i = 1; i < n; i++)
-			// {
-			// 	(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
-			// 		(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s))
-			// 		+ (diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))
-			// 			  * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i - 1, s));
-			// }
-
-			// fuse last
-			{
-				__m256 row0 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 8, s)));
-				__m256 row1 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)));
-				__m256 row2 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)));
-				__m256 row3 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)));
-				__m256 row4 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)));
-				__m256 row5 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)));
-				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)));
-				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)));
-
-				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 9, s))), row0);
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 8, s))), row1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 7, s))), row2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 6, s))), row3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 5, s))), row4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 4, s))), row5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 3, s))), row6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 2, s))), row7);
-
-				__m256 cs = _mm256_set1_ps(c[s]);
-
-				row7 = _mm256_mul_ps(row7, _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 1, s)));
-				row6 = _mm256_mul_ps(_mm256_fmadd_ps(row7, cs, row6),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 2, s)));
-				row5 = _mm256_mul_ps(_mm256_fmadd_ps(row6, cs, row5),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 3, s)));
-				row4 = _mm256_mul_ps(_mm256_fmadd_ps(row5, cs, row4),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 4, s)));
-				row3 = _mm256_mul_ps(_mm256_fmadd_ps(row4, cs, row3),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 5, s)));
-				row2 = _mm256_mul_ps(_mm256_fmadd_ps(row3, cs, row2),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 6, s)));
-				row1 = _mm256_mul_ps(_mm256_fmadd_ps(row2, cs, row1),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 7, s)));
-				row0 = _mm256_mul_ps(_mm256_fmadd_ps(row1, cs, row0),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, n - 8, s)));
-
-				prev = row0;
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 8, s)), row0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)), row1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)), row2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)), row3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)), row4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)), row5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)), row6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)), row7);
-			}
-
-			// {
-			// 	(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 1, s)) =
-			// 		(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 1, s))
-			// 		* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-			// }
-
-			for (index_t i = n - 16; i >= 0; i -= 8)
-			{
-				__m256 row0 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)));
-				__m256 row1 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
-				__m256 row2 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
-				__m256 row3 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
-				__m256 row4 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
-				__m256 row5 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
-				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
-				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
-
-				__m256 cs = _mm256_set1_ps(c[s]);
-
-				row7 = _mm256_mul_ps(_mm256_fmadd_ps(prev, cs, row7),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 7, s)));
-				row6 = _mm256_mul_ps(_mm256_fmadd_ps(row7, cs, row6),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 6, s)));
-				row5 = _mm256_mul_ps(_mm256_fmadd_ps(row6, cs, row5),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 5, s)));
-				row4 = _mm256_mul_ps(_mm256_fmadd_ps(row5, cs, row4),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 4, s)));
-				row3 = _mm256_mul_ps(_mm256_fmadd_ps(row4, cs, row3),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 3, s)));
-				row2 = _mm256_mul_ps(_mm256_fmadd_ps(row3, cs, row2),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 2, s)));
-				row1 = _mm256_mul_ps(_mm256_fmadd_ps(row2, cs, row1),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 1, s)));
-				row0 = _mm256_mul_ps(_mm256_fmadd_ps(row1, cs, row0),
-									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 0, s)));
-
-				prev = row0;
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)), row0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)), row1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)), row2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)), row3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)), row4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)), row5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)), row6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)), row7);
-			}
-
-			// for (index_t i = n - 2; i >= 0; i--)
-			// {
-			// 	(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)) =
-			// 		((dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s))
-			// 		 + c[s] * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i + 1, s)))
-			// 		* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
-			// }
-		}
-	}
-}
-
-
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ b,
 											  const real_t* __restrict__ c, const real_t* __restrict__ e,
 											  const density_layout_t dens_l, const diagonal_layout_t diag_l)
@@ -554,7 +358,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 	const index_t n = dens_l | noarr::get_length<'x'>();
 	const index_t m = dens_l | noarr::get_length<'m'>();
 
-	using simd_tag = hn::ScalableTag<real_t>;
+	using simd_tag = hn::FixedTag<real_t, 8>;
 	simd_tag d;
 	constexpr index_t simd_length = hn::Lanes(d);
 	using simd_t = hn::Vec<simd_tag>;
@@ -654,167 +458,128 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 			// begin
 			simd_t prev;
 			{
-				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, 0, s)));
-				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)));
-				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)));
-				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)));
-				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)));
-				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)));
-				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)));
-				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)));
+				simd_t rows[simd_length];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				for (index_t r = 0; r < simd_length; r++)
+					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, 0, s)));
+
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, 0, s)));
 
-				row1 = hn::MulAdd(row0, hn::BroadcastLane<0>(e_tmp), row1);
-				row2 = hn::MulAdd(row1, hn::BroadcastLane<1>(e_tmp), row2);
-				row3 = hn::MulAdd(row2, hn::BroadcastLane<2>(e_tmp), row3);
-				row4 = hn::MulAdd(row3, hn::BroadcastLane<3>(e_tmp), row4);
-				row5 = hn::MulAdd(row4, hn::BroadcastLane<4>(e_tmp), row5);
-				row6 = hn::MulAdd(row5, hn::BroadcastLane<5>(e_tmp), row6);
-				row7 = hn::MulAdd(row6, hn::BroadcastLane<6>(e_tmp), row7);
+				rows[1] = hn::MulAdd(rows[0], hn::BroadcastLane<0>(e_tmp), rows[1]);
+				rows[2] = hn::MulAdd(rows[1], hn::BroadcastLane<1>(e_tmp), rows[2]);
+				rows[3] = hn::MulAdd(rows[2], hn::BroadcastLane<2>(e_tmp), rows[3]);
+				rows[4] = hn::MulAdd(rows[3], hn::BroadcastLane<3>(e_tmp), rows[4]);
+				rows[5] = hn::MulAdd(rows[4], hn::BroadcastLane<4>(e_tmp), rows[5]);
+				rows[6] = hn::MulAdd(rows[5], hn::BroadcastLane<5>(e_tmp), rows[6]);
+				rows[7] = hn::MulAdd(rows[6], hn::BroadcastLane<6>(e_tmp), rows[7]);
 
-				prev = row7;
+				prev = rows[7];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
-				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, 0, s)));
-				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)));
-				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)));
-				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)));
-				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)));
-				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)));
-				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)));
-				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)));
+
+				for (index_t r = 0; r < simd_length; r++)
+					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, 0, s)));
 			}
 
 			for (index_t i = simd_length; i < n - simd_length; i += simd_length)
 			{
-				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
-				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
-				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
-				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
-				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
-				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
-				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
-				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+				simd_t rows[simd_length];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				for (index_t r = 0; r < simd_length; r++)
+					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
+
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, i - 1, s)));
 
-				row0 = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), row0);
-				row1 = hn::MulAdd(row0, hn::BroadcastLane<1>(e_tmp), row1);
-				row2 = hn::MulAdd(row1, hn::BroadcastLane<2>(e_tmp), row2);
-				row3 = hn::MulAdd(row2, hn::BroadcastLane<3>(e_tmp), row3);
-				row4 = hn::MulAdd(row3, hn::BroadcastLane<4>(e_tmp), row4);
-				row5 = hn::MulAdd(row4, hn::BroadcastLane<5>(e_tmp), row5);
-				row6 = hn::MulAdd(row5, hn::BroadcastLane<6>(e_tmp), row6);
-				row7 = hn::MulAdd(row6, hn::BroadcastLane<7>(e_tmp), row7);
+				rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
+				rows[1] = hn::MulAdd(rows[0], hn::BroadcastLane<0>(e_tmp), rows[1]);
+				rows[2] = hn::MulAdd(rows[1], hn::BroadcastLane<1>(e_tmp), rows[2]);
+				rows[3] = hn::MulAdd(rows[2], hn::BroadcastLane<2>(e_tmp), rows[3]);
+				rows[4] = hn::MulAdd(rows[3], hn::BroadcastLane<3>(e_tmp), rows[4]);
+				rows[5] = hn::MulAdd(rows[4], hn::BroadcastLane<4>(e_tmp), rows[5]);
+				rows[6] = hn::MulAdd(rows[5], hn::BroadcastLane<5>(e_tmp), rows[6]);
+				rows[7] = hn::MulAdd(rows[6], hn::BroadcastLane<6>(e_tmp), rows[7]);
 
-				prev = row7;
+				prev = rows[7];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
-				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
-				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
-				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
-				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
-				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
-				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
-				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
-				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+
+				for (index_t r = 0; r < simd_length; r++)
+					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
 			}
 
 			// fuse last
 			{
-				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, n - 8, s)));
-				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)));
-				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)));
-				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)));
-				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)));
-				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)));
-				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)));
-				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)));
+				simd_t rows[simd_length];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				for (index_t r = 0; r < simd_length; r++)
+					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, n - 8, s)));
 
-				auto tmp_e = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, n - 9, s)));
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
-				row0 = hn::MulAdd(prev, hn::BroadcastLane<0>(tmp_e), row0);
-				row1 = hn::MulAdd(row0, hn::BroadcastLane<1>(tmp_e), row1);
-				row2 = hn::MulAdd(row1, hn::BroadcastLane<2>(tmp_e), row2);
-				row3 = hn::MulAdd(row2, hn::BroadcastLane<3>(tmp_e), row3);
-				row4 = hn::MulAdd(row3, hn::BroadcastLane<4>(tmp_e), row4);
-				row5 = hn::MulAdd(row4, hn::BroadcastLane<5>(tmp_e), row5);
-				row6 = hn::MulAdd(row5, hn::BroadcastLane<6>(tmp_e), row6);
-				row7 = hn::MulAdd(row6, hn::BroadcastLane<7>(tmp_e), row7);
+				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, n - 9, s)));
+
+				rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
+				rows[1] = hn::MulAdd(rows[0], hn::BroadcastLane<0>(e_tmp), rows[1]);
+				rows[2] = hn::MulAdd(rows[1], hn::BroadcastLane<1>(e_tmp), rows[2]);
+				rows[3] = hn::MulAdd(rows[2], hn::BroadcastLane<2>(e_tmp), rows[3]);
+				rows[4] = hn::MulAdd(rows[3], hn::BroadcastLane<3>(e_tmp), rows[4]);
+				rows[5] = hn::MulAdd(rows[4], hn::BroadcastLane<4>(e_tmp), rows[5]);
+				rows[6] = hn::MulAdd(rows[5], hn::BroadcastLane<5>(e_tmp), rows[6]);
+				rows[7] = hn::MulAdd(rows[6], hn::BroadcastLane<6>(e_tmp), rows[7]);
 
 				auto cs = hn::Set(d, c[s]);
 				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, n - 8, s)));
 
-				row7 = hn::Mul(row7, hn::BroadcastLane<7>(b_tmp));
-				row6 = hn::Mul(hn::MulAdd(row7, cs, row6), hn::BroadcastLane<6>(b_tmp));
-				row5 = hn::Mul(hn::MulAdd(row6, cs, row5), hn::BroadcastLane<5>(b_tmp));
-				row4 = hn::Mul(hn::MulAdd(row5, cs, row4), hn::BroadcastLane<4>(b_tmp));
-				row3 = hn::Mul(hn::MulAdd(row4, cs, row3), hn::BroadcastLane<3>(b_tmp));
-				row2 = hn::Mul(hn::MulAdd(row3, cs, row2), hn::BroadcastLane<2>(b_tmp));
-				row1 = hn::Mul(hn::MulAdd(row2, cs, row1), hn::BroadcastLane<1>(b_tmp));
-				row0 = hn::Mul(hn::MulAdd(row1, cs, row0), hn::BroadcastLane<0>(b_tmp));
+				rows[7] = hn::Mul(rows[7], hn::BroadcastLane<7>(b_tmp));
+				rows[6] = hn::Mul(hn::MulAdd(rows[7], cs, rows[6]), hn::BroadcastLane<6>(b_tmp));
+				rows[5] = hn::Mul(hn::MulAdd(rows[6], cs, rows[5]), hn::BroadcastLane<5>(b_tmp));
+				rows[4] = hn::Mul(hn::MulAdd(rows[5], cs, rows[4]), hn::BroadcastLane<4>(b_tmp));
+				rows[3] = hn::Mul(hn::MulAdd(rows[4], cs, rows[3]), hn::BroadcastLane<3>(b_tmp));
+				rows[2] = hn::Mul(hn::MulAdd(rows[3], cs, rows[2]), hn::BroadcastLane<2>(b_tmp));
+				rows[1] = hn::Mul(hn::MulAdd(rows[2], cs, rows[1]), hn::BroadcastLane<1>(b_tmp));
+				rows[0] = hn::Mul(hn::MulAdd(rows[1], cs, rows[0]), hn::BroadcastLane<0>(b_tmp));
 
-				prev = row0;
+				prev = rows[0];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
-				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, n - 8, s)));
-				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)));
-				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)));
-				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)));
-				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)));
-				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)));
-				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)));
-				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)));
+				for (index_t r = 0; r < simd_length; r++)
+					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, n - 8, s)));
 			}
 
 			for (index_t i = n - 16; i >= 0; i -= 8)
 			{
-				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
-				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
-				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
-				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
-				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
-				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
-				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
-				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+				simd_t rows[simd_length];
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+				for (index_t r = 0; r < simd_length; r++)
+					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
+
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
 				auto cs = hn::Set(d, c[s]);
 				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
 
+				rows[7] = hn::Mul(hn::MulAdd(prev, cs, rows[7]), hn::BroadcastLane<6>(b_tmp));
+				rows[6] = hn::Mul(hn::MulAdd(rows[7], cs, rows[6]), hn::BroadcastLane<6>(b_tmp));
+				rows[5] = hn::Mul(hn::MulAdd(rows[6], cs, rows[5]), hn::BroadcastLane<5>(b_tmp));
+				rows[4] = hn::Mul(hn::MulAdd(rows[5], cs, rows[4]), hn::BroadcastLane<4>(b_tmp));
+				rows[3] = hn::Mul(hn::MulAdd(rows[4], cs, rows[3]), hn::BroadcastLane<3>(b_tmp));
+				rows[2] = hn::Mul(hn::MulAdd(rows[3], cs, rows[2]), hn::BroadcastLane<2>(b_tmp));
+				rows[1] = hn::Mul(hn::MulAdd(rows[2], cs, rows[1]), hn::BroadcastLane<1>(b_tmp));
+				rows[0] = hn::Mul(hn::MulAdd(rows[1], cs, rows[0]), hn::BroadcastLane<0>(b_tmp));
 
-				row7 = hn::Mul(hn::MulAdd(prev, cs, row7), hn::BroadcastLane<6>(b_tmp));
-				row6 = hn::Mul(hn::MulAdd(row7, cs, row6), hn::BroadcastLane<6>(b_tmp));
-				row5 = hn::Mul(hn::MulAdd(row6, cs, row5), hn::BroadcastLane<5>(b_tmp));
-				row4 = hn::Mul(hn::MulAdd(row5, cs, row4), hn::BroadcastLane<4>(b_tmp));
-				row3 = hn::Mul(hn::MulAdd(row4, cs, row3), hn::BroadcastLane<3>(b_tmp));
-				row2 = hn::Mul(hn::MulAdd(row3, cs, row2), hn::BroadcastLane<2>(b_tmp));
-				row1 = hn::Mul(hn::MulAdd(row2, cs, row1), hn::BroadcastLane<1>(b_tmp));
-				row0 = hn::Mul(hn::MulAdd(row1, cs, row0), hn::BroadcastLane<0>(b_tmp));
+				prev = rows[0];
 
-				prev = row0;
+				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
 
-				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
-
-				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
-				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
-				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
-				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
-				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
-				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
-				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
-				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+				for (index_t r = 0; r < simd_length; r++)
+					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
 			}
 		}
 	}
