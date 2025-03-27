@@ -143,8 +143,7 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
-template <typename SFINAE = hn::Vec<hn::FixedTag<float, 8>>>
-void transpose(hn::Vec<hn::FixedTag<float, 8>> rows[8])
+HWY_INLINE void transpose(hn::Vec<hn::FixedTag<float, 8>> rows[8])
 {
 	hn::FixedTag<float, 8> d;
 
@@ -463,7 +462,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, 0, s)));
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, 0, s)));
 
@@ -477,7 +477,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				prev = rows[7];
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 
 				for (index_t r = 0; r < simd_length; r++)
@@ -491,7 +492,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, i - 1, s)));
 
@@ -506,7 +508,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				prev = rows[7];
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+				transpose(rows);
 
 
 				for (index_t r = 0; r < simd_length; r++)
@@ -520,7 +522,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, n - 8, s)));
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, n - 9, s)));
 
@@ -547,7 +550,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				prev = rows[0];
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 				for (index_t r = 0; r < simd_length; r++)
 					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, n - 8, s)));
@@ -560,7 +564,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 				auto cs = hn::Set(d, c[s]);
 				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
@@ -576,7 +581,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				prev = rows[0];
 
-				TRANSPOSE_8x8(rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7]);
+
+				transpose(rows);
 
 				for (index_t r = 0; r < simd_length; r++)
 					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
