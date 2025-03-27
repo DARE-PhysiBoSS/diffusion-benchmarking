@@ -42,16 +42,16 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver,
 {
 	using index_t = std::int32_t;
 
-	std::unique_ptr<real_t[]> bx_, cx_, ex_;
-	std::unique_ptr<real_t[]> by_, cy_, ey_;
-	std::unique_ptr<real_t[]> bz_, cz_, ez_;
+	real_t *bx_, *cx_, *ex_;
+	real_t *by_, *cy_, *ey_;
+	real_t *bz_, *cz_, *ez_;
 
 	bool vectorized_x_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 
-	void precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c, std::unique_ptr<real_t[]>& e,
-						   index_t shape, index_t dims, index_t n, bool prepended_e);
+	void precompute_values(real_t*& b, real_t*& c, real_t*& e, index_t shape, index_t dims, index_t n,
+						   bool prepended_e);
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
@@ -78,4 +78,6 @@ public:
 	void solve_z() override;
 
 	void solve() override;
+
+	~least_compute_thomas_solver_s_t();
 };

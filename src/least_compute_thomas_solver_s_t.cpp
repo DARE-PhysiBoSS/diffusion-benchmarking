@@ -10,19 +10,28 @@
 namespace hn = hwy::HWY_NAMESPACE;
 
 template <typename real_t, bool aligned_x>
-void least_compute_thomas_solver_s_t<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t[]>& b,
-																		   std::unique_ptr<real_t[]>& c,
-																		   std::unique_ptr<real_t[]>& e, index_t shape,
-																		   index_t dims, index_t n, bool prepended_e)
+void least_compute_thomas_solver_s_t<real_t, aligned_x>::precompute_values(real_t*& b, real_t*& c, real_t*& e,
+																		   index_t shape, index_t dims, index_t n,
+																		   bool prepended_e)
 {
 	auto layout = get_diagonal_layout(this->problem_, n);
 
-	b = std::make_unique<real_t[]>((layout | noarr::get_size()) * sizeof(real_t));
-	e = std::make_unique<real_t[]>((layout | noarr::get_size()) * sizeof(real_t));
-	c = std::make_unique<real_t[]>(this->problem_.substrates_count);
 
-	auto b_diag = noarr::make_bag(layout, b.get());
-	auto e_diag = noarr::make_bag(layout, e.get());
+	if (aligned_x)
+	{
+		b = (real_t*)std::aligned_alloc(alignment_size_, (layout | noarr::get_size()));
+		e = (real_t*)std::aligned_alloc(alignment_size_, (layout | noarr::get_size()));
+	}
+	else
+	{
+		b = (real_t*)std::malloc((layout | noarr::get_size()));
+		e = (real_t*)std::malloc((layout | noarr::get_size()));
+	}
+
+	c = (real_t*)std::malloc(this->problem_.substrates_count * sizeof(real_t));
+
+	auto b_diag = noarr::make_bag(layout, b);
+	auto e_diag = noarr::make_bag(layout, e);
 
 	// compute c_i
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
@@ -1132,23 +1141,22 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_x()
 		if (this->problem_.dims == 1)
 		{
 #pragma omp parallel
-			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+			solve_slice_x_1d<index_t>(this->substrates_, bx_, cx_, ex_, get_substrates_layout<1>(),
 									  get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
 		else if (this->problem_.dims == 2)
 		{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+			solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_, cx_, ex_,
 													   get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 													   get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
 		else if (this->problem_.dims == 3)
 		{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
-													   get_substrates_layout<3>()
-														   ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-													   get_diagonal_layout(this->problem_, this->problem_.nx));
+			solve_slice_x_2d_and_3d_transpose<index_t>(
+				this->substrates_, bx_, cx_, ex_, get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+				get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
 	}
 	else
@@ -1156,20 +1164,20 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_x()
 		if (this->problem_.dims == 1)
 		{
 #pragma omp parallel
-			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+			solve_slice_x_1d<index_t>(this->substrates_, bx_, cx_, ex_, get_substrates_layout<1>(),
 									  get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
 		else if (this->problem_.dims == 2)
 		{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 											 get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
 		else if (this->problem_.dims == 3)
 		{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 											 get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
@@ -1182,13 +1190,13 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_y()
 	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
+		solve_slice_y_2d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<2>(),
 								  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
+		solve_slice_y_3d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<3>(),
 								  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
 	}
 }
@@ -1197,7 +1205,7 @@ template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_z()
 {
 #pragma omp parallel
-	solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
+	solve_slice_z_3d<index_t>(this->substrates_, bz_, cz_, ez_, get_substrates_layout<3>(),
 							  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_);
 }
 
@@ -1207,18 +1215,18 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+		solve_slice_x_1d<index_t>(this->substrates_, bx_, cx_, ex_, get_substrates_layout<1>(),
 								  get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
 		{
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 											 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
-			solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
+			solve_slice_y_2d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<2>(),
 									  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
 		}
 	}
@@ -1226,14 +1234,14 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 											 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
-			solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
+			solve_slice_y_3d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<3>(),
 									  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
 #pragma omp barrier
-			solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
+			solve_slice_z_3d<index_t>(this->substrates_, bz_, cz_, ez_, get_substrates_layout<3>(),
 									  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_);
 		}
 	}
@@ -1241,8 +1249,41 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 
 template <typename real_t, bool aligned_x>
 least_compute_thomas_solver_s_t<real_t, aligned_x>::least_compute_thomas_solver_s_t(bool vectorized_x)
-	: vectorized_x_(vectorized_x)
+	: bx_(nullptr),
+	  cx_(nullptr),
+	  ex_(nullptr),
+	  by_(nullptr),
+	  cy_(nullptr),
+	  ey_(nullptr),
+	  bz_(nullptr),
+	  cz_(nullptr),
+	  ez_(nullptr),
+	  vectorized_x_(vectorized_x)
 {}
+
+
+template <typename real_t, bool aligned_x>
+least_compute_thomas_solver_s_t<real_t, aligned_x>::~least_compute_thomas_solver_s_t()
+{
+	if (bx_)
+	{
+		std::free(bx_);
+		std::free(cx_);
+		std::free(ex_);
+	}
+	if (by_)
+	{
+		std::free(by_);
+		std::free(cy_);
+		std::free(ey_);
+	}
+	if (bz_)
+	{
+		std::free(bz_);
+		std::free(cz_);
+		std::free(ez_);
+	}
+}
 
 template class least_compute_thomas_solver_s_t<float, false>;
 // template class least_compute_thomas_solver_s_t<double, false>;
