@@ -2,6 +2,12 @@
 
 #include <cstddef>
 #include <immintrin.h>
+#include <iostream>
+
+#include <hwy/highway.h>
+
+
+namespace hn = hwy::HWY_NAMESPACE;
 
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_s_t<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t[]>& b,
@@ -137,10 +143,216 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
+template <typename SFINAE = hn::Vec<hn::FixedTag<float, 8>>>
+void transpose(hn::Vec<hn::FixedTag<float, 8>> rows[8])
+{
+	hn::FixedTag<float, 8> d;
+
+	auto t0 = hn::InterleaveEvenBlocks(d, rows[0], rows[4]);
+	auto t1 = hn::InterleaveEvenBlocks(d, rows[1], rows[5]);
+	auto t2 = hn::InterleaveEvenBlocks(d, rows[2], rows[6]);
+	auto t3 = hn::InterleaveEvenBlocks(d, rows[3], rows[7]);
+	auto t4 = hn::InterleaveOddBlocks(d, rows[0], rows[4]);
+	auto t5 = hn::InterleaveOddBlocks(d, rows[1], rows[5]);
+	auto t6 = hn::InterleaveOddBlocks(d, rows[2], rows[6]);
+	auto t7 = hn::InterleaveOddBlocks(d, rows[3], rows[7]);
+
+	auto u0 = hn::InterleaveLower(d, t0, t2);
+	auto u1 = hn::InterleaveLower(d, t1, t3);
+	auto u2 = hn::InterleaveUpper(d, t0, t2);
+	auto u3 = hn::InterleaveUpper(d, t1, t3);
+	auto u4 = hn::InterleaveLower(d, t4, t6);
+	auto u5 = hn::InterleaveLower(d, t5, t7);
+	auto u6 = hn::InterleaveUpper(d, t4, t6);
+	auto u7 = hn::InterleaveUpper(d, t5, t7);
+
+	rows[0] = hn::InterleaveLower(d, u0, u1);
+	rows[1] = hn::InterleaveUpper(d, u0, u1);
+	rows[2] = hn::InterleaveLower(d, u2, u3);
+	rows[3] = hn::InterleaveUpper(d, u2, u3);
+	rows[4] = hn::InterleaveLower(d, u4, u5);
+	rows[5] = hn::InterleaveUpper(d, u4, u5);
+	rows[6] = hn::InterleaveLower(d, u6, u7);
+	rows[7] = hn::InterleaveUpper(d, u6, u7);
+}
+
+void transpose(hn::Vec<hn::FixedTag<float, 4>> rows[4])
+{
+	hn::FixedTag<float, 4> d;
+
+	auto u0 = hn::InterleaveLower(d, rows[0], rows[2]);
+	auto u1 = hn::InterleaveLower(d, rows[1], rows[3]);
+	auto u2 = hn::InterleaveUpper(d, rows[0], rows[2]);
+	auto u3 = hn::InterleaveUpper(d, rows[1], rows[3]);
+
+	rows[0] = hn::InterleaveLower(d, u0, u1);
+	rows[1] = hn::InterleaveUpper(d, u0, u1);
+	rows[2] = hn::InterleaveLower(d, u2, u3);
+	rows[3] = hn::InterleaveUpper(d, u2, u3);
+}
+
+void transpose(hn::Vec<hn::FixedTag<double, 4>> rows[4])
+{
+	hn::FixedTag<double, 4> d;
+
+	auto t0 = hn::InterleaveEvenBlocks(d, rows[0], rows[2]);
+	auto t1 = hn::InterleaveEvenBlocks(d, rows[1], rows[3]);
+	auto t2 = hn::InterleaveOddBlocks(d, rows[0], rows[2]);
+	auto t3 = hn::InterleaveOddBlocks(d, rows[1], rows[3]);
+
+	rows[0] = hn::InterleaveLower(d, t0, t1);
+	rows[1] = hn::InterleaveUpper(d, t0, t1);
+	rows[2] = hn::InterleaveLower(d, t2, t3);
+	rows[3] = hn::InterleaveUpper(d, t2, t3);
+}
+
+template <typename real_t>
+void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
+{
+	hn::FixedTag<real_t, 2> d;
+
+	auto t0 = hn::InterleaveLower(d, rows[0], rows[1]);
+	auto t1 = hn::InterleaveUpper(d, rows[0], rows[1]);
+
+	rows[0] = t0;
+	rows[1] = t1;
+}
+
+#define TRANSPOSE_8x8__(row0, row1, row2, row3, row4, row5, row6, row7)                                                 \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		__m256 t0 = _mm256_unpacklo_ps(row0, row1);                                                                    \
+		__m256 t1 = _mm256_unpackhi_ps(row0, row1);                                                                    \
+		__m256 t2 = _mm256_unpacklo_ps(row2, row3);                                                                    \
+		__m256 t3 = _mm256_unpackhi_ps(row2, row3);                                                                    \
+		__m256 t4 = _mm256_unpacklo_ps(row4, row5);                                                                    \
+		__m256 t5 = _mm256_unpackhi_ps(row4, row5);                                                                    \
+		__m256 t6 = _mm256_unpacklo_ps(row6, row7);                                                                    \
+		__m256 t7 = _mm256_unpackhi_ps(row6, row7);                                                                    \
+                                                                                                                       \
+		__m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44);                                                                  \
+		__m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);                                                                  \
+		__m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);                                                                  \
+		__m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);                                                                  \
+		__m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);                                                                  \
+		__m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);                                                                  \
+		__m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);                                                                  \
+		__m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);                                                                  \
+                                                                                                                       \
+		row0 = _mm256_permute2f128_ps(tt0, tt4, 0x20);                                                                 \
+		row1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);                                                                 \
+		row2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);                                                                 \
+		row3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);                                                                 \
+		row4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);                                                                 \
+		row5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);                                                                 \
+		row6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);                                                                 \
+		row7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);                                                                 \
+	} while (0)
+
+#define TRANSPOSE_8x8_(row0, row1, row2, row3, row4, row5, row6, row7)                                                \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		__m256 t0 = _mm256_permute2f128_ps(row0, row4, 0x20);                                                          \
+		__m256 t1 = _mm256_permute2f128_ps(row1, row5, 0x20);                                                          \
+		__m256 t2 = _mm256_permute2f128_ps(row2, row6, 0x20);                                                          \
+		__m256 t3 = _mm256_permute2f128_ps(row3, row7, 0x20);                                                          \
+		__m256 t4 = _mm256_permute2f128_ps(row0, row4, 0x31);                                                          \
+		__m256 t5 = _mm256_permute2f128_ps(row1, row5, 0x31);                                                          \
+		__m256 t6 = _mm256_permute2f128_ps(row2, row6, 0x31);                                                          \
+		__m256 t7 = _mm256_permute2f128_ps(row3, row7, 0x31);                                                          \
+                                                                                                                       \
+		__m256 tt0 = _mm256_unpacklo_ps(t0, t2);                                                                       \
+		__m256 tt1 = _mm256_unpacklo_ps(t1, t3);                                                                       \
+		__m256 tt2 = _mm256_unpackhi_ps(t0, t2);                                                                       \
+		__m256 tt3 = _mm256_unpackhi_ps(t1, t3);                                                                       \
+		__m256 tt4 = _mm256_unpacklo_ps(t4, t6);                                                                       \
+		__m256 tt5 = _mm256_unpacklo_ps(t5, t7);                                                                       \
+		__m256 tt6 = _mm256_unpackhi_ps(t4, t6);                                                                       \
+		__m256 tt7 = _mm256_unpackhi_ps(t5, t7);                                                                       \
+                                                                                                                       \
+		row0 = _mm256_unpacklo_ps(tt0, tt1);                                                                           \
+		row1 = _mm256_unpackhi_ps(tt0, tt1);                                                                           \
+		row2 = _mm256_unpacklo_ps(tt2, tt3);                                                                           \
+		row3 = _mm256_unpackhi_ps(tt2, tt3);                                                                           \
+		row4 = _mm256_unpacklo_ps(tt4, tt5);                                                                           \
+		row5 = _mm256_unpackhi_ps(tt4, tt5);                                                                           \
+		row6 = _mm256_unpacklo_ps(tt6, tt7);                                                                           \
+		row7 = _mm256_unpackhi_ps(tt6, tt7);                                                                           \
+	} while (0)
+
+#define TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7)                                               \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		auto t0 = hn::InterleaveEvenBlocks(d, row0, row4);                                                             \
+		auto t1 = hn::InterleaveEvenBlocks(d, row1, row5);                                                             \
+		auto t2 = hn::InterleaveEvenBlocks(d, row2, row6);                                                             \
+		auto t3 = hn::InterleaveEvenBlocks(d, row3, row7);                                                             \
+		auto t4 = hn::InterleaveOddBlocks(d, row0, row4);                                                              \
+		auto t5 = hn::InterleaveOddBlocks(d, row1, row5);                                                              \
+		auto t6 = hn::InterleaveOddBlocks(d, row2, row6);                                                              \
+		auto t7 = hn::InterleaveOddBlocks(d, row3, row7);                                                              \
+                                                                                                                       \
+		auto u0 = hn::InterleaveLower(d, t0, t2);                                                                      \
+		auto u1 = hn::InterleaveLower(d, t1, t3);                                                                      \
+		auto u2 = hn::InterleaveUpper(d, t0, t2);                                                                      \
+		auto u3 = hn::InterleaveUpper(d, t1, t3);                                                                      \
+		auto u4 = hn::InterleaveLower(d, t4, t6);                                                                      \
+		auto u5 = hn::InterleaveLower(d, t5, t7);                                                                      \
+		auto u6 = hn::InterleaveUpper(d, t4, t6);                                                                      \
+		auto u7 = hn::InterleaveUpper(d, t5, t7);                                                                      \
+                                                                                                                       \
+		row0 = hn::InterleaveLower(d, u0, u1);                                                                         \
+		row1 = hn::InterleaveUpper(d, u0, u1);                                                                         \
+		row2 = hn::InterleaveLower(d, u2, u3);                                                                         \
+		row3 = hn::InterleaveUpper(d, u2, u3);                                                                         \
+		row4 = hn::InterleaveLower(d, u4, u5);                                                                         \
+		row5 = hn::InterleaveUpper(d, u4, u5);                                                                         \
+		row6 = hn::InterleaveLower(d, u6, u7);                                                                         \
+		row7 = hn::InterleaveUpper(d, u6, u7);                                                                         \
+	} while (0)
+
+
+#define TRANSPOSE_8x8_____(row0, row1, row2, row3, row4, row5, row6, row7)                                             \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		auto t0 = hn::InterleaveLower(d, row0, row1);                                                                  \
+		auto t1 = hn::InterleaveUpper(d, row0, row1);                                                                  \
+		auto t2 = hn::InterleaveLower(d, row2, row3);                                                                  \
+		auto t3 = hn::InterleaveUpper(d, row2, row3);                                                                  \
+		auto t4 = hn::InterleaveLower(d, row4, row5);                                                                  \
+		auto t5 = hn::InterleaveUpper(d, row4, row5);                                                                  \
+		auto t6 = hn::InterleaveLower(d, row6, row7);                                                                  \
+		auto t7 = hn::InterleaveUpper(d, row6, row7);                                                                  \
+                                                                                                                       \
+		auto u0 = hn::InterleaveLower(d, t0, t2);                                                                      \
+		auto u1 = hn::InterleaveLower(d, t1, t3);                                                                      \
+		auto u2 = hn::InterleaveUpper(d, t0, t2);                                                                      \
+		auto u3 = hn::InterleaveUpper(d, t1, t3);                                                                      \
+		auto u4 = hn::InterleaveLower(d, t4, t6);                                                                      \
+		auto u5 = hn::InterleaveLower(d, t5, t7);                                                                      \
+		auto u6 = hn::InterleaveUpper(d, t4, t6);                                                                      \
+		auto u7 = hn::InterleaveUpper(d, t5, t7);                                                                      \
+                                                                                                                       \
+		row0 = hn::InterleaveEvenBlocks(d, u0, u4);                                                                    \
+		row1 = hn::InterleaveEvenBlocks(d, u1, u5);                                                                    \
+		row2 = hn::InterleaveEvenBlocks(d, u2, u6);                                                                    \
+		row3 = hn::InterleaveEvenBlocks(d, u3, u7);                                                                    \
+		row4 = hn::InterleaveOddBlocks(d, u0, u4);                                                                     \
+		row5 = hn::InterleaveOddBlocks(d, u1, u5);                                                                     \
+		row6 = hn::InterleaveOddBlocks(d, u2, u6);                                                                     \
+		row7 = hn::InterleaveOddBlocks(d, u3, u7);                                                                     \
+	} while (0)
+
+#define TRANSPOSE_8x8____(row0, row1, row2, row3, row4, row5, row6, row7)                                              \
+	do                                                                                                                 \
+	{                                                                                                                  \
+	} while (0)
+
+
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ b,
-											  const real_t* __restrict__ c, const real_t* __restrict__ e,
-											  const density_layout_t dens_l, const diagonal_layout_t diag_l)
+static void solve_slice_x_2d_and_3d_transpose2(real_t* __restrict__ densities, const real_t* __restrict__ b,
+											   const real_t* __restrict__ c, const real_t* __restrict__ e,
+											   const density_layout_t dens_l, const diagonal_layout_t diag_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -163,79 +375,24 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)));
 				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)));
 
-				__m256 t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				__m256 t1 = _mm256_unpackhi_ps(row0, row1);
-				__m256 t2 = _mm256_unpacklo_ps(row2, row3);
-				__m256 t3 = _mm256_unpackhi_ps(row2, row3);
-				__m256 t4 = _mm256_unpacklo_ps(row4, row5);
-				__m256 t5 = _mm256_unpackhi_ps(row4, row5);
-				__m256 t6 = _mm256_unpacklo_ps(row6, row7);
-				__m256 t7 = _mm256_unpackhi_ps(row6, row7);
-
-				__m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				__m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				__m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				__m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				__m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				__m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				__m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				__m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				__m256 tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				__m256 tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				__m256 tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				__m256 tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				__m256 tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				__m256 tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				row0 = tr0;
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 0, s))), tr1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 1, s))), tr2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 2, s))), tr3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 3, s))), tr4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 4, s))), tr5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 5, s))), tr6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 6, s))), tr7);
+				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 0, s))), row1);
+				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 1, s))), row2);
+				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 2, s))), row3);
+				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 3, s))), row4);
+				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 4, s))), row5);
+				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 5, s))), row6);
+				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, 6, s))), row7);
 
 				prev = row7;
 
-				t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				t1 = _mm256_unpackhi_ps(row0, row1);
-				t2 = _mm256_unpacklo_ps(row2, row3);
-				t3 = _mm256_unpackhi_ps(row2, row3);
-				t4 = _mm256_unpacklo_ps(row4, row5);
-				t5 = _mm256_unpackhi_ps(row4, row5);
-				t6 = _mm256_unpacklo_ps(row6, row7);
-				t7 = _mm256_unpackhi_ps(row6, row7);
-
-				tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, 0, s)), tr0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)), tr1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)), tr2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)), tr3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)), tr4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)), tr5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)), tr6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)), tr7);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, 0, s)), row0);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)), row1);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)), row2);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)), row3);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)), row4);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)), row5);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)), row6);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)), row7);
 			}
 
 			for (index_t i = 8; i < n - 8; i += 8)
@@ -249,79 +406,25 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
 				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
 
-				__m256 t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				__m256 t1 = _mm256_unpackhi_ps(row0, row1);
-				__m256 t2 = _mm256_unpacklo_ps(row2, row3);
-				__m256 t3 = _mm256_unpackhi_ps(row2, row3);
-				__m256 t4 = _mm256_unpacklo_ps(row4, row5);
-				__m256 t5 = _mm256_unpackhi_ps(row4, row5);
-				__m256 t6 = _mm256_unpacklo_ps(row6, row7);
-				__m256 t7 = _mm256_unpackhi_ps(row6, row7);
-
-				__m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				__m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				__m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				__m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				__m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				__m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				__m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				__m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				__m256 tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				__m256 tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				__m256 tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				__m256 tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				__m256 tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				__m256 tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))), tr0);
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i, s))), tr1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 1, s))), tr2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 2, s))), tr3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 3, s))), tr4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 4, s))), tr5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 5, s))), tr6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 6, s))), tr7);
+				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i - 1, s))), row0);
+				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i, s))), row1);
+				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 1, s))), row2);
+				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 2, s))), row3);
+				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 3, s))), row4);
+				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 4, s))), row5);
+				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 5, s))), row6);
+				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, i + 6, s))), row7);
 
 				prev = row7;
 
-				t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				t1 = _mm256_unpackhi_ps(row0, row1);
-				t2 = _mm256_unpacklo_ps(row2, row3);
-				t3 = _mm256_unpackhi_ps(row2, row3);
-				t4 = _mm256_unpacklo_ps(row4, row5);
-				t5 = _mm256_unpackhi_ps(row4, row5);
-				t6 = _mm256_unpacklo_ps(row6, row7);
-				t7 = _mm256_unpackhi_ps(row6, row7);
-
-				tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)), tr0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)), tr1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)), tr2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)), tr3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)), tr4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)), tr5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)), tr6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)), tr7);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)), row0);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)), row1);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)), row2);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)), row3);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)), row4);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)), row5);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)), row6);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)), row7);
 			}
 
 			// for (index_t i = 1; i < n; i++)
@@ -343,41 +446,14 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)));
 				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)));
 
-				__m256 t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				__m256 t1 = _mm256_unpackhi_ps(row0, row1);
-				__m256 t2 = _mm256_unpacklo_ps(row2, row3);
-				__m256 t3 = _mm256_unpackhi_ps(row2, row3);
-				__m256 t4 = _mm256_unpacklo_ps(row4, row5);
-				__m256 t5 = _mm256_unpackhi_ps(row4, row5);
-				__m256 t6 = _mm256_unpacklo_ps(row6, row7);
-				__m256 t7 = _mm256_unpackhi_ps(row6, row7);
-
-				__m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				__m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				__m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				__m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				__m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				__m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				__m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				__m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				__m256 tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				__m256 tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				__m256 tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				__m256 tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				__m256 tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				__m256 tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 9, s))), tr0);
-				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 8, s))), tr1);
-				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 7, s))), tr2);
-				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 6, s))), tr3);
-				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 5, s))), tr4);
-				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 4, s))), tr5);
-				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 3, s))), tr6);
-				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 2, s))), tr7);
+				row0 = _mm256_fmadd_ps(prev, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 9, s))), row0);
+				row1 = _mm256_fmadd_ps(row0, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 8, s))), row1);
+				row2 = _mm256_fmadd_ps(row1, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 7, s))), row2);
+				row3 = _mm256_fmadd_ps(row2, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 6, s))), row3);
+				row4 = _mm256_fmadd_ps(row3, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 5, s))), row4);
+				row5 = _mm256_fmadd_ps(row4, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 4, s))), row5);
+				row6 = _mm256_fmadd_ps(row5, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 3, s))), row6);
+				row7 = _mm256_fmadd_ps(row6, _mm256_set1_ps((diag_l | noarr::get_at<'i', 's'>(e, n - 2, s))), row7);
 
 				__m256 cs = _mm256_set1_ps(c[s]);
 
@@ -399,41 +475,14 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				prev = row0;
 
-				t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				t1 = _mm256_unpackhi_ps(row0, row1);
-				t2 = _mm256_unpacklo_ps(row2, row3);
-				t3 = _mm256_unpackhi_ps(row2, row3);
-				t4 = _mm256_unpacklo_ps(row4, row5);
-				t5 = _mm256_unpackhi_ps(row4, row5);
-				t6 = _mm256_unpacklo_ps(row6, row7);
-				t7 = _mm256_unpackhi_ps(row6, row7);
-
-				tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 8, s)), tr0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)), tr1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)), tr2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)), tr3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)), tr4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)), tr5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)), tr6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)), tr7);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, n - 8, s)), row0);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)), row1);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)), row2);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)), row3);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)), row4);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)), row5);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)), row6);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)), row7);
 			}
 
 			// {
@@ -453,89 +502,35 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				__m256 row6 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
 				__m256 row7 = _mm256_loadu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
 
-				__m256 t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				__m256 t1 = _mm256_unpackhi_ps(row0, row1);
-				__m256 t2 = _mm256_unpacklo_ps(row2, row3);
-				__m256 t3 = _mm256_unpackhi_ps(row2, row3);
-				__m256 t4 = _mm256_unpacklo_ps(row4, row5);
-				__m256 t5 = _mm256_unpackhi_ps(row4, row5);
-				__m256 t6 = _mm256_unpacklo_ps(row6, row7);
-				__m256 t7 = _mm256_unpackhi_ps(row6, row7);
-
-				__m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				__m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				__m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				__m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				__m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				__m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				__m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				__m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				__m256 tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				__m256 tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				__m256 tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				__m256 tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				__m256 tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				__m256 tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				__m256 tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				__m256 tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
 				__m256 cs = _mm256_set1_ps(c[s]);
 
-				row7 = _mm256_mul_ps(_mm256_fmadd_ps(prev, cs, tr7),
+				row7 = _mm256_mul_ps(_mm256_fmadd_ps(prev, cs, row7),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 7, s)));
-				row6 = _mm256_mul_ps(_mm256_fmadd_ps(row7, cs, tr6),
+				row6 = _mm256_mul_ps(_mm256_fmadd_ps(row7, cs, row6),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 6, s)));
-				row5 = _mm256_mul_ps(_mm256_fmadd_ps(row6, cs, tr5),
+				row5 = _mm256_mul_ps(_mm256_fmadd_ps(row6, cs, row5),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 5, s)));
-				row4 = _mm256_mul_ps(_mm256_fmadd_ps(row5, cs, tr4),
+				row4 = _mm256_mul_ps(_mm256_fmadd_ps(row5, cs, row4),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 4, s)));
-				row3 = _mm256_mul_ps(_mm256_fmadd_ps(row4, cs, tr3),
+				row3 = _mm256_mul_ps(_mm256_fmadd_ps(row4, cs, row3),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 3, s)));
-				row2 = _mm256_mul_ps(_mm256_fmadd_ps(row3, cs, tr2),
+				row2 = _mm256_mul_ps(_mm256_fmadd_ps(row3, cs, row2),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 2, s)));
-				row1 = _mm256_mul_ps(_mm256_fmadd_ps(row2, cs, tr1),
+				row1 = _mm256_mul_ps(_mm256_fmadd_ps(row2, cs, row1),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 1, s)));
-				row0 = _mm256_mul_ps(_mm256_fmadd_ps(row1, cs, tr0),
+				row0 = _mm256_mul_ps(_mm256_fmadd_ps(row1, cs, row0),
 									 _mm256_set1_ps(diag_l | noarr::get_at<'i', 's'>(b, i + 0, s)));
 
 				prev = row0;
 
-				t0 = _mm256_unpacklo_ps(row0, row1); // [a00, a10, a01, a11, a02, a12, a03, a13]
-				t1 = _mm256_unpackhi_ps(row0, row1);
-				t2 = _mm256_unpacklo_ps(row2, row3);
-				t3 = _mm256_unpackhi_ps(row2, row3);
-				t4 = _mm256_unpacklo_ps(row4, row5);
-				t5 = _mm256_unpackhi_ps(row4, row5);
-				t6 = _mm256_unpacklo_ps(row6, row7);
-				t7 = _mm256_unpackhi_ps(row6, row7);
-
-				tt0 = _mm256_shuffle_ps(t0, t2, 0x44); // [a00, a10, a20, a30, a01, a11, a21, a31]
-				tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-				tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
-				tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-				tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
-				tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-				tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
-				tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-				tr0 = _mm256_permute2f128_ps(tt0, tt4, 0x20); // [a00, a10, a20, a30, a40, a50, a60, a70]
-				tr1 = _mm256_permute2f128_ps(tt1, tt5, 0x20);
-				tr2 = _mm256_permute2f128_ps(tt2, tt6, 0x20);
-				tr3 = _mm256_permute2f128_ps(tt3, tt7, 0x20);
-				tr4 = _mm256_permute2f128_ps(tt0, tt4, 0x31);
-				tr5 = _mm256_permute2f128_ps(tt1, tt5, 0x31);
-				tr6 = _mm256_permute2f128_ps(tt2, tt6, 0x31);
-				tr7 = _mm256_permute2f128_ps(tt3, tt7, 0x31);
-
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)), tr0);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)), tr1);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)), tr2);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)), tr3);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)), tr4);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)), tr5);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)), tr6);
-				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)), tr7);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i, s)), row0);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)), row1);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)), row2);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)), row3);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)), row4);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)), row5);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)), row6);
+				_mm256_storeu_ps(&(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)), row7);
 			}
 
 			// for (index_t i = n - 2; i >= 0; i--)
@@ -545,6 +540,282 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 			// 		 + c[s] * (dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz, i + 1, s)))
 			// 		* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
 			// }
+		}
+	}
+}
+
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ b,
+											  const real_t* __restrict__ c, const real_t* __restrict__ e,
+											  const density_layout_t dens_l, const diagonal_layout_t diag_l)
+{
+	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
+	const index_t n = dens_l | noarr::get_length<'x'>();
+	const index_t m = dens_l | noarr::get_length<'m'>();
+
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag d;
+	constexpr index_t simd_length = hn::Lanes(d);
+	using simd_t = hn::Vec<simd_tag>;
+
+	// 	auto myprint = [](auto row) {
+	// 		for (index_t i = 0; i < 8; i++)
+	// 			std::cout << hn::ExtractLane(row, i) << " ";
+	// 		std::cout << std::endl;
+	// 	};
+	// #pragma omp single
+	// 	{
+	// 		auto row0 = hn::Iota(d, 0);
+	// 		auto row1 = hn::Iota(d, 8);
+	// 		auto row2 = hn::Iota(d, 8 * 2);
+	// 		auto row3 = hn::Iota(d, 8 * 3);
+	// 		auto row4 = hn::Iota(d, 8 * 4);
+	// 		auto row5 = hn::Iota(d, 8 * 5);
+	// 		auto row6 = hn::Iota(d, 8 * 6);
+	// 		auto row7 = hn::Iota(d, 8 * 7);
+
+	// 		myprint(row0);
+	// 		myprint(row1);
+	// 		myprint(row2);
+	// 		myprint(row3);
+	// 		myprint(row4);
+	// 		myprint(row5);
+	// 		myprint(row6);
+	// 		myprint(row7);
+
+	// 		__m256 t0 = _mm256_blend_ps(row0.raw, row1.raw, 0b10101010);
+	// 		__m256 t1 = _mm256_blend_ps(row0.raw, row1.raw, 0b01010101);
+	// 		__m256 t2 = _mm256_blend_ps(row2.raw, row3.raw, 0b10101010);
+	// 		__m256 t3 = _mm256_blend_ps(row2.raw, row3.raw, 0b01010101);
+	// 		__m256 t4 = _mm256_blend_ps(row4.raw, row5.raw, 0b10101010);
+	// 		__m256 t5 = _mm256_blend_ps(row4.raw, row5.raw, 0b01010101);
+	// 		__m256 t6 = _mm256_blend_ps(row6.raw, row7.raw, 0b10101010);
+	// 		__m256 t7 = _mm256_blend_ps(row6.raw, row7.raw, 0b01010101);
+
+
+	// 		std::cout << "Transposed" << std::endl;
+
+	// 		myprint(simd_t { t0 });
+	// 		myprint(simd_t { t1 });
+	// 		myprint(simd_t { t2 });
+	// 		myprint(simd_t { t3 });
+	// 		myprint(simd_t { t4 });
+	// 		myprint(simd_t { t5 });
+	// 		myprint(simd_t { t6 });
+	// 		myprint(simd_t { t7 });
+
+	// 		auto u0 = _mm256_shuffle_ps(t0, t2, 0x44);
+	// 		auto u1 = _mm256_shuffle_ps(t0, t2, 0xEE);
+	// 		auto u2 = _mm256_shuffle_ps(t1, t3, 0x44);
+	// 		auto u3 = _mm256_shuffle_ps(t1, t3, 0xEE);
+	// 		auto u4 = _mm256_shuffle_ps(t4, t6, 0x44);
+	// 		auto u5 = _mm256_shuffle_ps(t4, t6, 0xEE);
+	// 		auto u6 = _mm256_shuffle_ps(t5, t7, 0x44);
+	// 		auto u7 = _mm256_shuffle_ps(t5, t7, 0xEE);
+
+	// 		std::cout << "Transposed" << std::endl;
+	// 		myprint(simd_t { u0 });
+	// 		myprint(simd_t { u1 });
+	// 		myprint(simd_t { u2 });
+	// 		myprint(simd_t { u3 });
+	// 		myprint(simd_t { u4 });
+	// 		myprint(simd_t { u5 });
+	// 		myprint(simd_t { u6 });
+	// 		myprint(simd_t { u7 });
+
+	// 		row0.raw = _mm256_permute2f128_ps(u0, u4, 0x20);
+	// 		row1.raw = _mm256_permute2f128_ps(u1, u5, 0x20);
+	// 		row2.raw = _mm256_permute2f128_ps(u2, u6, 0x20);
+	// 		row3.raw = _mm256_permute2f128_ps(u3, u7, 0x20);
+	// 		row4.raw = _mm256_permute2f128_ps(u0, u4, 0x31);
+	// 		row5.raw = _mm256_permute2f128_ps(u1, u5, 0x31);
+	// 		row6.raw = _mm256_permute2f128_ps(u2, u6, 0x31);
+	// 		row7.raw = _mm256_permute2f128_ps(u3, u7, 0x31);
+
+	// 		std::cout << "Transposed" << std::endl;
+
+
+	// 		myprint(row0);
+	// 		myprint(row1);
+	// 		myprint(row2);
+	// 		myprint(row3);
+	// 		myprint(row4);
+	// 		myprint(row5);
+	// 		myprint(row6);
+	// 		myprint(row7);
+	// 	}
+
+#pragma omp for schedule(static) nowait collapse(2)
+	for (index_t s = 0; s < substrates_count; s++)
+	{
+		for (index_t yz = 0; yz < m; yz += simd_length)
+		{
+			// begin
+			simd_t prev;
+			{
+				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, 0, s)));
+				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)));
+				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)));
+				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)));
+				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)));
+				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)));
+				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)));
+				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)));
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, 0, s)));
+
+				row1 = hn::MulAdd(row0, hn::BroadcastLane<0>(e_tmp), row1);
+				row2 = hn::MulAdd(row1, hn::BroadcastLane<1>(e_tmp), row2);
+				row3 = hn::MulAdd(row2, hn::BroadcastLane<2>(e_tmp), row3);
+				row4 = hn::MulAdd(row3, hn::BroadcastLane<3>(e_tmp), row4);
+				row5 = hn::MulAdd(row4, hn::BroadcastLane<4>(e_tmp), row5);
+				row6 = hn::MulAdd(row5, hn::BroadcastLane<5>(e_tmp), row6);
+				row7 = hn::MulAdd(row6, hn::BroadcastLane<6>(e_tmp), row7);
+
+				prev = row7;
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, 0, s)));
+				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, 0, s)));
+				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, 0, s)));
+				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, 0, s)));
+				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, 0, s)));
+				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, 0, s)));
+				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, 0, s)));
+				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, 0, s)));
+			}
+
+			for (index_t i = simd_length; i < n - simd_length; i += simd_length)
+			{
+				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
+				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
+				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
+				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
+				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
+				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
+				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
+				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, i - 1, s)));
+
+				row0 = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), row0);
+				row1 = hn::MulAdd(row0, hn::BroadcastLane<1>(e_tmp), row1);
+				row2 = hn::MulAdd(row1, hn::BroadcastLane<2>(e_tmp), row2);
+				row3 = hn::MulAdd(row2, hn::BroadcastLane<3>(e_tmp), row3);
+				row4 = hn::MulAdd(row3, hn::BroadcastLane<4>(e_tmp), row4);
+				row5 = hn::MulAdd(row4, hn::BroadcastLane<5>(e_tmp), row5);
+				row6 = hn::MulAdd(row5, hn::BroadcastLane<6>(e_tmp), row6);
+				row7 = hn::MulAdd(row6, hn::BroadcastLane<7>(e_tmp), row7);
+
+				prev = row7;
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
+				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
+				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
+				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
+				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
+				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
+				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
+				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+			}
+
+			// fuse last
+			{
+				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, n - 8, s)));
+				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)));
+				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)));
+				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)));
+				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)));
+				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)));
+				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)));
+				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)));
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				auto tmp_e = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, n - 9, s)));
+
+				row0 = hn::MulAdd(prev, hn::BroadcastLane<0>(tmp_e), row0);
+				row1 = hn::MulAdd(row0, hn::BroadcastLane<1>(tmp_e), row1);
+				row2 = hn::MulAdd(row1, hn::BroadcastLane<2>(tmp_e), row2);
+				row3 = hn::MulAdd(row2, hn::BroadcastLane<3>(tmp_e), row3);
+				row4 = hn::MulAdd(row3, hn::BroadcastLane<4>(tmp_e), row4);
+				row5 = hn::MulAdd(row4, hn::BroadcastLane<5>(tmp_e), row5);
+				row6 = hn::MulAdd(row5, hn::BroadcastLane<6>(tmp_e), row6);
+				row7 = hn::MulAdd(row6, hn::BroadcastLane<7>(tmp_e), row7);
+
+				auto cs = hn::Set(d, c[s]);
+				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, n - 8, s)));
+
+				row7 = hn::Mul(row7, hn::BroadcastLane<7>(b_tmp));
+				row6 = hn::Mul(hn::MulAdd(row7, cs, row6), hn::BroadcastLane<6>(b_tmp));
+				row5 = hn::Mul(hn::MulAdd(row6, cs, row5), hn::BroadcastLane<5>(b_tmp));
+				row4 = hn::Mul(hn::MulAdd(row5, cs, row4), hn::BroadcastLane<4>(b_tmp));
+				row3 = hn::Mul(hn::MulAdd(row4, cs, row3), hn::BroadcastLane<3>(b_tmp));
+				row2 = hn::Mul(hn::MulAdd(row3, cs, row2), hn::BroadcastLane<2>(b_tmp));
+				row1 = hn::Mul(hn::MulAdd(row2, cs, row1), hn::BroadcastLane<1>(b_tmp));
+				row0 = hn::Mul(hn::MulAdd(row1, cs, row0), hn::BroadcastLane<0>(b_tmp));
+
+				prev = row0;
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, n - 8, s)));
+				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, n - 8, s)));
+				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, n - 8, s)));
+				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, n - 8, s)));
+				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, n - 8, s)));
+				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, n - 8, s)));
+				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, n - 8, s)));
+				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, n - 8, s)));
+			}
+
+			for (index_t i = n - 16; i >= 0; i -= 8)
+			{
+				auto row0 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
+				auto row1 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
+				auto row2 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
+				auto row3 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
+				auto row4 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
+				auto row5 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
+				auto row6 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
+				auto row7 = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				auto cs = hn::Set(d, c[s]);
+				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
+
+
+				row7 = hn::Mul(hn::MulAdd(prev, cs, row7), hn::BroadcastLane<6>(b_tmp));
+				row6 = hn::Mul(hn::MulAdd(row7, cs, row6), hn::BroadcastLane<6>(b_tmp));
+				row5 = hn::Mul(hn::MulAdd(row6, cs, row5), hn::BroadcastLane<5>(b_tmp));
+				row4 = hn::Mul(hn::MulAdd(row5, cs, row4), hn::BroadcastLane<4>(b_tmp));
+				row3 = hn::Mul(hn::MulAdd(row4, cs, row3), hn::BroadcastLane<3>(b_tmp));
+				row2 = hn::Mul(hn::MulAdd(row3, cs, row2), hn::BroadcastLane<2>(b_tmp));
+				row1 = hn::Mul(hn::MulAdd(row2, cs, row1), hn::BroadcastLane<1>(b_tmp));
+				row0 = hn::Mul(hn::MulAdd(row1, cs, row0), hn::BroadcastLane<0>(b_tmp));
+
+				prev = row0;
+
+				TRANSPOSE_8x8(row0, row1, row2, row3, row4, row5, row6, row7);
+
+				hn::Store(row0, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 0, i, s)));
+				hn::Store(row1, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 1, i, s)));
+				hn::Store(row2, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 2, i, s)));
+				hn::Store(row3, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 3, i, s)));
+				hn::Store(row4, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 4, i, s)));
+				hn::Store(row5, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 5, i, s)));
+				hn::Store(row6, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 6, i, s)));
+				hn::Store(row7, d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + 7, i, s)));
+			}
 		}
 	}
 }
@@ -892,25 +1163,52 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve_x()
 {
-	if (this->problem_.dims == 1)
+	if (vectorized_x_)
 	{
+		if (this->problem_.dims == 1)
+		{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
-								  get_diagonal_layout(this->problem_, this->problem_.nx));
+			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+									  get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
+		else if (this->problem_.dims == 2)
+		{
+#pragma omp parallel
+			solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+													   get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+													   get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
+		else if (this->problem_.dims == 3)
+		{
+#pragma omp parallel
+			solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+													   get_substrates_layout<3>()
+														   ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+													   get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
 	}
-	else if (this->problem_.dims == 2)
+	else
 	{
+		if (this->problem_.dims == 1)
+		{
 #pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
-										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-										 get_diagonal_layout(this->problem_, this->problem_.nx));
-	}
-	else if (this->problem_.dims == 3)
-	{
+			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+									  get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
+		else if (this->problem_.dims == 2)
+		{
 #pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
-										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-										 get_diagonal_layout(this->problem_, this->problem_.nx));
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+											 get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
+		else if (this->problem_.dims == 3)
+		{
+#pragma omp parallel
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+											 get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
 	}
 }
 
@@ -977,8 +1275,13 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	}
 }
 
+template <typename real_t, bool aligned_x>
+least_compute_thomas_solver_s_t<real_t, aligned_x>::least_compute_thomas_solver_s_t(bool vectorized_x)
+	: vectorized_x_(vectorized_x)
+{}
+
 template class least_compute_thomas_solver_s_t<float, false>;
-template class least_compute_thomas_solver_s_t<double, false>;
+// template class least_compute_thomas_solver_s_t<double, false>;
 
 template class least_compute_thomas_solver_s_t<float, true>;
-template class least_compute_thomas_solver_s_t<double, true>;
+// template class least_compute_thomas_solver_s_t<double, true>;

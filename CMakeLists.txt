@@ -8,6 +8,10 @@ project(
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# address sanitizer (uncomment to enable)
+# add_compile_options(-fsanitize=address -g)
+# add_link_options(-fsanitize=address)
+
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
@@ -37,6 +41,19 @@ FetchContent_Declare(
   URL file://${CMAKE_CURRENT_SOURCE_DIR}/submodules/json)
 FetchContent_MakeAvailable(json)
 
+# Fetch highway
+FetchContent_Declare(
+  highway
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  URL file://${CMAKE_CURRENT_SOURCE_DIR}/submodules/highway)
+
+set(HWY_ENABLE_TESTS OFF)
+set(HWY_ENABLE_CONTRIB OFF)
+set(HWY_ENABLE_INSTALL OFF)
+set(HWY_ENABLE_EXAMPLES OFF)
+
+FetchContent_MakeAvailable(highway)
+
 file(GLOB src_files "src/*")
 
 add_executable(diffuse ${src_files})
@@ -46,9 +63,12 @@ target_compile_options(
 
 target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
-                  ${argparse_SOURCE_DIR}/include)
+                  ${argparse_SOURCE_DIR}/include
+                  ${highway_SOURCE_DIR})
 
 target_link_libraries(diffuse nlohmann_json::nlohmann_json)
+
+target_link_libraries(diffuse hwy)
 
 find_package(OpenMP REQUIRED)
 target_link_libraries(diffuse OpenMP::OpenMP_CXX)

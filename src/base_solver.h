@@ -13,7 +13,7 @@ protected:
 
 	problem_t<index_t, real_t> problem_;
 
-	real_t* substrates_;
+	real_t* substrates_ = nullptr;
 
 	real_t access_internal(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
 	{
@@ -51,5 +51,9 @@ public:
 		return (double)access_internal(s, x, y, z);
 	}
 
-	virtual ~base_solver() override { std::free(substrates_); }
+	virtual ~base_solver() override
+	{
+		if (substrates_)
+			std::free(substrates_);
+	}
 };

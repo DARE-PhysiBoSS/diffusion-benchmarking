@@ -46,6 +46,7 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver,
 	std::unique_ptr<real_t[]> by_, cy_, ey_;
 	std::unique_ptr<real_t[]> bz_, cz_, ez_;
 
+	bool vectorized_x_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 
@@ -55,6 +56,8 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver,
 	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
 public:
+	least_compute_thomas_solver_s_t(bool vectorized_x);
+
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
 	{
