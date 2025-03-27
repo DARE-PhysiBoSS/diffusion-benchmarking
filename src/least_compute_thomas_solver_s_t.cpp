@@ -348,6 +348,50 @@ void transpose(hn::Vec<hn::FixedTag<real_t, 2>> rows[2])
 	} while (0)
 
 
+template <int First, int Last>
+struct static_for
+{
+	template <typename Fn>
+	void operator()(Fn const& fn) const
+	{
+		if (First < Last)
+		{
+			fn(std::integral_constant<int, First> {});
+			static_for<First + 1, Last>()(fn);
+		}
+	}
+};
+
+template <int N>
+struct static_for<N, N>
+{
+	template <typename Fn>
+	void operator()(Fn const&) const
+	{}
+};
+
+template <int First, int Last>
+struct static_rfor
+{
+	template <typename Fn>
+	void operator()(Fn const& fn) const
+	{
+		if (First >= Last)
+		{
+			fn(std::integral_constant<int, First> {});
+			static_rfor<First - 1, Last>()(fn);
+		}
+	}
+};
+
+template <int N>
+struct static_rfor<N - 1, N>
+{
+	template <typename Fn>
+	void operator()(Fn const&) const
+	{}
+};
+
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ b,
 											  const real_t* __restrict__ c, const real_t* __restrict__ e,
@@ -462,24 +506,16 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, 0, s)));
 
-
 				transpose(rows);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, 0, s)));
 
-				rows[1] = hn::MulAdd(rows[0], hn::BroadcastLane<0>(e_tmp), rows[1]);
-				rows[2] = hn::MulAdd(rows[1], hn::BroadcastLane<1>(e_tmp), rows[2]);
-				rows[3] = hn::MulAdd(rows[2], hn::BroadcastLane<2>(e_tmp), rows[3]);
-				rows[4] = hn::MulAdd(rows[3], hn::BroadcastLane<3>(e_tmp), rows[4]);
-				rows[5] = hn::MulAdd(rows[4], hn::BroadcastLane<4>(e_tmp), rows[5]);
-				rows[6] = hn::MulAdd(rows[5], hn::BroadcastLane<5>(e_tmp), rows[6]);
-				rows[7] = hn::MulAdd(rows[6], hn::BroadcastLane<6>(e_tmp), rows[7]);
+				static_for<1, simd_length>()(
+					[&](auto i) { rows[i] = hn::MulAdd(rows[i - 1], hn::BroadcastLane<i - 1>(e_tmp), rows[i]); });
 
-				prev = rows[7];
-
+				prev = rows[simd_length - 1];
 
 				transpose(rows);
-
 
 				for (index_t r = 0; r < simd_length; r++)
 					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, 0, s)));
@@ -492,24 +528,18 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
 
-
 				transpose(rows);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, i - 1, s)));
 
 				rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
-				rows[1] = hn::MulAdd(rows[0], hn::BroadcastLane<0>(e_tmp), rows[1]);
-				rows[2] = hn::MulAdd(rows[1], hn::BroadcastLane<1>(e_tmp), rows[2]);
-				rows[3] = hn::MulAdd(rows[2], hn::BroadcastLane<2>(e_tmp), rows[3]);
-				rows[4] = hn::MulAdd(rows[3], hn::BroadcastLane<3>(e_tmp), rows[4]);
-				rows[5] = hn::MulAdd(rows[4], hn::BroadcastLane<4>(e_tmp), rows[5]);
-				rows[6] = hn::MulAdd(rows[5], hn::BroadcastLane<5>(e_tmp), rows[6]);
-				rows[7] = hn::MulAdd(rows[6], hn::BroadcastLane<6>(e_tmp), rows[7]);
+
+				static_for<1, simd_length>()(
+					[&](auto i) { rows[i] = hn::MulAdd(rows[i - 1], hn::BroadcastLane<i - 1>(e_tmp), rows[i]); });
 
 				prev = rows[7];
 
 				transpose(rows);
-
 
 				for (index_t r = 0; r < simd_length; r++)
 					hn::Store(rows[r], d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
@@ -522,34 +552,23 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, n - 8, s)));
 
-
 				transpose(rows);
 
 				auto e_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(e, n - 9, s)));
 
 				rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
-				rows[1] = hn::MulAdd(rows[0], hn::BroadcastLane<0>(e_tmp), rows[1]);
-				rows[2] = hn::MulAdd(rows[1], hn::BroadcastLane<1>(e_tmp), rows[2]);
-				rows[3] = hn::MulAdd(rows[2], hn::BroadcastLane<2>(e_tmp), rows[3]);
-				rows[4] = hn::MulAdd(rows[3], hn::BroadcastLane<3>(e_tmp), rows[4]);
-				rows[5] = hn::MulAdd(rows[4], hn::BroadcastLane<4>(e_tmp), rows[5]);
-				rows[6] = hn::MulAdd(rows[5], hn::BroadcastLane<5>(e_tmp), rows[6]);
-				rows[7] = hn::MulAdd(rows[6], hn::BroadcastLane<6>(e_tmp), rows[7]);
+				static_for<1, simd_length>()(
+					[&](auto i) { rows[i] = hn::MulAdd(rows[i - 1], hn::BroadcastLane<i - 1>(e_tmp), rows[i]); });
 
 				auto cs = hn::Set(d, c[s]);
 				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, n - 8, s)));
 
 				rows[7] = hn::Mul(rows[7], hn::BroadcastLane<7>(b_tmp));
-				rows[6] = hn::Mul(hn::MulAdd(rows[7], cs, rows[6]), hn::BroadcastLane<6>(b_tmp));
-				rows[5] = hn::Mul(hn::MulAdd(rows[6], cs, rows[5]), hn::BroadcastLane<5>(b_tmp));
-				rows[4] = hn::Mul(hn::MulAdd(rows[5], cs, rows[4]), hn::BroadcastLane<4>(b_tmp));
-				rows[3] = hn::Mul(hn::MulAdd(rows[4], cs, rows[3]), hn::BroadcastLane<3>(b_tmp));
-				rows[2] = hn::Mul(hn::MulAdd(rows[3], cs, rows[2]), hn::BroadcastLane<2>(b_tmp));
-				rows[1] = hn::Mul(hn::MulAdd(rows[2], cs, rows[1]), hn::BroadcastLane<1>(b_tmp));
-				rows[0] = hn::Mul(hn::MulAdd(rows[1], cs, rows[0]), hn::BroadcastLane<0>(b_tmp));
+				static_rfor<simd_length - 2, 0>()([&](auto i) {
+					rows[i] = hn::Mul(hn::MulAdd(rows[i + 1], cs, rows[i]), hn::BroadcastLane<i>(b_tmp));
+				});
 
 				prev = rows[0];
-
 
 				transpose(rows);
 
@@ -564,23 +583,17 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				for (index_t r = 0; r < simd_length; r++)
 					rows[r] = hn::Load(d, &(dens_l | noarr::get_at<'m', 'x', 's'>(densities, yz + r, i, s)));
 
-
 				transpose(rows);
 
 				auto cs = hn::Set(d, c[s]);
 				auto b_tmp = hn::LoadU(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
 
 				rows[7] = hn::Mul(hn::MulAdd(prev, cs, rows[7]), hn::BroadcastLane<6>(b_tmp));
-				rows[6] = hn::Mul(hn::MulAdd(rows[7], cs, rows[6]), hn::BroadcastLane<6>(b_tmp));
-				rows[5] = hn::Mul(hn::MulAdd(rows[6], cs, rows[5]), hn::BroadcastLane<5>(b_tmp));
-				rows[4] = hn::Mul(hn::MulAdd(rows[5], cs, rows[4]), hn::BroadcastLane<4>(b_tmp));
-				rows[3] = hn::Mul(hn::MulAdd(rows[4], cs, rows[3]), hn::BroadcastLane<3>(b_tmp));
-				rows[2] = hn::Mul(hn::MulAdd(rows[3], cs, rows[2]), hn::BroadcastLane<2>(b_tmp));
-				rows[1] = hn::Mul(hn::MulAdd(rows[2], cs, rows[1]), hn::BroadcastLane<1>(b_tmp));
-				rows[0] = hn::Mul(hn::MulAdd(rows[1], cs, rows[0]), hn::BroadcastLane<0>(b_tmp));
+				static_rfor<simd_length - 2, 0>()([&](auto i) {
+					rows[i] = hn::Mul(hn::MulAdd(rows[i + 1], cs, rows[i]), hn::BroadcastLane<i>(b_tmp));
+				});
 
 				prev = rows[0];
-
 
 				transpose(rows);
 
