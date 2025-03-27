@@ -165,6 +165,80 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
+// HWY_INLINE void transpose(hn::Vec<hn::FixedTag<float, 16>> rows[16])
+// {
+// 	hn::FixedTag<float, 16> d;
+
+// 	auto t0 = hn::ConcatLowerLower(d, rows[0], rows[8]);
+// 	auto t1 = hn::ConcatLowerLower(d, rows[1], rows[9]);
+// 	auto t2 = hn::ConcatLowerLower(d, rows[2], rows[10]);
+// 	auto t3 = hn::ConcatLowerLower(d, rows[3], rows[11]);
+// 	auto t4 = hn::ConcatLowerLower(d, rows[4], rows[12]);
+// 	auto t5 = hn::ConcatLowerLower(d, rows[5], rows[13]);
+// 	auto t6 = hn::ConcatLowerLower(d, rows[6], rows[14]);
+// 	auto t7 = hn::ConcatLowerLower(d, rows[7], rows[15]);
+// 	auto t8 = hn::ConcatUpperUpper(d, rows[0], rows[8]);
+// 	auto t9 = hn::ConcatUpperUpper(d, rows[1], rows[9]);
+// 	auto t10 = hn::ConcatUpperUpper(d, rows[2], rows[10]);
+// 	auto t11 = hn::ConcatUpperUpper(d, rows[3], rows[11]);
+// 	auto t12 = hn::ConcatUpperUpper(d, rows[4], rows[12]);
+// 	auto t13 = hn::ConcatUpperUpper(d, rows[5], rows[13]);
+// 	auto t14 = hn::ConcatUpperUpper(d, rows[6], rows[14]);
+// 	auto t15 = hn::ConcatUpperUpper(d, rows[7], rows[15]);
+
+// 	auto tt0 = hn::InterleaveEvenBlocks(d, t0, t4);
+// 	auto tt1 = hn::InterleaveEvenBlocks(d, t1, t5);
+// 	auto tt2 = hn::InterleaveEvenBlocks(d, t2, t6);
+// 	auto tt3 = hn::InterleaveEvenBlocks(d, t3, t7);
+// 	auto tt4 = hn::InterleaveOddBlocks(d, t0, t4);
+// 	auto tt5 = hn::InterleaveOddBlocks(d, t1, t5);
+// 	auto tt6 = hn::InterleaveOddBlocks(d, t2, t6);
+// 	auto tt7 = hn::InterleaveOddBlocks(d, t3, t7);
+// 	auto tt8 = hn::InterleaveEvenBlocks(d, t8, t12);
+// 	auto tt9 = hn::InterleaveEvenBlocks(d, t9, t13);
+// 	auto tt10 = hn::InterleaveEvenBlocks(d, t10, t14);
+// 	auto tt11 = hn::InterleaveEvenBlocks(d, t11, t15);
+// 	auto tt12 = hn::InterleaveOddBlocks(d, t8, t12);
+// 	auto tt13 = hn::InterleaveOddBlocks(d, t9, t13);
+// 	auto tt14 = hn::InterleaveOddBlocks(d, t10, t14);
+// 	auto tt15 = hn::InterleaveOddBlocks(d, t11, t15);
+
+// 	auto u0 = hn::InterleaveLower(d, tt0, tt2);
+// 	auto u1 = hn::InterleaveLower(d, tt1, tt3);
+// 	auto u2 = hn::InterleaveUpper(d, tt0, tt2);
+// 	auto u3 = hn::InterleaveUpper(d, tt1, tt3);
+// 	auto u4 = hn::InterleaveLower(d, tt4, tt6);
+// 	auto u5 = hn::InterleaveLower(d, tt5, tt7);
+// 	auto u6 = hn::InterleaveUpper(d, tt4, tt6);
+// 	auto u7 = hn::InterleaveUpper(d, tt5, tt7);
+// 	auto u8 = hn::InterleaveLower(d, tt8, tt10);
+// 	auto u9 = hn::InterleaveLower(d, tt9, tt11);
+// 	auto u10 = hn::InterleaveUpper(d, tt8, tt10);
+// 	auto u11 = hn::InterleaveUpper(d, tt9, tt11);
+// 	auto u12 = hn::InterleaveLower(d, tt12, tt14);
+// 	auto u13 = hn::InterleaveLower(d, tt13, tt15);
+// 	auto u14 = hn::InterleaveUpper(d, tt12, tt14);
+// 	auto u15 = hn::InterleaveUpper(d, tt13, tt15);
+
+// 	rows[0] = hn::InterleaveLower(d, u0, u1);
+// 	rows[1] = hn::InterleaveUpper(d, u0, u1);
+// 	rows[2] = hn::InterleaveLower(d, u2, u3);
+// 	rows[3] = hn::InterleaveUpper(d, u2, u3);
+// 	rows[4] = hn::InterleaveLower(d, u4, u5);
+// 	rows[5] = hn::InterleaveUpper(d, u4, u5);
+// 	rows[6] = hn::InterleaveLower(d, u6, u7);
+// 	rows[7] = hn::InterleaveUpper(d, u6, u7);
+
+// 	rows[8] = hn::InterleaveLower(d, u8, u9);
+// 	rows[9] = hn::InterleaveUpper(d, u8, u9);
+// 	rows[10] = hn::InterleaveLower(d, u10, u11);
+// 	rows[11] = hn::InterleaveUpper(d, u10, u11);
+// 	rows[12] = hn::InterleaveLower(d, u12, u13);
+// 	rows[13] = hn::InterleaveUpper(d, u12, u13);
+// 	rows[14] = hn::InterleaveLower(d, u14, u15);
+// 	rows[15] = hn::InterleaveUpper(d, u14, u15);
+// }
+
 HWY_INLINE void transpose(hn::Vec<hn::FixedTag<float, 8>> rows[8])
 {
 	hn::FixedTag<float, 8> d;
