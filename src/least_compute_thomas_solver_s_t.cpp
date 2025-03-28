@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <immintrin.h>
-#include <iostream>
+#include <type_traits>
 
 #include <hwy/highway.h>
 
@@ -186,83 +186,123 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
-// HWY_INLINE void transpose(hn::Vec<hn::FixedTag<float, 16>> rows[16])
-// {
-// 	hn::FixedTag<float, 16> d;
-
-// 	auto t0 = hn::ConcatLowerLower(d, rows[0], rows[8]);
-// 	auto t1 = hn::ConcatLowerLower(d, rows[1], rows[9]);
-// 	auto t2 = hn::ConcatLowerLower(d, rows[2], rows[10]);
-// 	auto t3 = hn::ConcatLowerLower(d, rows[3], rows[11]);
-// 	auto t4 = hn::ConcatLowerLower(d, rows[4], rows[12]);
-// 	auto t5 = hn::ConcatLowerLower(d, rows[5], rows[13]);
-// 	auto t6 = hn::ConcatLowerLower(d, rows[6], rows[14]);
-// 	auto t7 = hn::ConcatLowerLower(d, rows[7], rows[15]);
-// 	auto t8 = hn::ConcatUpperUpper(d, rows[0], rows[8]);
-// 	auto t9 = hn::ConcatUpperUpper(d, rows[1], rows[9]);
-// 	auto t10 = hn::ConcatUpperUpper(d, rows[2], rows[10]);
-// 	auto t11 = hn::ConcatUpperUpper(d, rows[3], rows[11]);
-// 	auto t12 = hn::ConcatUpperUpper(d, rows[4], rows[12]);
-// 	auto t13 = hn::ConcatUpperUpper(d, rows[5], rows[13]);
-// 	auto t14 = hn::ConcatUpperUpper(d, rows[6], rows[14]);
-// 	auto t15 = hn::ConcatUpperUpper(d, rows[7], rows[15]);
-
-// 	auto tt0 = hn::InterleaveEvenBlocks(d, t0, t4);
-// 	auto tt1 = hn::InterleaveEvenBlocks(d, t1, t5);
-// 	auto tt2 = hn::InterleaveEvenBlocks(d, t2, t6);
-// 	auto tt3 = hn::InterleaveEvenBlocks(d, t3, t7);
-// 	auto tt4 = hn::InterleaveOddBlocks(d, t0, t4);
-// 	auto tt5 = hn::InterleaveOddBlocks(d, t1, t5);
-// 	auto tt6 = hn::InterleaveOddBlocks(d, t2, t6);
-// 	auto tt7 = hn::InterleaveOddBlocks(d, t3, t7);
-// 	auto tt8 = hn::InterleaveEvenBlocks(d, t8, t12);
-// 	auto tt9 = hn::InterleaveEvenBlocks(d, t9, t13);
-// 	auto tt10 = hn::InterleaveEvenBlocks(d, t10, t14);
-// 	auto tt11 = hn::InterleaveEvenBlocks(d, t11, t15);
-// 	auto tt12 = hn::InterleaveOddBlocks(d, t8, t12);
-// 	auto tt13 = hn::InterleaveOddBlocks(d, t9, t13);
-// 	auto tt14 = hn::InterleaveOddBlocks(d, t10, t14);
-// 	auto tt15 = hn::InterleaveOddBlocks(d, t11, t15);
-
-// 	auto u0 = hn::InterleaveLower(d, tt0, tt2);
-// 	auto u1 = hn::InterleaveLower(d, tt1, tt3);
-// 	auto u2 = hn::InterleaveUpper(d, tt0, tt2);
-// 	auto u3 = hn::InterleaveUpper(d, tt1, tt3);
-// 	auto u4 = hn::InterleaveLower(d, tt4, tt6);
-// 	auto u5 = hn::InterleaveLower(d, tt5, tt7);
-// 	auto u6 = hn::InterleaveUpper(d, tt4, tt6);
-// 	auto u7 = hn::InterleaveUpper(d, tt5, tt7);
-// 	auto u8 = hn::InterleaveLower(d, tt8, tt10);
-// 	auto u9 = hn::InterleaveLower(d, tt9, tt11);
-// 	auto u10 = hn::InterleaveUpper(d, tt8, tt10);
-// 	auto u11 = hn::InterleaveUpper(d, tt9, tt11);
-// 	auto u12 = hn::InterleaveLower(d, tt12, tt14);
-// 	auto u13 = hn::InterleaveLower(d, tt13, tt15);
-// 	auto u14 = hn::InterleaveUpper(d, tt12, tt14);
-// 	auto u15 = hn::InterleaveUpper(d, tt13, tt15);
-
-// 	rows[0] = hn::InterleaveLower(d, u0, u1);
-// 	rows[1] = hn::InterleaveUpper(d, u0, u1);
-// 	rows[2] = hn::InterleaveLower(d, u2, u3);
-// 	rows[3] = hn::InterleaveUpper(d, u2, u3);
-// 	rows[4] = hn::InterleaveLower(d, u4, u5);
-// 	rows[5] = hn::InterleaveUpper(d, u4, u5);
-// 	rows[6] = hn::InterleaveLower(d, u6, u7);
-// 	rows[7] = hn::InterleaveUpper(d, u6, u7);
-
-// 	rows[8] = hn::InterleaveLower(d, u8, u9);
-// 	rows[9] = hn::InterleaveUpper(d, u8, u9);
-// 	rows[10] = hn::InterleaveLower(d, u10, u11);
-// 	rows[11] = hn::InterleaveUpper(d, u10, u11);
-// 	rows[12] = hn::InterleaveLower(d, u12, u13);
-// 	rows[13] = hn::InterleaveUpper(d, u12, u13);
-// 	rows[14] = hn::InterleaveLower(d, u14, u15);
-// 	rows[15] = hn::InterleaveUpper(d, u14, u15);
-// }
-
-HWY_INLINE void transpose(hn::Vec<hn::FixedTag<float, 8>> rows[8])
+// 16xfloat
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 16, bool> = true,
+		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
+HWY_INLINE void transpose(vec_t rows[16])
 {
-	hn::FixedTag<float, 8> d;
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::ConcatLowerLower(d, rows[8], rows[0]);
+	auto t1 = hn::ConcatLowerLower(d, rows[9], rows[1]);
+	auto t2 = hn::ConcatLowerLower(d, rows[10], rows[2]);
+	auto t3 = hn::ConcatLowerLower(d, rows[11], rows[3]);
+	auto t4 = hn::ConcatLowerLower(d, rows[12], rows[4]);
+	auto t5 = hn::ConcatLowerLower(d, rows[13], rows[5]);
+	auto t6 = hn::ConcatLowerLower(d, rows[14], rows[6]);
+	auto t7 = hn::ConcatLowerLower(d, rows[15], rows[7]);
+	auto t8 = hn::ConcatUpperUpper(d, rows[8], rows[0]);
+	auto t9 = hn::ConcatUpperUpper(d, rows[9], rows[1]);
+	auto t10 = hn::ConcatUpperUpper(d, rows[10], rows[2]);
+	auto t11 = hn::ConcatUpperUpper(d, rows[11], rows[3]);
+	auto t12 = hn::ConcatUpperUpper(d, rows[12], rows[4]);
+	auto t13 = hn::ConcatUpperUpper(d, rows[13], rows[5]);
+	auto t14 = hn::ConcatUpperUpper(d, rows[14], rows[6]);
+	auto t15 = hn::ConcatUpperUpper(d, rows[15], rows[7]);
+
+	auto tt0 = hn::InterleaveEvenBlocks(d, t0, t4);
+	auto tt1 = hn::InterleaveEvenBlocks(d, t1, t5);
+	auto tt2 = hn::InterleaveEvenBlocks(d, t2, t6);
+	auto tt3 = hn::InterleaveEvenBlocks(d, t3, t7);
+	auto tt4 = hn::InterleaveOddBlocks(d, t0, t4);
+	auto tt5 = hn::InterleaveOddBlocks(d, t1, t5);
+	auto tt6 = hn::InterleaveOddBlocks(d, t2, t6);
+	auto tt7 = hn::InterleaveOddBlocks(d, t3, t7);
+	auto tt8 = hn::InterleaveEvenBlocks(d, t8, t12);
+	auto tt9 = hn::InterleaveEvenBlocks(d, t9, t13);
+	auto tt10 = hn::InterleaveEvenBlocks(d, t10, t14);
+	auto tt11 = hn::InterleaveEvenBlocks(d, t11, t15);
+	auto tt12 = hn::InterleaveOddBlocks(d, t8, t12);
+	auto tt13 = hn::InterleaveOddBlocks(d, t9, t13);
+	auto tt14 = hn::InterleaveOddBlocks(d, t10, t14);
+	auto tt15 = hn::InterleaveOddBlocks(d, t11, t15);
+
+	auto u0 = hn::InterleaveLower(d, tt0, tt2);
+	auto u1 = hn::InterleaveLower(d, tt1, tt3);
+	auto u2 = hn::InterleaveUpper(d, tt0, tt2);
+	auto u3 = hn::InterleaveUpper(d, tt1, tt3);
+	auto u4 = hn::InterleaveLower(d, tt4, tt6);
+	auto u5 = hn::InterleaveLower(d, tt5, tt7);
+	auto u6 = hn::InterleaveUpper(d, tt4, tt6);
+	auto u7 = hn::InterleaveUpper(d, tt5, tt7);
+	auto u8 = hn::InterleaveLower(d, tt8, tt10);
+	auto u9 = hn::InterleaveLower(d, tt9, tt11);
+	auto u10 = hn::InterleaveUpper(d, tt8, tt10);
+	auto u11 = hn::InterleaveUpper(d, tt9, tt11);
+	auto u12 = hn::InterleaveLower(d, tt12, tt14);
+	auto u13 = hn::InterleaveLower(d, tt13, tt15);
+	auto u14 = hn::InterleaveUpper(d, tt12, tt14);
+	auto u15 = hn::InterleaveUpper(d, tt13, tt15);
+
+	rows[0] = hn::InterleaveLower(d, u0, u1);
+	rows[1] = hn::InterleaveUpper(d, u0, u1);
+	rows[2] = hn::InterleaveLower(d, u2, u3);
+	rows[3] = hn::InterleaveUpper(d, u2, u3);
+	rows[4] = hn::InterleaveLower(d, u4, u5);
+	rows[5] = hn::InterleaveUpper(d, u4, u5);
+	rows[6] = hn::InterleaveLower(d, u6, u7);
+	rows[7] = hn::InterleaveUpper(d, u6, u7);
+	rows[8] = hn::InterleaveLower(d, u8, u9);
+	rows[9] = hn::InterleaveUpper(d, u8, u9);
+	rows[10] = hn::InterleaveLower(d, u10, u11);
+	rows[11] = hn::InterleaveUpper(d, u10, u11);
+	rows[12] = hn::InterleaveLower(d, u12, u13);
+	rows[13] = hn::InterleaveUpper(d, u12, u13);
+	rows[14] = hn::InterleaveLower(d, u14, u15);
+	rows[15] = hn::InterleaveUpper(d, u14, u15);
+}
+
+// 8xdouble
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 8, bool> = true,
+		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
+HWY_INLINE void transpose(vec_t rows[8])
+{
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::ConcatLowerLower(d, rows[4], rows[0]);
+	auto t1 = hn::ConcatLowerLower(d, rows[5], rows[1]);
+	auto t2 = hn::ConcatLowerLower(d, rows[6], rows[2]);
+	auto t3 = hn::ConcatLowerLower(d, rows[7], rows[3]);
+	auto t4 = hn::ConcatUpperUpper(d, rows[4], rows[0]);
+	auto t5 = hn::ConcatUpperUpper(d, rows[5], rows[1]);
+	auto t6 = hn::ConcatUpperUpper(d, rows[6], rows[2]);
+	auto t7 = hn::ConcatUpperUpper(d, rows[7], rows[3]);
+
+	auto u0 = hn::InterleaveEvenBlocks(d, t0, t2);
+	auto u1 = hn::InterleaveEvenBlocks(d, t1, t3);
+	auto u2 = hn::InterleaveOddBlocks(d, t0, t2);
+	auto u3 = hn::InterleaveOddBlocks(d, t1, t3);
+	auto u4 = hn::InterleaveEvenBlocks(d, t4, t6);
+	auto u5 = hn::InterleaveEvenBlocks(d, t5, t7);
+	auto u6 = hn::InterleaveOddBlocks(d, t4, t6);
+	auto u7 = hn::InterleaveOddBlocks(d, t5, t7);
+
+	rows[0] = hn::InterleaveLower(d, u0, u1);
+	rows[1] = hn::InterleaveUpper(d, u0, u1);
+	rows[2] = hn::InterleaveLower(d, u2, u3);
+	rows[3] = hn::InterleaveUpper(d, u2, u3);
+	rows[4] = hn::InterleaveLower(d, u4, u5);
+	rows[5] = hn::InterleaveUpper(d, u4, u5);
+	rows[6] = hn::InterleaveLower(d, u6, u7);
+	rows[7] = hn::InterleaveUpper(d, u6, u7);
+}
+
+// 8xfloat
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 8, bool> = true,
+		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
+HWY_INLINE void transpose(vec_t rows[8])
+{
+	hn::DFromV<vec_t> d;
 
 	auto t0 = hn::InterleaveEvenBlocks(d, rows[0], rows[4]);
 	auto t1 = hn::InterleaveEvenBlocks(d, rows[1], rows[5]);
@@ -292,9 +332,12 @@ HWY_INLINE void transpose(hn::Vec<hn::FixedTag<float, 8>> rows[8])
 	rows[7] = hn::InterleaveUpper(d, u6, u7);
 }
 
-void transpose(hn::Vec<hn::FixedTag<float, 4>> rows[4])
+// 4xfloat
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 4, bool> = true,
+		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
+HWY_INLINE void transpose(vec_t rows[4])
 {
-	hn::FixedTag<float, 4> d;
+	hn::DFromV<vec_t> d;
 
 	auto u0 = hn::InterleaveLower(d, rows[0], rows[2]);
 	auto u1 = hn::InterleaveLower(d, rows[1], rows[3]);
@@ -307,9 +350,12 @@ void transpose(hn::Vec<hn::FixedTag<float, 4>> rows[4])
 	rows[3] = hn::InterleaveUpper(d, u2, u3);
 }
 
-void transpose(hn::Vec<hn::FixedTag<double, 4>> rows[4])
+// 4xdouble
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 4, bool> = true,
+		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
+HWY_INLINE void transpose(vec_t rows[4])
 {
-	hn::FixedTag<double, 4> d;
+	hn::DFromV<vec_t> d;
 
 	auto t0 = hn::InterleaveEvenBlocks(d, rows[0], rows[2]);
 	auto t1 = hn::InterleaveEvenBlocks(d, rows[1], rows[3]);
@@ -322,20 +368,11 @@ void transpose(hn::Vec<hn::FixedTag<double, 4>> rows[4])
 	rows[3] = hn::InterleaveUpper(d, t2, t3);
 }
 
-void transpose(hn::Vec<hn::FixedTag<float, 2>> rows[2])
+// 2xfloat & 2xdouble
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 2, bool> = true>
+HWY_INLINE void transpose(vec_t rows[2])
 {
-	hn::FixedTag<float, 2> d;
-
-	auto t0 = hn::InterleaveLower(d, rows[0], rows[1]);
-	auto t1 = hn::InterleaveUpper(d, rows[0], rows[1]);
-
-	rows[0] = t0;
-	rows[1] = t1;
-}
-
-void transpose(hn::Vec<hn::FixedTag<double, 2>> rows[2])
-{
-	hn::FixedTag<double, 2> d;
+	hn::DFromV<vec_t> d;
 
 	auto t0 = hn::InterleaveLower(d, rows[0], rows[1]);
 	auto t1 = hn::InterleaveUpper(d, rows[0], rows[1]);
@@ -402,94 +439,6 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 	using simd_t = hn::Vec<simd_tag>;
 
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'m', 'b', 'm', 'v'>(noarr::lit<simd_length>);
-
-
-	// 	auto myprint = [](auto row) {
-	// 		for (index_t i = 0; i < 8; i++)
-	// 			std::cout << hn::ExtractLane(row, i) << " ";
-	// 		std::cout << std::endl;
-	// 	};
-	// #pragma omp single
-	// 	{
-	// 		auto row0 = hn::Iota(d, 0);
-	// 		auto row1 = hn::Iota(d, 8);
-	// 		auto row2 = hn::Iota(d, 8 * 2);
-	// 		auto row3 = hn::Iota(d, 8 * 3);
-	// 		auto row4 = hn::Iota(d, 8 * 4);
-	// 		auto row5 = hn::Iota(d, 8 * 5);
-	// 		auto row6 = hn::Iota(d, 8 * 6);
-	// 		auto row7 = hn::Iota(d, 8 * 7);
-
-	// 		myprint(row0);
-	// 		myprint(row1);
-	// 		myprint(row2);
-	// 		myprint(row3);
-	// 		myprint(row4);
-	// 		myprint(row5);
-	// 		myprint(row6);
-	// 		myprint(row7);
-
-	// 		__m256 t0 = _mm256_blend_ps(row0.raw, row1.raw, 0b10101010);
-	// 		__m256 t1 = _mm256_blend_ps(row0.raw, row1.raw, 0b01010101);
-	// 		__m256 t2 = _mm256_blend_ps(row2.raw, row3.raw, 0b10101010);
-	// 		__m256 t3 = _mm256_blend_ps(row2.raw, row3.raw, 0b01010101);
-	// 		__m256 t4 = _mm256_blend_ps(row4.raw, row5.raw, 0b10101010);
-	// 		__m256 t5 = _mm256_blend_ps(row4.raw, row5.raw, 0b01010101);
-	// 		__m256 t6 = _mm256_blend_ps(row6.raw, row7.raw, 0b10101010);
-	// 		__m256 t7 = _mm256_blend_ps(row6.raw, row7.raw, 0b01010101);
-
-
-	// 		std::cout << "Transposed" << std::endl;
-
-	// 		myprint(simd_t { t0 });
-	// 		myprint(simd_t { t1 });
-	// 		myprint(simd_t { t2 });
-	// 		myprint(simd_t { t3 });
-	// 		myprint(simd_t { t4 });
-	// 		myprint(simd_t { t5 });
-	// 		myprint(simd_t { t6 });
-	// 		myprint(simd_t { t7 });
-
-	// 		auto u0 = _mm256_shuffle_ps(t0, t2, 0x44);
-	// 		auto u1 = _mm256_shuffle_ps(t0, t2, 0xEE);
-	// 		auto u2 = _mm256_shuffle_ps(t1, t3, 0x44);
-	// 		auto u3 = _mm256_shuffle_ps(t1, t3, 0xEE);
-	// 		auto u4 = _mm256_shuffle_ps(t4, t6, 0x44);
-	// 		auto u5 = _mm256_shuffle_ps(t4, t6, 0xEE);
-	// 		auto u6 = _mm256_shuffle_ps(t5, t7, 0x44);
-	// 		auto u7 = _mm256_shuffle_ps(t5, t7, 0xEE);
-
-	// 		std::cout << "Transposed" << std::endl;
-	// 		myprint(simd_t { u0 });
-	// 		myprint(simd_t { u1 });
-	// 		myprint(simd_t { u2 });
-	// 		myprint(simd_t { u3 });
-	// 		myprint(simd_t { u4 });
-	// 		myprint(simd_t { u5 });
-	// 		myprint(simd_t { u6 });
-	// 		myprint(simd_t { u7 });
-
-	// 		row0.raw = _mm256_permute2f128_ps(u0, u4, 0x20);
-	// 		row1.raw = _mm256_permute2f128_ps(u1, u5, 0x20);
-	// 		row2.raw = _mm256_permute2f128_ps(u2, u6, 0x20);
-	// 		row3.raw = _mm256_permute2f128_ps(u3, u7, 0x20);
-	// 		row4.raw = _mm256_permute2f128_ps(u0, u4, 0x31);
-	// 		row5.raw = _mm256_permute2f128_ps(u1, u5, 0x31);
-	// 		row6.raw = _mm256_permute2f128_ps(u2, u6, 0x31);
-	// 		row7.raw = _mm256_permute2f128_ps(u3, u7, 0x31);
-
-	// 		std::cout << "Transposed" << std::endl;
-
-
-	// 		myprint(row0);
-	// 		myprint(row1);
-	// 		myprint(row2);
-	// 		myprint(row3);
-	// 		myprint(row4);
-	// 		myprint(row5);
-	// 		myprint(row6);
-	// 		myprint(row7);
-	// 	}
 
 	for (index_t s = 0; s < substrates_count; s++)
 	{
