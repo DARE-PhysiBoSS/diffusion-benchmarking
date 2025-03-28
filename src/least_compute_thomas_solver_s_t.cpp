@@ -495,7 +495,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 	{
 		// vectorized body
 		{
-			const index_t full_n = (n + hn::Lanes(d) - 1) / hn::Lanes(d) * hn::Lanes(d);
+			const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
 
 			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
 			const index_t m = body_dens_l | noarr::get_length<'m'>();
@@ -525,7 +525,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 						rows[0] = hn::MulAdd(prev, hn::BroadcastLane<0>(e_tmp), rows[0]);
 						static_for<1, simd_length>()(
-							[&](auto i) { rows[i] = hn::MulAdd(rows[i - 1], hn::BroadcastLane<i>(e_tmp), rows[i]); });
+							[&](auto v) { rows[v] = hn::MulAdd(rows[v - 1], hn::BroadcastLane<v>(e_tmp), rows[v]); });
 
 						prev = rows[simd_length - 1];
 					}
@@ -617,8 +617,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 						rows[simd_length - 1] = hn::Mul(hn::MulAdd(prev, cs, rows[simd_length - 1]),
 														hn::BroadcastLane<simd_length - 1>(b_tmp));
-						static_rfor<simd_length - 2, 0>()([&](auto i) {
-							rows[i] = hn::Mul(hn::MulAdd(rows[i + 1], cs, rows[i]), hn::BroadcastLane<i>(b_tmp));
+						static_rfor<simd_length - 2, 0>()([&](auto v) {
+							rows[v] = hn::Mul(hn::MulAdd(rows[v + 1], cs, rows[v]), hn::BroadcastLane<v>(b_tmp));
 						});
 
 						prev = rows[0];
@@ -1101,9 +1101,15 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
-											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-											 get_diagonal_layout(this->problem_, this->problem_.nx));
+			if (vectorized_x_)
+				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_, cx_, ex_,
+														   get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+														   get_diagonal_layout(this->problem_, this->problem_.nx));
+			else
+
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
+												 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+												 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
 			solve_slice_y_2d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<2>(),
 									  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
@@ -1113,9 +1119,14 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
-											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-											 get_diagonal_layout(this->problem_, this->problem_.nx));
+			if (vectorized_x_)
+				solve_slice_x_2d_and_3d_transpose<index_t>(
+					this->substrates_, bx_, cx_, ex_, get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+					get_diagonal_layout(this->problem_, this->problem_.nx));
+			else
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_, cx_, ex_,
+												 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+												 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
 			solve_slice_y_3d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<3>(),
 									  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
