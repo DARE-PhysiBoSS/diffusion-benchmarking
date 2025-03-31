@@ -7,3 +7,6 @@
 [submodule "submodules/json"]
 	path = submodules/json
 	url = https://github.com/nlohmann/json.git
+[submodule "submodules/highway"]
+	path = submodules/highway
+	url = https://github.com/google/highway.git

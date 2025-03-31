@@ -1,6 +1,5 @@
 #include "biofvm.h"
 
-#include <immintrin.h>
 #include <iostream>
 #include <vector>
 
