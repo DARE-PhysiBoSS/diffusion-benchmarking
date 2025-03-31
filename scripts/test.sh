@@ -8,7 +8,9 @@ problem_file="example-problems/toy-small.json"
 
 # Loop through each algorithm and run the command
 for alg in "${algorithms[@]}"; do
-    echo "Running benchmark for algorithm: $alg"
+    echo "Running single precision benchmark for algorithm: $alg"
     build/diffuse --problem "$problem_file" --alg "$alg" --validate
+    echo "Running double precision benchmark for algorithm: $alg"
+    build/diffuse --problem "$problem_file" --alg "$alg" --validate --double
     echo "-----------------------------------"
 done

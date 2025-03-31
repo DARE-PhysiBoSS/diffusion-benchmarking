@@ -11,15 +11,15 @@
     "dt": 0.01,
     "diffusion_coefficients": [
         10000,
-        5000
+        50000
     ],
     "decay_rates": [
         0.5,
         1
     ],
     "initial_conditions": [
-        1,
-        10
+        12345,
+        10000
     ],
     "gaussian_pulse": true
 }
