@@ -1,7 +1,6 @@
 #include "least_compute_thomas_solver_s_t.h"
 
 #include <cstddef>
-#include <immintrin.h>
 #include <type_traits>
 
 #include <hwy/highway.h>
@@ -330,6 +329,91 @@ HWY_INLINE void transpose(vec_t rows[8])
 	rows[5] = hn::InterleaveUpper(d, u4, u5);
 	rows[6] = hn::InterleaveLower(d, u6, u7);
 	rows[7] = hn::InterleaveUpper(d, u6, u7);
+
+	// TODO - overlap transpose with loads
+	// __m256 t0 = _mm256_unpacklo_ps(rows[0].raw, rows[1].raw);
+	// __m256 t1 = _mm256_unpackhi_ps(rows[0].raw, rows[1].raw);
+	// __m256 t2 = _mm256_unpacklo_ps(rows[2].raw, rows[3].raw);
+	// __m256 t3 = _mm256_unpackhi_ps(rows[2].raw, rows[3].raw);
+	// __m256 t4 = _mm256_unpacklo_ps(rows[4].raw, rows[5].raw);
+	// __m256 t5 = _mm256_unpackhi_ps(rows[4].raw, rows[5].raw);
+	// __m256 t6 = _mm256_unpacklo_ps(rows[6].raw, rows[7].raw);
+	// __m256 t7 = _mm256_unpackhi_ps(rows[6].raw, rows[7].raw);
+
+	// __m256 tt0 = _mm256_shuffle_ps(t0, t2, 0x44);
+	// __m256 tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
+	// __m256 tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
+	// __m256 tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
+	// __m256 tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
+	// __m256 tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
+	// __m256 tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
+	// __m256 tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
+
+	// rows[0].raw = _mm256_permute2f128_ps(tt0, tt4, 0x20);
+	// rows[1].raw = _mm256_permute2f128_ps(tt1, tt5, 0x20);
+	// rows[2].raw = _mm256_permute2f128_ps(tt2, tt6, 0x20);
+	// rows[3].raw = _mm256_permute2f128_ps(tt3, tt7, 0x20);
+	// rows[4].raw = _mm256_permute2f128_ps(tt0, tt4, 0x31);
+	// rows[5].raw = _mm256_permute2f128_ps(tt1, tt5, 0x31);
+	// rows[6].raw = _mm256_permute2f128_ps(tt2, tt6, 0x31);
+	// rows[7].raw = _mm256_permute2f128_ps(tt3, tt7, 0x31);
+
+	//  __m256 t0 = _mm256_permute2f128_ps(rows[0].raw, rows[4].raw, 0x20);
+	//  __m256 t1 = _mm256_permute2f128_ps(rows[1].raw, rows[5].raw, 0x20);
+	//  __m256 t2 = _mm256_permute2f128_ps(rows[2].raw, rows[6].raw, 0x20);
+	//  __m256 t3 = _mm256_permute2f128_ps(rows[3].raw, rows[7].raw, 0x20);
+	//  __m256 t4 = _mm256_permute2f128_ps(rows[0].raw, rows[4].raw, 0x31);
+	//  __m256 t5 = _mm256_permute2f128_ps(rows[1].raw, rows[5].raw, 0x31);
+	//  __m256 t6 = _mm256_permute2f128_ps(rows[2].raw, rows[6].raw, 0x31);
+	//  __m256 t7 = _mm256_permute2f128_ps(rows[3].raw, rows[7].raw, 0x31);
+
+	//  __m256 tt0 = _mm256_unpacklo_ps(t0, t2);
+	//  __m256 tt1 = _mm256_unpacklo_ps(t1, t3);
+	//  __m256 tt2 = _mm256_unpackhi_ps(t0, t2);
+	//  __m256 tt3 = _mm256_unpackhi_ps(t1, t3);
+	//  __m256 tt4 = _mm256_unpacklo_ps(t4, t6);
+	//  __m256 tt5 = _mm256_unpacklo_ps(t5, t7);
+	//  __m256 tt6 = _mm256_unpackhi_ps(t4, t6);
+	//  __m256 tt7 = _mm256_unpackhi_ps(t5, t7);
+
+	//  rows[0].raw = _mm256_unpacklo_ps(tt0, tt1);
+	//  rows[1].raw = _mm256_unpackhi_ps(tt0, tt1);
+	//  rows[2].raw = _mm256_unpacklo_ps(tt2, tt3);
+	//  rows[3].raw = _mm256_unpackhi_ps(tt2, tt3);
+	//  rows[4].raw = _mm256_unpacklo_ps(tt4, tt5);
+	//  rows[5].raw = _mm256_unpackhi_ps(tt4, tt5);
+	//  rows[6].raw = _mm256_unpacklo_ps(tt6, tt7);
+	//  rows[7].raw = _mm256_unpackhi_ps(tt6, tt7);
+
+	// hn::DFromV<vec_t> d;
+
+	// auto t0 = hn::InterleaveLower(d, rows[0], rows[2]);
+	// auto t1 = hn::InterleaveUpper(d, rows[0], rows[2]);
+	// auto t2 = hn::InterleaveLower(d, rows[1], rows[3]);
+	// auto t3 = hn::InterleaveUpper(d, rows[1], rows[3]);
+	// auto t4 = hn::InterleaveLower(d, rows[4], rows[6]);
+	// auto t5 = hn::InterleaveUpper(d, rows[4], rows[6]);
+	// auto t6 = hn::InterleaveLower(d, rows[5], rows[7]);
+	// auto t7 = hn::InterleaveUpper(d, rows[5], rows[7]);
+
+
+	// auto u0 = hn::InterleaveLower(d, t0, t2);
+	// auto u1 = hn::InterleaveUpper(d, t0, t2);
+	// auto u2 = hn::InterleaveLower(d, t1, t3);
+	// auto u3 = hn::InterleaveUpper(d, t1, t3);
+	// auto u4 = hn::InterleaveLower(d, t4, t6);
+	// auto u5 = hn::InterleaveUpper(d, t4, t6);
+	// auto u6 = hn::InterleaveLower(d, t5, t7);
+	// auto u7 = hn::InterleaveUpper(d, t5, t7);
+
+	// rows[0] = hn::InterleaveEvenBlocks(d, u0, u4);
+	// rows[1] = hn::InterleaveEvenBlocks(d, u1, u5);
+	// rows[2] = hn::InterleaveEvenBlocks(d, u2, u6);
+	// rows[3] = hn::InterleaveEvenBlocks(d, u3, u7);
+	// rows[4] = hn::InterleaveOddBlocks(d, u0, u4);
+	// rows[5] = hn::InterleaveOddBlocks(d, u1, u5);
+	// rows[6] = hn::InterleaveOddBlocks(d, u2, u6);
+	// rows[7] = hn::InterleaveOddBlocks(d, u3, u7);
 }
 
 // 4xfloat
@@ -418,7 +502,7 @@ struct static_rfor
 };
 
 template <int N>
-struct static_rfor<N - 1, N>
+struct static_rfor<-1, N>
 {
 	template <typename Fn>
 	void operator()(Fn const&) const
