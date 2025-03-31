@@ -42,19 +42,21 @@ class least_memory_thomas_solver_t : public locally_onedimensional_solver,
 {
 	using index_t = std::int32_t;
 
-	std::unique_ptr<real_t[]> ax_, b1x_, bx_;
-	std::unique_ptr<real_t[]> ay_, b1y_, by_;
-	std::unique_ptr<real_t[]> az_, b1z_, bz_;
+	real_t *ax_, *b1x_, *bx_;
+	real_t *ay_, *b1y_, *by_;
+	real_t *az_, *b1z_, *bz_;
 
+	bool vectorized_x_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 
-	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
+	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
-	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b0, std::unique_ptr<real_t[]>& b,
-						   index_t shape, index_t dims, index_t n);
+	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
 public:
+	least_memory_thomas_solver_t(bool vectorized_x);
+
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
 	{
@@ -75,4 +77,6 @@ public:
 	void solve_z() override;
 
 	void solve() override;
+
+	~least_memory_thomas_solver_t();
 };
