@@ -34,6 +34,8 @@ Optimizations:
 - Aligned memory for x dimension (tunable by 'alignment_size')
 - Better temporal locality of memory accesses - x dimension is divided into smaller tiles (tunable by 'x_tile_size') and
 y/z dimensions are solved alongside tiled x dimension
+- X dimension is vectorized manually - squares of x*yz plane are loaded into vector registers, then the data is
+transposed so the vectorization can be utilized
 */
 
 template <typename real_t, bool aligned_x>
