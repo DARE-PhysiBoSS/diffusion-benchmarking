@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the list of algorithms to test
-algorithms=("lstc" "lstcm" "lstcma" "lstct" "lstcta" "lstcs" "lstcst" "lstcsta" "lstm" "lstmt" "lstmta" "avx256d" "biofvm" "lapack" "lapack2" "full_lapack")
+algorithms=("lstc" "lstcm" "lstcma" "lstct" "lstcta" "lstcs" "lstcst" "lstcsta" "lstcstai" "lstm" "lstmt" "lstmta" "lstmtai" "avx256d" "biofvm" "lapack" "lapack2" "full_lapack")
 
 # Define the common command parameters
 problem_file="example-problems/300x300x300x100.json"
