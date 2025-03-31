@@ -8,6 +8,13 @@ project(
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(USE_ASAN OFF)
+
+if(USE_ASAN)
+  add_compile_options(-fsanitize=address -g)
+  add_link_options(-fsanitize=address)
+endif()
+
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
@@ -59,8 +66,7 @@ target_compile_options(
 
 target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
-                  ${argparse_SOURCE_DIR}/include
-                  ${highway_SOURCE_DIR})
+                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
 
 target_link_libraries(diffuse nlohmann_json::nlohmann_json)
 
