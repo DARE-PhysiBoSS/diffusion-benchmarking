@@ -57,13 +57,16 @@ option(HWY_ENABLE_EXAMPLES OFF)
 
 FetchContent_MakeAvailable(highway)
 
+find_package(OpenMP REQUIRED)
+find_package(LAPACK REQUIRED)
+
 file(GLOB src_files "src/*")
 
-list(FILTER src_files EXCLUDE REGEX "src/MPI_1D_blocking.*")
+set(mpi_src_files "${CMAKE_CURRENT_SOURCE_DIR}/src/MPI_1D_blocking.cpp")
 
-set(diffuse_sources ${src_files})
+list(REMOVE_ITEM src_files ${mpi_src_files})
 
-add_executable(diffuse ${diffuse_sources})
+add_executable(diffuse ${src_files})
 
 target_compile_options(
   diffuse PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${DIFFUSE_CPP_COMPILE_OPTIONS}>)
@@ -72,14 +75,22 @@ target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
                   ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
 
-target_link_libraries(diffuse nlohmann_json::nlohmann_json)
+target_link_libraries(diffuse nlohmann_json::nlohmann_json hwy
+                      OpenMP::OpenMP_CXX LAPACK::LAPACK)
 
-target_link_libraries(diffuse hwy)
+find_package(MPI)
 
-find_package(OpenMP REQUIRED)
-target_link_libraries(diffuse OpenMP::OpenMP_CXX)
+if(MPI_FOUND)
+  add_executable(diffuse_mpi ${src_files} ${mpi_src_files})
 
-find_package(LAPACK REQUIRED)
-target_link_libraries(diffuse LAPACK::LAPACK)
+  target_compile_options(
+    diffuse_mpi
+    PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${DIFFUSE_CPP_COMPILE_OPTIONS}>)
 
-add_subdirectory(mpi)
+  target_include_directories(
+    diffuse_mpi PRIVATE ${noarr_structures_SOURCE_DIR}/include
+                        ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
+
+  target_link_libraries(diffuse_mpi nlohmann_json::nlohmann_json hwy
+                        OpenMP::OpenMP_CXX LAPACK::LAPACK MPI::MPI_CXX)
+endif()
