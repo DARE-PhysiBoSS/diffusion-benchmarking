@@ -13,27 +13,23 @@
 export OMP_DISPLAY_ENV=true
 export OMP_NUM_THREADS=112
 export OMP_PROC_BIND=close
-export OMP_PLACES=threads
+export OMP_PLACES=cores
 
 module purge
 module load cmake/3.30.5
 module load gcc/13.2.0 openmpi/4.1.5-gcc mkl lapack/3.12-gcc ddt
 
 
-./build/diffuse --alg ref --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg lstc --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg lstc_t --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg lstm --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg lapack --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg lapack2 --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg full_lapack --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
-./build/diffuse --alg avx256d --problem ./example-problems/50x50x50x1.json --benchmark --double >> test1.csv
+# Define the list of algorithms to test
+algorithms=("lstc" "lstcm" "lstcma" "lstct" "lstcta" "lstcs" "lstcst" "lstcsta" "lstcstai" "lstm" "lstmt" "lstmta" "lstmtai" "avx256d" "biofvm" "lapack" "lapack2" "full_lapack")
 
-./build/diffuse --alg ref --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg lstc --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg lstc_t --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg lstm --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg lapack --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg lapack2 --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg full_lapack --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
-./build/diffuse --alg avx256d --problem ./example-problems/50x50x50x8.json --benchmark --double >> test2.csv
+# Define the common command parameters
+problem_file="example-problems/300x300x300x100.json"
+params_file="example-problems/params.json"
+
+# Loop through each algorithm and run the command
+for alg in "${algorithms[@]}"; do
+    echo "Running benchmark for algorithm: $alg"
+    build/diffuse --problem "$problem_file" --params "$params_file" --alg "$alg" --benchmark --double
+    echo "-----------------------------------"
+done

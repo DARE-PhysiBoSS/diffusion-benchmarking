@@ -204,9 +204,9 @@ template <typename real_t>
 void simd<real_t>::prepare(const max_problem_t& problem)
 {
 	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
+    long long int array_size = static_cast<long long int>(problem_.nx) * static_cast<long long int>(problem_.ny) * static_cast<long long int>(problem_.nz) * static_cast<long long int>(problem_.substrates_count);
+	substrates_ = std::make_unique<real_t[]>(array_size);
 
-	// Initialize substrates
 
 	auto substrates_layout = get_substrates_layout(problem_); 
 
@@ -229,7 +229,7 @@ void simd<real_t>::solve_x()
         {
         for (index_t j = 0; j < problem_.ny; j++)
         {
-            index_t index = k * thomas_k_jump + j * thomas_j_jump;
+            long_index_t index = k * thomas_k_jump + j * thomas_j_jump;
             //(*(*M.p_density_vectors))[n] /= M.thomas_denomz[0];
             for (index_t d = 0; d < problem_.substrates_count; d++)
             {
@@ -240,7 +240,7 @@ void simd<real_t>::solve_x()
             for (index_t i = 1; i < problem_.nx; i++)
             {
 
-                index_t index_inc = index + thomas_i_jump;
+                long_index_t index_inc = index + thomas_i_jump;
                 // axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n - M.thomas_k_jump]);
                 for (index_t d = 0; d < problem_.substrates_count; d++)
                 {
@@ -258,7 +258,7 @@ void simd<real_t>::solve_x()
             index = k * thomas_k_jump + j * thomas_j_jump + (thomas_i_jump * (problem_.nx - 1));
             for (index_t i = problem_.nx - 2; i >= 0; i--)
             {
-                index_t index_dec = index - thomas_i_jump;
+                long_index_t index_dec = index - thomas_i_jump;
                 // naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + M.thomas_k_jump]);
                 for (index_t d = 0; d < problem_.substrates_count; d++)
                 {
@@ -279,8 +279,8 @@ void simd<real_t>::solve_y()
         //Forward Elimination
         //J = 0
         index_t gd = 0; //Density pointer
-        index_t index = k * thomas_k_jump;
-        index_t zd;
+        long_index_t index = k * thomas_k_jump;
+        long_index_t zd;
         for (zd = 0; zd + vl_ < thomas_j_jump; zd+=vl_)
         {
             __m256d denomy1 = _mm256_loadu_pd(&vby_[0][gd]);
@@ -306,9 +306,9 @@ void simd<real_t>::solve_y()
         //J = 1..(y_size-1)
         for (index_t j = 1; j < problem_.ny; j++)
         {
-            index_t index_base = k * thomas_k_jump +  (j-1)*thomas_j_jump;
-            index_t index_inc =  index_base + thomas_j_jump;
-            index_t zd;
+            long_index_t index_base = k * thomas_k_jump +  (j-1)*thomas_j_jump;
+            long_index_t index_inc =  index_base + thomas_j_jump;
+            long_index_t zd;
             gd = 0;
             for (zd = 0; zd + vl_ < thomas_j_jump; zd+=vl_)
             {
@@ -342,9 +342,9 @@ void simd<real_t>::solve_y()
         // Back substitution
         for (index_t j = problem_.ny - 2; j >= 0; j--)
         {
-            index_t index_base = k * thomas_k_jump + (j+1) * thomas_j_jump;
-            index_t index_dec = index_base - thomas_j_jump;
-            index_t zd;
+            long_index_t index_base = k * thomas_k_jump + (j+1) * thomas_j_jump;
+            long_index_t index_dec = index_base - thomas_j_jump;
+            long_index_t zd;
             gd = 0;
             for ( zd = 0; zd + vl_ < thomas_j_jump; zd+=vl_)
             {
@@ -385,13 +385,13 @@ void simd<real_t>::solve_z()
 {
     
     //Forward Elimination
-    index_t initial_index = 0;
-    index_t limit = initial_index + thomas_k_jump;
-    index_t limit_vec = limit -(thomas_k_jump%vl_);
+    long_index_t initial_index = 0;
+    long_index_t limit = initial_index + thomas_k_jump;
+    long_index_t limit_vec = limit -(thomas_k_jump%vl_);
     #pragma omp parallel for
-    for (index_t index = initial_index; index < limit_vec; index += vl_)
+    for (long_index_t index = initial_index; index < limit_vec; index += vl_)
     {
-        index_t index_dec = index;
+        long_index_t index_dec = index;
         index_t gd = index%gvec_size;
 
         __m256d denomx1 = _mm256_loadu_pd(&vbz_[0][gd]);
@@ -402,7 +402,7 @@ void simd<real_t>::solve_z()
 
         for (index_t k = 1; k < problem_.nz; k++)
         {
-            index_t index_inc = index_dec + thomas_k_jump;
+            long_index_t index_inc = index_dec + thomas_k_jump;
             __m256d constant1 = _mm256_loadu_pd(&vconstant1[gd]);
             __m256d density_curr1 = _mm256_loadu_pd(&substrates_[index_dec]);
             __m256d density_inc1 = _mm256_loadu_pd(&substrates_[index_inc]);
@@ -418,16 +418,16 @@ void simd<real_t>::solve_z()
     }
 
     //Epilogo vectorization
-    for (index_t index = limit_vec; index < limit; ++index)
+    for (long_index_t index = limit_vec; index < limit; ++index)
     {
-        index_t index_dec = index;
+        long_index_t index_dec = index;
         index_t d = index % problem_.substrates_count; 
 
         substrates_[index] /= bz_[0][d];
 
         for (index_t k = 1; k < problem_.nz; k++)
         {
-            index_t index_inc = index_dec + thomas_k_jump;
+            long_index_t index_inc = index_dec + thomas_k_jump;
             // axpy(&(*M.microenvironment)[n], M.thomas_constant1, (*M.microenvironment)[n - M.i_jump]);
             substrates_[index_inc] += constant1[d] * substrates_[index_dec];
             
@@ -441,18 +441,18 @@ void simd<real_t>::solve_z()
 
     // Back substitution
 
-    index_t last_zplane = ((problem_.nz - 1)*thomas_k_jump);
+    long_index_t last_zplane = ((problem_.nz - 1)*thomas_k_jump);
     initial_index = last_zplane;
     limit = initial_index + thomas_k_jump;
     limit_vec = limit - (thomas_k_jump%vl_);
     #pragma omp parallel for 
-    for (index_t index = initial_index; index < limit_vec; index += vl_)
+    for (long_index_t index = initial_index; index < limit_vec; index += vl_)
     {
-        index_t index_aux = index;
+        long_index_t index_aux = index;
         index_t gd = (index - last_zplane)%gvec_size;
         for (index_t k = problem_.nz - 2; k >= 0; k--)
         {
-            index_t index_dec = index_aux - thomas_k_jump;
+            long_index_t index_dec = index_aux - thomas_k_jump;
             __m256d cy1 = _mm256_loadu_pd(&vcz_[k][gd]);
             __m256d density_curr1 = _mm256_loadu_pd(&substrates_[index_aux]);
             __m256d density_dec1 = _mm256_loadu_pd(&substrates_[index_dec]);
@@ -466,8 +466,8 @@ void simd<real_t>::solve_z()
 
     //Epilogo Vectorizacion Back Last rank
     
-    for (index_t index = limit_vec; index < limit; ++index){
-        index_t index_aux = index;
+    for (long_index_t index = limit_vec; index < limit; ++index){
+        long_index_t index_aux = index;
         index_t d = (index - last_zplane) % problem_.substrates_count;
         for (index_t k = problem_.nz - 2; k >= 0; k--)
         {

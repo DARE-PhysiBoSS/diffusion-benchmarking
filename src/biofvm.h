@@ -8,6 +8,7 @@ template <typename real_t>
 class biofvm : public locally_onedimensional_solver
 {
 	using index_t = std::int32_t;
+	using long_index_t = std::int64_t;
 
 	problem_t<index_t, real_t> problem_;
 
@@ -17,9 +18,9 @@ class biofvm : public locally_onedimensional_solver
 	std::vector<std::vector<real_t>> by_, cy_;
 	std::vector<std::vector<real_t>> bz_, cz_;
     std::vector<real_t> constant1;
-    index_t thomas_i_jump;
-    index_t thomas_j_jump;
-    index_t thomas_k_jump;
+    long_index_t thomas_i_jump;
+    long_index_t thomas_j_jump;
+    long_index_t thomas_k_jump;
 
 	std::size_t work_items_;
 

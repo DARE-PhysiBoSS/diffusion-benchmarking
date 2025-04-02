@@ -9,6 +9,10 @@ Once cloned the repository
     $ cd build
 
     $ cmake ../CMakeLists.txt
+    
+    $ make
+    
+    $ cd ../
+    
+  
 
-Debug
-    $

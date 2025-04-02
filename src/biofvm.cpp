@@ -12,7 +12,6 @@ void biofvm<real_t>::precompute_values()
 	thomas_j_jump = thomas_i_jump * problem_.nx;
 	thomas_k_jump = thomas_j_jump * problem_.ny;
 
-
 	std::vector<real_t> zero(problem_.substrates_count, 0.0);
 	std::vector<real_t> one(problem_.substrates_count, 1.0);
 	real_t dt = problem_.dt;
@@ -140,7 +139,8 @@ template <typename real_t>
 void biofvm<real_t>::prepare(const max_problem_t& problem)
 {
 	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	substrates_ = std::make_unique<real_t[]>(problem_.nx * problem_.ny * problem_.nz * problem_.substrates_count);
+	long long int array_size = static_cast<long long int>(problem_.nx) * static_cast<long long int>(problem_.ny) * static_cast<long long int>(problem_.nz) * static_cast<long long int>(problem_.substrates_count);
+	substrates_ = std::make_unique<real_t[]>(array_size);
 
 	// Initialize substrates
 
@@ -165,7 +165,7 @@ void biofvm<real_t>::solve_x()
 	{
 		for (index_t j = 0; j < problem_.ny; j++)
 		{
-			index_t index = k * thomas_k_jump + j * thomas_j_jump;
+			long_index_t index = k * thomas_k_jump + j * thomas_j_jump;
 			//(*(*M.p_density_vectors))[n] /= M.thomas_denomz[0];
 			for (index_t d = 0; d < problem_.substrates_count; d++)
 			{
@@ -175,7 +175,7 @@ void biofvm<real_t>::solve_x()
 			// should be an empty loop if mesh.z_coordinates.size() < 2
 			for (index_t i = 1; i < problem_.nx; i++)
 			{
-				index_t index_inc = index + thomas_i_jump;
+				long_index_t index_inc = index + thomas_i_jump;
 				// axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n -
 				// M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -194,7 +194,7 @@ void biofvm<real_t>::solve_x()
 			index = k * thomas_k_jump + j * thomas_j_jump + (thomas_i_jump * (problem_.nx - 1));
 			for (index_t i = problem_.nx - 2; i >= 0; i--)
 			{
-				index_t index_dec = index - thomas_i_jump;
+				long_index_t index_dec = index - thomas_i_jump;
 				// naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
 				{
@@ -214,7 +214,7 @@ void biofvm<real_t>::solve_y()
 	{
 		for (index_t i = 0; i < problem_.nx; i++)
 		{
-			index_t index = k * thomas_k_jump + i * thomas_i_jump;
+			long_index_t index = k * thomas_k_jump + i * thomas_i_jump;
 			//(*(*M.p_density_vectors))[n] /= M.thomas_denomz[0];
 			for (index_t d = 0; d < problem_.substrates_count; d++)
 			{
@@ -224,7 +224,7 @@ void biofvm<real_t>::solve_y()
 			// should be an empty loop if mesh.z_coordinates.size() < 2
 			for (index_t j = 1; j < problem_.ny; j++)
 			{
-				index_t index_inc = index + thomas_j_jump;
+				long_index_t index_inc = index + thomas_j_jump;
 				// axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n -
 				// M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -243,7 +243,7 @@ void biofvm<real_t>::solve_y()
 			index = k * thomas_k_jump + i * thomas_i_jump + (thomas_j_jump * (problem_.ny - 1));
 			for (index_t j = problem_.ny - 2; j >= 0; j--)
 			{
-				index_t index_dec = index - thomas_j_jump;
+				long_index_t index_dec = index - thomas_j_jump;
 				// naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
 				{
@@ -263,7 +263,7 @@ void biofvm<real_t>::solve_z()
 	{
 		for (index_t i = 0; i < problem_.nx; i++)
 		{
-			index_t index = j * thomas_j_jump + i * thomas_i_jump;
+			long_index_t index = j * thomas_j_jump + i * thomas_i_jump;
 			//(*(*M.p_density_vectors))[n] /= M.thomas_denomz[0];
 			for (index_t d = 0; d < problem_.substrates_count; d++)
 			{
@@ -273,7 +273,7 @@ void biofvm<real_t>::solve_z()
 			// should be an empty loop if mesh.z_coordinates.size() < 2
 			for (index_t k = 1; k < problem_.nz; k++)
 			{
-				index_t index_inc = index + thomas_k_jump;
+				long_index_t index_inc = index + thomas_k_jump;
 				// axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n -
 				// M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -292,7 +292,7 @@ void biofvm<real_t>::solve_z()
 			index = i * thomas_i_jump + j * thomas_j_jump + (thomas_k_jump * (problem_.nz - 1));
 			for (index_t k = problem_.nz - 2; k >= 0; k--)
 			{
-				index_t index_dec = index - thomas_k_jump;
+				long_index_t index_dec = index - thomas_k_jump;
 				// naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
 				{
