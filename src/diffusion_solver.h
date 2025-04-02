@@ -7,6 +7,12 @@
 class diffusion_solver
 {
 public:
+	using index_t = std::int32_t; 
+	#ifdef USE_MPI
+	index_t x_min, y_min, z_min;
+	index_t x_max, y_max, z_max;
+	#endif
+
 	// Allocates common resources
 	virtual void prepare(const max_problem_t& problem) = 0;
 

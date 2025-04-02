@@ -59,7 +59,11 @@ FetchContent_MakeAvailable(highway)
 
 file(GLOB src_files "src/*")
 
-add_executable(diffuse ${src_files})
+list(FILTER src_files EXCLUDE REGEX "src/MPI_1D_blocking.*")
+
+set(diffuse_sources ${src_files})
+
+add_executable(diffuse ${diffuse_sources})
 
 target_compile_options(
   diffuse PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${DIFFUSE_CPP_COMPILE_OPTIONS}>)
@@ -77,3 +81,5 @@ target_link_libraries(diffuse OpenMP::OpenMP_CXX)
 
 find_package(LAPACK REQUIRED)
 target_link_libraries(diffuse LAPACK::LAPACK)
+
+add_subdirectory(mpi)

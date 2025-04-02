@@ -17,6 +17,9 @@
 #include "reference_thomas_solver.h"
 #include "simd.h"
 #include "tridiagonal_solver.h"
+#ifdef USE_MPI
+#include "MPI_1D_blocking.h"
+#endif
 
 template <typename real_t>
 std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_solvers_map()
@@ -42,6 +45,9 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
 	solvers.emplace("avx256d", []() { return std::make_unique<simd<double>>(); });
 	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
+	#ifdef USE_MPI
+		solvers.emplace("MPI_1D_blocking", []() { return std::make_unique<MPI_1D_blocking<real_t>>(); });
+	#endif
 	return solvers;
 }
 
@@ -140,10 +146,26 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 {
 	double maximum_absolute_difference = 0.;
 	double rmse = 0.;
+	
+	#ifdef USE_MPI
+	std::size_t z_ini = alg.z_ini;
+	std::size_t z_end = alg.z_end;
+	std::size_t y_ini = alg.y_ini;
+	std::size_t y_end = alg.y_end;
+	std::size_t x_ini = alg.x_ini;
+	std::size_t x_end = alg.x_end;
+	#else
+	std::size_t z_ini = 0;
+	std::size_t z_end = problem.nz;
+	std::size_t y_ini = 0;
+	std::size_t y_end = problem.ny;
+	std::size_t x_ini = 0;
+	std::size_t x_end = problem.nx;
+	#endif
 
-	for (std::size_t z = 0; z < problem.nz; z++)
-		for (std::size_t y = 0; y < problem.ny; y++)
-			for (std::size_t x = 0; x < problem.nx; x++)
+	for (std::size_t z = z_ini; z < z_end; z++)
+		for (std::size_t y = y_ini; y < y_end; y++)
+			for (std::size_t x = x_ini; x < x_end; x++)
 				for (std::size_t s = 0; s < problem.substrates_count; s++)
 				{
 					auto ref_val = ref.access(s, x, y, z);
@@ -245,6 +267,11 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params,
 								 benchmark_kind kind)
 {
+	#ifdef USE_MPI
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	#endif
+
 	auto inner_iterations = params.contains("inner_iterations") ? (std::size_t)params["inner_iterations"] : 10;
 
 	auto solver = get_solver(alg);
@@ -271,10 +298,19 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
+	#ifdef USE_MPI
+	if (rank == 0) {
 	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
 			  << "," << problem.nz << ",";
 	append_params(std::cout, params, false);
 	std::cout << init_time_us << ",";
+	}
+	#else
+	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
+			  << "," << problem.nz << ",";
+	append_params(std::cout, params, false);
+	std::cout << init_time_us << ",";
+	#endif
 
 	if (auto adi_solver = dynamic_cast<locally_onedimensional_solver*>(solver.get());
 		adi_solver && kind == benchmark_kind::per_dimension)
@@ -314,8 +350,13 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		auto [y_mean, y_std] = compute_mean_and_std(times_y);
 		auto [z_mean, z_std] = compute_mean_and_std(times_z);
 
+		#ifdef USE_MPI
+		if (rank == 0) std::cout << x_mean << "," << y_mean << "," << z_mean << "," << x_std << "," << y_std << "," << z_std
+				  << std::endl;
+		#else
 		std::cout << x_mean << "," << y_mean << "," << z_mean << "," << x_std << "," << y_std << "," << z_std
 				  << std::endl;
+		#endif
 	}
 	else
 	{
@@ -332,7 +373,11 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 		auto [mean, std_dev] = compute_mean_and_std(times);
 
+		#ifdef USE_MPI
+		if (rank == 0) std::cout << mean << "," << std_dev << std::endl;
+		#else
 		std::cout << mean << "," << std_dev << std::endl;
+		#endif
 	}
 }
 
@@ -351,6 +396,11 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 
 	// make header
 	{
+		#ifdef USE_MPI
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		if (rank == 0) {
+		#endif
 		std::cout << "algorithm,dims,s,nx,ny,nz,";
 		append_params(std::cout, params, true);
 
@@ -358,6 +408,9 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 			std::cout << "init_time,x_time,y_time,z_time,x_std,y_std,z_std" << std::endl;
 		else
 			std::cout << "init_time,time,std_dev" << std::endl;
+		#ifdef USE_MPI
+		}
+		#endif
 	}
 
 	// warmup

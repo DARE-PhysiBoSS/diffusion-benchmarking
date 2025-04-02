@@ -5,6 +5,9 @@
 #include <map>
 #include <memory>
 #include <string>
+#ifdef USE_MPI
+	#include <mpi.h>
+#endif
 
 #include "diffusion_solver.h"
 #include "tridiagonal_solver.h"

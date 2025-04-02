@@ -6,12 +6,38 @@
 
 #include "algorithms.h"
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
+
 int main(int argc, char** argv)
 {
 	// #define CSR_FLUSH_TO_ZERO (1 << 15)
 	// 	unsigned csr = __builtin_ia32_stmxcsr();
 	// 	csr |= CSR_FLUSH_TO_ZERO;
 	// 	__builtin_ia32_ldmxcsr(csr);
+
+	#ifdef USE_MPI
+	int rank, size;
+	try
+	{
+		int provided_thread_level;
+		MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided_thread_level);
+		if (provided_thread_level != MPI_THREAD_FUNNELED)
+		{
+			std::cerr << "ERROR! The MPI implementation does not provide the required thread level" << std::endl;
+			return 1;
+		}
+
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		MPI_Comm_size(MPI_COMM_WORLD, &size);
+	}
+	catch(const std::exception& e)
+	{
+		std::cerr << e.what() << '\n';
+		return 1;
+	}
+	#endif
 
 	argparse::ArgumentParser program("diffuse");
 
@@ -62,8 +88,12 @@ int main(int argc, char** argv)
 	}
 	catch (const std::exception& err)
 	{
-		std::cerr << err.what() << std::endl;
-		std::cerr << program;
+		#ifdef USE_MPI
+			std::cerr << "Error in Rank" << rank << ": " <<  err.what() << std::endl;
+			MPI_Abort(MPI_COMM_WORLD, 1);
+		#else
+			std::cerr << err.what() << std::endl;
+		#endif
 		return 1;
 	}
 
@@ -77,7 +107,12 @@ int main(int argc, char** argv)
 	}
 	catch (const std::exception& err)
 	{
-		std::cerr << err.what() << std::endl;
+		#ifdef USE_MPI
+			if (rank == 0) std::cerr << err.what() << std::endl;
+			MPI_Abort(MPI_COMM_WORLD, 1);
+		#else
+			std::cerr << err.what() << std::endl;
+		#endif
 		return 1;
 	}
 
@@ -88,7 +123,12 @@ int main(int argc, char** argv)
 		std::ifstream ifs(params_file);
 		if (!ifs)
 		{
+			#ifdef USE_MPI
+				if (rank == 0) std::cerr << "Cannot open file " << params_file << std::endl;
+				MPI_Abort(MPI_COMM_WORLD, 1);
+			#else
 			std::cerr << "Cannot open file " << params_file << std::endl;
+			#endif
 			return 1;
 		}
 
@@ -115,6 +155,10 @@ int main(int argc, char** argv)
 		std::cerr << err.what() << std::endl;
 		return 1;
 	}
+
+	#ifdef USE_MPI
+		MPI_Finalize();
+	#endif
 
 	return 0;
 }
