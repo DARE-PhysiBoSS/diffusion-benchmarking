@@ -18,7 +18,8 @@
 			"packages": [
 				"libopenblas-dev",
 				"cmake",
-				"ninja-build"
+				"ninja-build",
+				"gdb"
 			]
 		}
 	},

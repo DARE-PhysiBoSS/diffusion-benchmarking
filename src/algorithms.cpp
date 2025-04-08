@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "biofvm.h"
+#include "cyclic_reduction_solver.h"
 #include "full_lapack_solver.h"
 #include "general_lapack_thomas_solver.h"
 #include "lapack_thomas_solver.h"
@@ -42,6 +43,7 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
 	solvers.emplace("avx256d", []() { return std::make_unique<simd<double>>(); });
 	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
+	solvers.emplace("cr", []() { return std::make_unique<cyclic_reduction_solver<real_t, false>>(); });
 	return solvers;
 }
 
