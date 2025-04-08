@@ -364,18 +364,16 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 
 	// warmup
 	{
-		auto solver = get_solver(alg);
-		solver->tune(params);
-		solver->prepare(problem);
-		solver->initialize();
-
 		auto warmup_time_s = params.contains("warmup_time") ? (double)params["warmup_time"] : 3.0;
 		auto start = std::chrono::high_resolution_clock::now();
 		auto end = start;
 		do
 		{
+			auto solver = get_solver(alg);
+			solver->tune(params);
+			solver->prepare(problem);
 			solver->initialize();
-			solver->solve();
+
 			end = std::chrono::high_resolution_clock::now();
 		} while ((double)std::chrono::duration_cast<std::chrono::seconds>(end - start).count() < warmup_time_s);
 	}
