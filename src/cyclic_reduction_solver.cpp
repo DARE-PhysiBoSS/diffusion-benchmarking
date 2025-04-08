@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdlib>
 
+#include "omp_helper.h"
+
 template <typename real_t, bool aligned_x>
 void cyclic_reduction_solver<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims)
 {
@@ -54,9 +56,13 @@ void cyclic_reduction_solver<real_t, aligned_x>::initialize()
 		precompute_values(az_, b1z_, this->problem_.dz, this->problem_.dims);
 
 	auto max_n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
-	a_scratch_ = (real_t*)std::malloc(max_n * sizeof(real_t));
-	b_scratch_ = (real_t*)std::malloc(max_n * sizeof(real_t));
-	c_scratch_ = (real_t*)std::malloc(max_n * sizeof(real_t));
+
+	for (index_t i = 0; i < get_max_threads(); i++)
+	{
+		a_scratch_.push_back((real_t*)std::malloc(max_n * sizeof(real_t)));
+		b_scratch_.push_back((real_t*)std::malloc(max_n * sizeof(real_t)));
+		c_scratch_.push_back((real_t*)std::malloc(max_n * sizeof(real_t)));
+	}
 }
 
 template <typename real_t, bool aligned_x>
@@ -78,126 +84,10 @@ auto cyclic_reduction_solver<real_t, aligned_x>::get_diagonal_layout(const probl
 	}
 }
 
-// template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-// static void solve_slice_x_1d(real_t* __restrict__ densities, real_t* __restrict__ a, real_t* __restrict__ b,
-// 							 real_t* __restrict__ c, const density_layout_t dens_l, const diagonal_layout_t diag_l)
-// {
-// 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
-// 	const index_t n = dens_l | noarr::get_length<'x'>();
-
-// 	index_t log_n = (int)std::log2(n);
-
-// 	for (index_t s = 0; s < substrates_count; s++)
-// 	{
-// 		for (index_t step = 0; step < log_n; step++)
-// 		{
-// 			index_t stride = 1 << step;
-// 			for (index_t i = 2 * stride - 1; i < n; i += 2 * stride)
-// 			{
-// 				if (i + stride < n)
-// 				{
-// 					real_t alpha = (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-// 								   / (diag_l | noarr::get_at<'s', 'i'>(b, s, i - stride));
-// 					real_t beta = (diag_l | noarr::get_at<'s', 'i'>(c, s, i))
-// 								  / (diag_l | noarr::get_at<'s', 'i'>(b, s, i + stride));
-
-// 					(diag_l | noarr::get_at<'s', 'i'>(b, s, i)) -=
-// 						alpha * (diag_l | noarr::get_at<'s', 'i'>(c, s, i - stride))
-// 						+ beta * (diag_l | noarr::get_at<'s', 'i'>(a, s, i + stride));
-
-// 					(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) -=
-// 						alpha * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride))
-// 						+ beta * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i + stride));
-
-// 					(diag_l | noarr::get_at<'s', 'i'>(a, s, i)) =
-// 						-alpha * (diag_l | noarr::get_at<'s', 'i'>(a, s, i - stride));
-// 					(diag_l | noarr::get_at<'s', 'i'>(c, s, i)) =
-// 						-beta * (diag_l | noarr::get_at<'s', 'i'>(c, s, i + stride));
-
-// 					// std::cout << "b[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(b, s, i)) <<
-// 					// ", "
-// 					// 		  << "a[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(a, s, i)) << ", "
-// 					// 		  << "c[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(c, s, i)) << ", "
-// 					// 		  << "densities[" << s << "][" << i
-// 					// 		  << "] = " << (dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) << std::endl;
-// 				}
-// 				else
-// 				{
-// 					real_t alpha = (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-// 								   / (diag_l | noarr::get_at<'s', 'i'>(b, s, i - stride));
-
-// 					(diag_l | noarr::get_at<'s', 'i'>(b, s, i)) -=
-// 						alpha * (diag_l | noarr::get_at<'s', 'i'>(c, s, i - stride));
-
-// 					(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) -=
-// 						alpha * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride));
-
-// 					(diag_l | noarr::get_at<'s', 'i'>(a, s, i)) =
-// 						-alpha * (diag_l | noarr::get_at<'s', 'i'>(a, s, i - stride));
-
-
-// 					// std::cout << "b[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(b, s, i)) <<
-// 					// ", "
-// 					// 		  << "a[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(a, s, i)) << ", "
-// 					// 		  << "c[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(c, s, i)) << ", "
-// 					// 		  << "densities[" << s << "][" << i
-// 					// 		  << "] = " << (dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) << std::endl;
-// 				}
-// 			}
-// 		}
-
-// 		// the first solved unknown
-// 		{
-// 			index_t i = (1 << log_n) - 1;
-// 			(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-// 				(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) / (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-// 		}
-
-// 		for (index_t step = log_n - 1; step >= 0; step--)
-// 		{
-// 			index_t stride = 1 << step;
-
-// 			index_t i = stride - 1;
-// 			// the first unknown of each step does not have (i - stride) dependency
-// 			{
-// 				(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-// 					((dens_l | noarr::get_at<'s', 'x'>(densities, s, i))
-// 					 - (diag_l | noarr::get_at<'s', 'i'>(c, s, i))
-// 						   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i + stride])
-// 					/ (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-// 			}
-// 			i += 2 * stride;
-
-// 			for (; i < n; i += 2 * stride)
-// 			{
-// 				if (i + stride < n)
-// 				{
-// 					(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-// 						((dens_l | noarr::get_at<'s', 'x'>(densities, s, i))
-// 						 - (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-// 							   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride]
-// 						 - (diag_l | noarr::get_at<'s', 'i'>(c, s, i))
-// 							   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i + stride])
-// 						/ (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-// 				}
-// 				else
-// 				{
-// 					(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-// 						((dens_l | noarr::get_at<'s', 'x'>(densities, s, i))
-// 						 - (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-// 							   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride])
-// 						/ (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
-
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+template <typename index_t, typename real_t, typename density_layout_t>
 static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
-							 real_t* __restrict__ c, const density_layout_t dens_l, const diagonal_layout_t diag_l)
+							 real_t* __restrict__ c, const density_layout_t dens_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -206,10 +96,11 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	const index_t inner_steps = all_steps - 1;
 	const index_t inner_n = n / 2;
 
-	// we are halving the number of unknowns into new arrays a, b,c
+	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
 	const auto inner_dens_l = dens_l ^ noarr::step<'x'>(1, 2);
 
+#pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		// prepare inner arrays a, b, c
@@ -345,219 +236,155 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, real_t* __restrict__ a, real_t* __restrict__ b,
-									real_t* __restrict__ c, const density_layout_t dens_l,
-									const diagonal_layout_t diag_l)
-{
-	// const index_t substrates_count = dens_l | noarr::get_length<'s'>();
-	// const index_t n = dens_l | noarr::get_length<'x'>();
-	// const index_t m = dens_l | noarr::get_length<'m'>();
-
-	// index_t log_n = (int)std::log2(n);
-
-	// for (index_t s = 0; s < substrates_count; s++)
-	// {
-	// 	for (index_t step = 0; step < log_n; step++)
-	// 	{
-	// 		index_t stride = 1 << step;
-	// 		for (index_t i = 2 * stride - 1; i < n; i += 2 * stride)
-	// 		{
-	// 			if (i + stride < n)
-	// 			{
-	// 				real_t alpha = (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-	// 							   / (diag_l | noarr::get_at<'s', 'i'>(b, s, i - stride];
-	// 				real_t beta = (diag_l | noarr::get_at<'s', 'i'>(c, s, i))
-	// 							  / (diag_l | noarr::get_at<'s', 'i'>(b, s, i + stride];
-
-	// 				(diag_l | noarr::get_at<'s', 'i'>(b, s, i)) -=
-	// 					alpha * (diag_l | noarr::get_at<'s', 'i'>(c, s, i - stride]
-	// 					+ beta * (diag_l | noarr::get_at<'s', 'i'>(a, s, i + stride];
-
-	// 				(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) -=
-	// 					alpha * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride]
-	// 					+ beta * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i + stride];
-
-	// 				(diag_l | noarr::get_at<'s', 'i'>(a, s, i)) =
-	// 					-alpha * (diag_l | noarr::get_at<'s', 'i'>(a, s, i - stride];
-	// 				(diag_l | noarr::get_at<'s', 'i'>(c, s, i)) =
-	// 					-beta * (diag_l | noarr::get_at<'s', 'i'>(c, s, i + stride];
-
-	// 				// std::cout << "b[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(b, s, i)) <<
-	// 				// ", "
-	// 				// 		  << "a[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(a, s, i)) << ", "
-	// 				// 		  << "c[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(c, s, i)) << ", "
-	// 				// 		  << "densities[" << s << "][" << i
-	// 				// 		  << "] = " << (dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) << std::endl;
-	// 			}
-	// 			else
-	// 			{
-	// 				real_t alpha = (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-	// 							   / (diag_l | noarr::get_at<'s', 'i'>(b, s, i - stride];
-
-	// 				(diag_l | noarr::get_at<'s', 'i'>(b, s, i)) -=
-	// 					alpha * (diag_l | noarr::get_at<'s', 'i'>(c, s, i - stride];
-
-	// 				(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) -=
-	// 					alpha * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride];
-
-	// 				(diag_l | noarr::get_at<'s', 'i'>(a, s, i)) =
-	// 					-alpha * (diag_l | noarr::get_at<'s', 'i'>(a, s, i - stride];
-
-
-	// 				// std::cout << "b[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(b, s, i)) <<
-	// 				// ", "
-	// 				// 		  << "a[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(a, s, i)) << ", "
-	// 				// 		  << "c[" << s << "][" << i << "] = " << (diag_l | noarr::get_at<'s', 'i'>(c, s, i)) << ", "
-	// 				// 		  << "densities[" << s << "][" << i
-	// 				// 		  << "] = " << (dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) << std::endl;
-	// 			}
-	// 		}
-	// 	}
-
-	// 	// the first solved unknown
-	// 	{
-	// 		index_t i = (1 << log_n) - 1;
-	// 		(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-	// 			(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) / (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-	// 	}
-
-	// 	for (index_t step = log_n - 1; step >= 0; step--)
-	// 	{
-	// 		index_t stride = 1 << step;
-
-	// 		index_t i = stride - 1;
-	// 		// the first unknown of each step does not have (i - stride) dependency
-	// 		{
-	// 			(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-	// 				((dens_l | noarr::get_at<'s', 'x'>(densities, s, i))
-	// 				 - (diag_l | noarr::get_at<'s', 'i'>(c, s, i))
-	// 					   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i + stride])
-	// 				/ (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-	// 		}
-	// 		i += 2 * stride;
-
-	// 		for (; i < n; i += 2 * stride)
-	// 		{
-	// 			if (i + stride < n)
-	// 			{
-	// 				(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-	// 					((dens_l | noarr::get_at<'s', 'x'>(densities, s, i))
-	// 					 - (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-	// 						   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride]
-	// 					 - (diag_l | noarr::get_at<'s', 'i'>(c, s, i))
-	// 						   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i + stride])
-	// 					/ (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-	// 			}
-	// 			else
-	// 			{
-	// 				(dens_l | noarr::get_at<'s', 'x'>(densities, s, i)) =
-	// 					((dens_l | noarr::get_at<'s', 'x'>(densities, s, i))
-	// 					 - (diag_l | noarr::get_at<'s', 'i'>(a, s, i))
-	// 						   * (dens_l | noarr::get_at<'s', 'x'>(densities, s, i - stride])
-	// 					/ (diag_l | noarr::get_at<'s', 'i'>(b, s, i));
-	// 			}
-	// 		}
-	// 	}
-	// }
-}
-
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ a,
-							 const real_t* __restrict__ b1, const real_t* __restrict__ b, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t x_tile_size)
+template <typename index_t, typename real_t, typename density_layout_t>
+static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+									const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
+									real_t* __restrict__ c, const density_layout_t dens_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
-	const index_t n = dens_l | noarr::get_length<'y'>();
+	const index_t n = dens_l | noarr::get_length<'x'>();
+	const index_t m = dens_l | noarr::get_length<'m'>();
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
+	const index_t all_steps = (int)std::log2(n);
+	const index_t inner_steps = all_steps - 1;
+	const index_t inner_n = n / 2;
 
+	// we are halving the number of unknowns into new arrays a, b, c
+	// but we are preserving densities array, so its indices need to be adjusted
+	const auto inner_dens_l = dens_l ^ noarr::step<'x'>(1, 2);
+
+#pragma omp for schedule(static) collapse(2) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		// body
+		for (index_t yz = 0; yz < m; yz++)
 		{
-			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-			const index_t x_len = body_dens_l | noarr::get_length<'x'>();
-			const index_t X_len = body_dens_l | noarr::get_length<'X'>();
-
-#pragma omp for schedule(static) nowait
-			for (index_t X = 0; X < X_len; X++)
+			// prepare inner arrays a, b, c
+			for (index_t i = 1; i < n; i += 2)
 			{
-				const real_t a_s = a[s];
-				const real_t b1_s = b1[s];
-				real_t b_tmp = a_s / (b1_s + a_s);
+				const auto a_tmp = ac[s];
+				const auto a_low_tmp = a_tmp * (i == 1 ? 0 : 1);
 
-				for (index_t i = 1; i < n; i++)
+				const auto c_tmp = a_tmp;
+				const auto c_high_tmp = a_tmp * (i == n - 2 ? 0 : 1);
+
+				const auto b_low_tmp = b1[s] + ((i == 1) ? a_tmp : 0);
+				const auto b_tmp = b1[s] + ((i == n - 1) ? a_tmp : 0);
+				const auto b_high_tmp = b1[s] + ((i == n - 2) ? a_tmp : 0);
+
+				const real_t alpha = a_tmp / b_low_tmp;
+				const real_t beta = (i == n - 1) ? 0 : (c_tmp / b_high_tmp);
+
+				b[i / 2] = b_tmp - (alpha + beta) * c_tmp;
+
+				(dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) -=
+					alpha * (dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - 1))
+					+ beta * ((i == n - 1) ? 0 : (dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i + 1)));
+
+				a[i / 2] = -alpha * a_low_tmp;
+				c[i / 2] = -beta * c_high_tmp;
+			}
+
+			for (index_t step = 0; step < inner_steps; step++)
+			{
+				index_t stride = 1 << step;
+				for (index_t i = 2 * stride - 1; i < inner_n; i += 2 * stride)
 				{
-					for (index_t x = 0; x < x_len; x++)
+					if (i + stride < inner_n)
 					{
-						(body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, i, s)) -=
-							(body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, i - 1, s)) * b_tmp;
+						real_t alpha = a[i] / b[i - stride];
+						real_t beta = c[i] / b[i + stride];
+
+						b[i] -= alpha * c[i - stride] + beta * a[i + stride];
+
+						(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) -=
+							alpha * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - stride))
+							+ beta * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i + stride));
+
+						a[i] = -alpha * a[i - stride];
+						c[i] = -beta * c[i + stride];
 					}
-
-					b_tmp = a_s / (b1_s - a_s * b_tmp);
-				}
-
-				for (index_t x = 0; x < x_len; x++)
-				{
-					(body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, n - 1, s)) =
-						(body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, n - 1, s))
-						* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-				}
-
-				for (index_t i = n - 2; i >= 0; i--)
-				{
-					for (index_t x = 0; x < x_len; x++)
+					else
 					{
-						(body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, i, s)) =
-							((body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, i, s))
-							 - a_s * (body_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, X, x, i + 1, s)))
-							* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+						real_t alpha = a[i] / b[i - stride];
+
+						b[i] -= alpha * c[i - stride];
+
+						(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) -=
+							alpha * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - stride));
+
+						a[i] = -alpha * a[i - stride];
+						c[i] = 0;
 					}
 				}
 			}
-		}
 
-		// remainder
-		{
-			auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-			const index_t x_len = border_dens_l | noarr::get_length<'x'>();
-
-#pragma omp single
+			// the first solved unknown
 			{
-				const real_t a_s = a[s];
-				const real_t b1_s = b1[s];
-				real_t b_tmp = a_s / (b1_s + a_s);
+				index_t i = (1 << inner_steps) - 1;
+				(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) =
+					(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) / b[i];
+			}
 
-				for (index_t i = 1; i < n; i++)
+			for (index_t step = inner_steps - 1; step >= 0; step--)
+			{
+				index_t stride = 1 << step;
+
+				index_t i = stride - 1;
+				// the first unknown of each step does not have (i - stride) dependency
 				{
-					for (index_t x = 0; x < x_len; x++)
+					(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) =
+						((inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i))
+						 - c[i] * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i + stride)))
+						/ b[i];
+				}
+
+				i += 2 * stride;
+
+				for (; i < inner_n; i += 2 * stride)
+				{
+					if (i + stride < inner_n)
 					{
-						(border_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, i, s)) -=
-							(border_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, i - 1, s))
-							* b_tmp;
+						(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) =
+							((inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i))
+							 - a[i] * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - stride))
+							 - c[i] * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i + stride)))
+							/ b[i];
 					}
-
-					b_tmp = a_s / (b1_s - a_s * b_tmp);
-				}
-
-				for (index_t x = 0; x < x_len; x++)
-				{
-					(border_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, n - 1, s)) =
-						(border_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, n - 1, s))
-						* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-				}
-
-				for (index_t i = n - 2; i >= 0; i--)
-				{
-					for (index_t x = 0; x < x_len; x++)
+					else
 					{
-						(border_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, i, s)) =
-							((border_dens_l | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, i, s))
-							 - a_s
-								   * (border_dens_l
-									  | noarr::get_at<'X', 'x', 'y', 's'>(densities, noarr::lit<0>, x, i + 1, s)))
-							* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+						(inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) =
+							((inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i))
+							 - a[i] * (inner_dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - stride)))
+							/ b[i];
+					}
+				}
+			}
+
+			{
+				// the first unknown of each step does not have (i - stride) dependency
+				{
+					(dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, 0)) =
+						((dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, 0))
+						 - ac[s] * (dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, 1)))
+						/ (b1[s] + ac[s]);
+				}
+
+				for (index_t i = 2; i < n; i += 2)
+				{
+					if (i + 1 < n)
+					{
+						(dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) =
+							((dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i))
+							 - ac[s] * (dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - 1))
+							 - ac[s] * (dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i + 1)))
+							/ b1[s];
+					}
+					else
+					{
+						(dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i)) =
+							((dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i))
+							 - a[i] * (dens_l | noarr::get_at<'s', 'm', 'x'>(densities, s, yz, i - 1)))
+							/ (b1[s] + ac[s]);
 					}
 				}
 			}
@@ -565,114 +392,371 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ a,
-							 const real_t* __restrict__ b1, const real_t* __restrict__ b, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t x_tile_size)
+template <typename index_t, typename real_t, typename density_layout_t>
+static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
+							 real_t* __restrict__ c, const density_layout_t dens_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
+
+	const index_t all_steps = (int)std::log2(n);
+	const index_t inner_steps = all_steps - 1;
+	const index_t inner_n = n / 2;
+
+	// we are halving the number of unknowns into new arrays a, b, c
+	// but we are preserving densities array, so its indices need to be adjusted
+	const auto inner_dens_l = dens_l ^ noarr::step<'y'>(1, 2);
+
+#pragma omp for schedule(static) nowait
+	for (index_t s = 0; s < substrates_count; s++)
+	{
+		// prepare inner arrays a, b, c
+		for (index_t i = 1; i < n; i += 2)
+		{
+			const auto a_tmp = ac[s];
+			const auto a_low_tmp = a_tmp * (i == 1 ? 0 : 1);
+
+			const auto c_tmp = a_tmp;
+			const auto c_high_tmp = a_tmp * (i == n - 2 ? 0 : 1);
+
+			const auto b_low_tmp = b1[s] + ((i == 1) ? a_tmp : 0);
+			const auto b_tmp = b1[s] + ((i == n - 1) ? a_tmp : 0);
+			const auto b_high_tmp = b1[s] + ((i == n - 2) ? a_tmp : 0);
+
+			const real_t alpha = a_tmp / b_low_tmp;
+			const real_t beta = (i == n - 1) ? 0 : (c_tmp / b_high_tmp);
+
+			b[i / 2] = b_tmp - (alpha + beta) * c_tmp;
+
+			for (index_t x = 0; x < x_len; x++)
+			{
+				(dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) -=
+					alpha * (dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - 1))
+					+ beta * ((i == n - 1) ? 0 : (dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i + 1)));
+			}
+
+			a[i / 2] = -alpha * a_low_tmp;
+			c[i / 2] = -beta * c_high_tmp;
+		}
+
+		for (index_t step = 0; step < inner_steps; step++)
+		{
+			index_t stride = 1 << step;
+			for (index_t i = 2 * stride - 1; i < inner_n; i += 2 * stride)
+			{
+				if (i + stride < inner_n)
+				{
+					real_t alpha = a[i] / b[i - stride];
+					real_t beta = c[i] / b[i + stride];
+
+					b[i] -= alpha * c[i - stride] + beta * a[i + stride];
+
+					for (index_t x = 0; x < x_len; x++)
+					{
+						(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) -=
+							alpha * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - stride))
+							+ beta * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i + stride));
+					}
+
+					a[i] = -alpha * a[i - stride];
+					c[i] = -beta * c[i + stride];
+				}
+				else
+				{
+					real_t alpha = a[i] / b[i - stride];
+
+					b[i] -= alpha * c[i - stride];
+
+					for (index_t x = 0; x < x_len; x++)
+					{
+						(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) -=
+							alpha * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - stride));
+					}
+
+					a[i] = -alpha * a[i - stride];
+					c[i] = 0;
+				}
+			}
+		}
+
+		// the first solved unknown
+		for (index_t x = 0; x < x_len; x++)
+		{
+			index_t i = (1 << inner_steps) - 1;
+			(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) =
+				(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) / b[i];
+		}
+
+		for (index_t step = inner_steps - 1; step >= 0; step--)
+		{
+			index_t stride = 1 << step;
+
+			index_t i = stride - 1;
+			// the first unknown of each step does not have (i - stride) dependency
+			for (index_t x = 0; x < x_len; x++)
+			{
+				(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) =
+					((inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i))
+					 - c[i] * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i + stride)))
+					/ b[i];
+			}
+
+			i += 2 * stride;
+
+			for (; i < inner_n; i += 2 * stride)
+			{
+				if (i + stride < inner_n)
+				{
+					for (index_t x = 0; x < x_len; x++)
+					{
+						(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) =
+							((inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i))
+							 - a[i] * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - stride))
+							 - c[i] * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i + stride)))
+							/ b[i];
+					}
+				}
+				else
+				{
+					for (index_t x = 0; x < x_len; x++)
+					{
+						(inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) =
+							((inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i))
+							 - a[i] * (inner_dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - stride)))
+							/ b[i];
+					}
+				}
+			}
+		}
+
+		{
+			// the first unknown of each step does not have (i - stride) dependency
+
+			for (index_t x = 0; x < x_len; x++)
+			{
+				(dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, 0)) =
+					((dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, 0))
+					 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, 1)))
+					/ (b1[s] + ac[s]);
+			}
+
+			for (index_t i = 2; i < n; i += 2)
+			{
+				if (i + 1 < n)
+				{
+					for (index_t x = 0; x < x_len; x++)
+					{
+						(dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) =
+							((dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i))
+							 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - 1))
+							 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i + 1)))
+							/ b1[s];
+					}
+				}
+				else
+				{
+					for (index_t x = 0; x < x_len; x++)
+					{
+						(dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i)) =
+							((dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i))
+							 - a[i] * (dens_l | noarr::get_at<'s', 'x', 'y'>(densities, s, x, i - 1)))
+							/ (b1[s] + ac[s]);
+					}
+				}
+			}
+		}
+	}
+}
+
+template <typename index_t, typename real_t, typename density_layout_t>
+static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
+							 real_t* __restrict__ c, const density_layout_t dens_l)
+{
+	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
+	const index_t n = dens_l | noarr::get_length<'y'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
+	const index_t all_steps = (int)std::log2(n);
+	const index_t inner_steps = all_steps - 1;
+	const index_t inner_n = n / 2;
 
-#pragma omp for schedule(static) collapse(2) nowait
+	// we are halving the number of unknowns into new arrays a, b, c
+	// but we are preserving densities array, so its indices need to be adjusted
+	const auto inner_dens_l = dens_l ^ noarr::step<'y'>(1, 2);
+
+#pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		for (index_t z = 0; z < z_len; z++)
 		{
-			// body
+			// prepare inner arrays a, b, c
+			for (index_t i = 1; i < n; i += 2)
 			{
-				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-				const index_t x_len = body_dens_l | noarr::get_length<'x'>();
-				const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+				const auto a_tmp = ac[s];
+				const auto a_low_tmp = a_tmp * (i == 1 ? 0 : 1);
 
-				for (index_t X = 0; X < X_len; X++)
+				const auto c_tmp = a_tmp;
+				const auto c_high_tmp = a_tmp * (i == n - 2 ? 0 : 1);
+
+				const auto b_low_tmp = b1[s] + ((i == 1) ? a_tmp : 0);
+				const auto b_tmp = b1[s] + ((i == n - 1) ? a_tmp : 0);
+				const auto b_high_tmp = b1[s] + ((i == n - 2) ? a_tmp : 0);
+
+				const real_t alpha = a_tmp / b_low_tmp;
+				const real_t beta = (i == n - 1) ? 0 : (c_tmp / b_high_tmp);
+
+				b[i / 2] = b_tmp - (alpha + beta) * c_tmp;
+
+				for (index_t x = 0; x < x_len; x++)
 				{
-					const real_t a_s = a[s];
-					const real_t b1_s = b1[s];
-					real_t b_tmp = a_s / (b1_s + a_s);
+					(dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) -=
+						alpha * (dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - 1))
+						+ beta
+							  * ((i == n - 1)
+									 ? 0
+									 : (dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i + 1)));
+				}
 
-					for (index_t i = 1; i < n; i++)
+				a[i / 2] = -alpha * a_low_tmp;
+				c[i / 2] = -beta * c_high_tmp;
+			}
+
+			for (index_t step = 0; step < inner_steps; step++)
+			{
+				index_t stride = 1 << step;
+				for (index_t i = 2 * stride - 1; i < inner_n; i += 2 * stride)
+				{
+					if (i + stride < inner_n)
 					{
+						real_t alpha = a[i] / b[i - stride];
+						real_t beta = c[i] / b[i + stride];
+
+						b[i] -= alpha * c[i - stride] + beta * a[i + stride];
+
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(body_dens_l | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, i, s)) -=
-								(body_dens_l | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, i - 1, s))
-								* b_tmp;
+							(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) -=
+								alpha
+									* (inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - stride))
+								+ beta
+									  * (inner_dens_l
+										 | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i + stride));
 						}
 
-						b_tmp = a_s / (b1_s - a_s * b_tmp);
+						a[i] = -alpha * a[i - stride];
+						c[i] = -beta * c[i + stride];
 					}
-
-					for (index_t x = 0; x < x_len; x++)
+					else
 					{
-						(body_dens_l | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, n - 1, s)) =
-							(body_dens_l | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, n - 1, s))
-							* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-					}
+						real_t alpha = a[i] / b[i - stride];
 
-					for (index_t i = n - 2; i >= 0; i--)
+						b[i] -= alpha * c[i - stride];
+
+						for (index_t x = 0; x < x_len; x++)
+						{
+							(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) -=
+								alpha
+								* (inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - stride));
+						}
+
+						a[i] = -alpha * a[i - stride];
+						c[i] = 0;
+					}
+				}
+			}
+
+			// the first solved unknown
+			for (index_t x = 0; x < x_len; x++)
+			{
+				index_t i = (1 << inner_steps) - 1;
+				(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) =
+					(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) / b[i];
+			}
+
+			for (index_t step = inner_steps - 1; step >= 0; step--)
+			{
+				index_t stride = 1 << step;
+
+				index_t i = stride - 1;
+				// the first unknown of each step does not have (i - stride) dependency
+				for (index_t x = 0; x < x_len; x++)
+				{
+					(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) =
+						((inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i))
+						 - c[i] * (inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i + stride)))
+						/ b[i];
+				}
+
+				i += 2 * stride;
+
+				for (; i < inner_n; i += 2 * stride)
+				{
+					if (i + stride < inner_n)
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(body_dens_l | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, i, s)) =
-								((body_dens_l | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, i, s))
-								 - a_s
-									   * (body_dens_l
-										  | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, X, x, i + 1, s)))
-								* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+							(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) =
+								((inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i))
+								 - a[i]
+									   * (inner_dens_l
+										  | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - stride))
+								 - c[i]
+									   * (inner_dens_l
+										  | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i + stride)))
+								/ b[i];
+						}
+					}
+					else
+					{
+						for (index_t x = 0; x < x_len; x++)
+						{
+							(inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) =
+								((inner_dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i))
+								 - a[i]
+									   * (inner_dens_l
+										  | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - stride)))
+								/ b[i];
 						}
 					}
 				}
 			}
 
-			// remainder
 			{
-				auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-				const index_t x_len = border_dens_l | noarr::get_length<'x'>();
+				// the first unknown of each step does not have (i - stride) dependency
 
+				for (index_t x = 0; x < x_len; x++)
 				{
-					const real_t a_s = a[s];
-					const real_t b1_s = b1[s];
-					real_t b_tmp = a_s / (b1_s + a_s);
+					(dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, 0)) =
+						((dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, 0))
+						 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, 1)))
+						/ (b1[s] + ac[s]);
+				}
 
-					for (index_t i = 1; i < n; i++)
+				for (index_t i = 2; i < n; i += 2)
+				{
+					if (i + 1 < n)
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(border_dens_l
-							 | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x, i, s)) -=
-								(border_dens_l
-								 | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x, i - 1, s))
-								* b_tmp;
+							(dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) =
+								((dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i))
+								 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - 1))
+								 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i + 1)))
+								/ b1[s];
 						}
-
-						b_tmp = a_s / (b1_s - a_s * b_tmp);
 					}
-
-					for (index_t x = 0; x < x_len; x++)
-					{
-						(border_dens_l
-						 | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x, n - 1, s)) =
-							(border_dens_l
-							 | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x, n - 1, s))
-							* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-					}
-
-					for (index_t i = n - 2; i >= 0; i--)
+					else
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(border_dens_l
-							 | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x, i, s)) =
-								((border_dens_l
-								  | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x, i, s))
-								 - a_s
-									   * (border_dens_l
-										  | noarr::get_at<'z', 'X', 'x', 'y', 's'>(densities, z, noarr::lit<0>, x,
-																				   i + 1, s)))
-								* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+							(dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i)) =
+								((dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i))
+								 - a[i] * (dens_l | noarr::get_at<'s', 'x', 'z', 'y'>(densities, s, x, z, i - 1)))
+								/ (b1[s] + ac[s]);
 						}
 					}
 				}
@@ -681,114 +765,228 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ a,
-							 const real_t* __restrict__ b1, const real_t* __restrict__ b, const density_layout_t dens_l,
-							 const diagonal_layout_t diag_l, std::size_t x_tile_size)
+template <typename index_t, typename real_t, typename density_layout_t>
+static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
+							 real_t* __restrict__ c, const density_layout_t dens_l)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'z'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
+	const index_t all_steps = (int)std::log2(n);
+	const index_t inner_steps = all_steps - 1;
+	const index_t inner_n = n / 2;
 
-#pragma omp for schedule(static) collapse(2) nowait
+	// we are halving the number of unknowns into new arrays a, b, c
+	// but we are preserving densities array, so its indices need to be adjusted
+	const auto inner_dens_l = dens_l ^ noarr::step<'z'>(1, 2);
+
 	for (index_t s = 0; s < substrates_count; s++)
 	{
+		// prepare inner arrays a, b, c
+		for (index_t i = 1; i < n; i += 2)
+		{
+			const auto a_tmp = ac[s];
+			const auto a_low_tmp = a_tmp * (i == 1 ? 0 : 1);
+
+			const auto c_tmp = a_tmp;
+			const auto c_high_tmp = a_tmp * (i == n - 2 ? 0 : 1);
+
+			const auto b_low_tmp = b1[s] + ((i == 1) ? a_tmp : 0);
+			const auto b_tmp = b1[s] + ((i == n - 1) ? a_tmp : 0);
+			const auto b_high_tmp = b1[s] + ((i == n - 2) ? a_tmp : 0);
+
+			const real_t alpha = a_tmp / b_low_tmp;
+			const real_t beta = (i == n - 1) ? 0 : (c_tmp / b_high_tmp);
+
+			b[i / 2] = b_tmp - (alpha + beta) * c_tmp;
+
+#pragma omp for schedule(static) nowait
+			for (index_t y = 0; y < y_len; y++)
+			{
+				for (index_t x = 0; x < x_len; x++)
+				{
+					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) -=
+						alpha * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - 1))
+						+ beta
+							  * ((i == n - 1)
+									 ? 0
+									 : (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i + 1)));
+				}
+			}
+
+			a[i / 2] = -alpha * a_low_tmp;
+			c[i / 2] = -beta * c_high_tmp;
+		}
+
+		for (index_t step = 0; step < inner_steps; step++)
+		{
+			index_t stride = 1 << step;
+			for (index_t i = 2 * stride - 1; i < inner_n; i += 2 * stride)
+			{
+				if (i + stride < inner_n)
+				{
+					real_t alpha = a[i] / b[i - stride];
+					real_t beta = c[i] / b[i + stride];
+
+					b[i] -= alpha * c[i - stride] + beta * a[i + stride];
+
+#pragma omp for schedule(static) nowait
+					for (index_t y = 0; y < y_len; y++)
+					{
+						for (index_t x = 0; x < x_len; x++)
+						{
+							(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) -=
+								alpha
+									* (inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - stride))
+								+ beta
+									  * (inner_dens_l
+										 | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i + stride));
+						}
+					}
+
+					a[i] = -alpha * a[i - stride];
+					c[i] = -beta * c[i + stride];
+				}
+				else
+				{
+					real_t alpha = a[i] / b[i - stride];
+
+					b[i] -= alpha * c[i - stride];
+
+#pragma omp for schedule(static) nowait
+					for (index_t y = 0; y < y_len; y++)
+					{
+						for (index_t x = 0; x < x_len; x++)
+						{
+							(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) -=
+								alpha
+								* (inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - stride));
+						}
+					}
+
+					a[i] = -alpha * a[i - stride];
+					c[i] = 0;
+				}
+			}
+		}
+
+		// the first solved unknown
+#pragma omp for schedule(static) nowait
 		for (index_t y = 0; y < y_len; y++)
 		{
-			// body
+			for (index_t x = 0; x < x_len; x++)
 			{
-				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-				const index_t x_len = body_dens_l | noarr::get_length<'x'>();
-				const index_t X_len = body_dens_l | noarr::get_length<'X'>();
+				index_t i = (1 << inner_steps) - 1;
+				(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) =
+					(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) / b[i];
+			}
+		}
 
-				for (index_t X = 0; X < X_len; X++)
+		for (index_t step = inner_steps - 1; step >= 0; step--)
+		{
+			index_t stride = 1 << step;
+
+			index_t i = stride - 1;
+			// the first unknown of each step does not have (i - stride) dependency
+#pragma omp for schedule(static) nowait
+			for (index_t y = 0; y < y_len; y++)
+			{
+				for (index_t x = 0; x < x_len; x++)
 				{
-					const real_t a_s = a[s];
-					const real_t b1_s = b1[s];
-					real_t b_tmp = a_s / (b1_s + a_s);
+					(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) =
+						((inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i))
+						 - c[i] * (inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i + stride)))
+						/ b[i];
+				}
+			}
 
-					for (index_t i = 1; i < n; i++)
+			i += 2 * stride;
+
+			for (; i < inner_n; i += 2 * stride)
+			{
+				if (i + stride < inner_n)
+				{
+#pragma omp for schedule(static) nowait
+					for (index_t y = 0; y < y_len; y++)
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(body_dens_l | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, i, s)) -=
-								(body_dens_l | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, i - 1, s))
-								* b_tmp;
+							(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) =
+								((inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i))
+								 - a[i]
+									   * (inner_dens_l
+										  | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - stride))
+								 - c[i]
+									   * (inner_dens_l
+										  | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i + stride)))
+								/ b[i];
 						}
-
-						b_tmp = a_s / (b1_s - a_s * b_tmp);
 					}
-
-					for (index_t x = 0; x < x_len; x++)
-					{
-						(body_dens_l | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, n - 1, s)) =
-							(body_dens_l | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, n - 1, s))
-							* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-					}
-
-					for (index_t i = n - 2; i >= 0; i--)
+				}
+				else
+				{
+#pragma omp for schedule(static) nowait
+					for (index_t y = 0; y < y_len; y++)
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(body_dens_l | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, i, s)) =
-								((body_dens_l | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, i, s))
-								 - a_s
-									   * (body_dens_l
-										  | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, X, x, i + 1, s)))
-								* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+							(inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) =
+								((inner_dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i))
+								 - a[i]
+									   * (inner_dens_l
+										  | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - stride)))
+								/ b[i];
 						}
 					}
 				}
 			}
+		}
 
-			// remainder
+		{
+			// the first unknown of each step does not have (i - stride) dependency
+
+#pragma omp for schedule(static) nowait
+			for (index_t y = 0; y < y_len; y++)
 			{
-				auto border_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-				const index_t x_len = border_dens_l | noarr::get_length<'x'>();
-
+				for (index_t x = 0; x < x_len; x++)
 				{
-					const real_t a_s = a[s];
-					const real_t b1_s = b1[s];
-					real_t b_tmp = a_s / (b1_s + a_s);
-
-					for (index_t i = 1; i < n; i++)
+					(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, 0)) =
+						((dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, 0))
+						 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, 1)))
+						/ (b1[s] + ac[s]);
+				}
+			}
+			for (index_t i = 2; i < n; i += 2)
+			{
+				if (i + 1 < n)
+				{
+#pragma omp for schedule(static) nowait
+					for (index_t y = 0; y < y_len; y++)
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(border_dens_l
-							 | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x, i, s)) -=
-								(border_dens_l
-								 | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x, i - 1, s))
-								* b_tmp;
+							(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) =
+								((dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i))
+								 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - 1))
+								 - ac[s] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i + 1)))
+								/ b1[s];
 						}
-
-						b_tmp = a_s / (b1_s - a_s * b_tmp);
 					}
-
-					for (index_t x = 0; x < x_len; x++)
-					{
-						(border_dens_l
-						 | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x, n - 1, s)) =
-							(border_dens_l
-							 | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x, n - 1, s))
-							* (diag_l | noarr::get_at<'i', 's'>(b, n - 1, s));
-					}
-
-					for (index_t i = n - 2; i >= 0; i--)
+				}
+				else
+				{
+#pragma omp for schedule(static) nowait
+					for (index_t y = 0; y < y_len; y++)
 					{
 						for (index_t x = 0; x < x_len; x++)
 						{
-							(border_dens_l
-							 | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x, i, s)) =
-								((border_dens_l
-								  | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x, i, s))
-								 - a_s
-									   * (border_dens_l
-										  | noarr::get_at<'y', 'X', 'x', 'z', 's'>(densities, y, noarr::lit<0>, x,
-																				   i + 1, s)))
-								* (diag_l | noarr::get_at<'i', 's'>(b, i, s));
+							(dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i)) =
+								((dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i))
+								 - a[i] * (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(densities, s, x, y, i - 1)))
+								/ (b1[s] + ac[s]);
 						}
 					}
 				}
@@ -802,49 +1000,52 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve_x()
 {
 	if (this->problem_.dims == 1)
 	{
-		// #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, b_scratch_, c_scratch_,
-								  get_substrates_layout<1>(), get_diagonal_layout(this->problem_, this->problem_.nx));
+#pragma omp parallel
+		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
+								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+								  get_substrates_layout<1>());
 	}
-	// 	else if (this->problem_.dims == 2)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, cx_,
-	// 										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-	// 										 get_diagonal_layout(this->problem_, this->problem_.nx));
-	// 	}
-	// 	else if (this->problem_.dims == 3)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, cx_,
-	// 										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-	// 										 get_diagonal_layout(this->problem_, this->problem_.nx));
-	// 	}
+	else if (this->problem_.dims == 2)
+	{
+#pragma omp parallel
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
+										 b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>());
+	}
+	else if (this->problem_.dims == 3)
+	{
+#pragma omp parallel
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
+										 b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>());
+	}
 }
 
 template <typename real_t, bool aligned_x>
 void cyclic_reduction_solver<real_t, aligned_x>::solve_y()
 {
-	// 	if (this->problem_.dims == 2)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, cy_, get_substrates_layout<2>(),
-	// 								  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
-	// 	}
-	// 	else if (this->problem_.dims == 3)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, cy_, get_substrates_layout<3>(),
-	// 								  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
-	// }
+	if (this->problem_.dims == 2)
+	{
+#pragma omp parallel
+		solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
+								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+								  get_substrates_layout<2>());
+	}
+	else if (this->problem_.dims == 3)
+	{
+#pragma omp parallel
+		solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
+								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+								  get_substrates_layout<3>());
+	}
 }
 
 template <typename real_t, bool aligned_x>
 void cyclic_reduction_solver<real_t, aligned_x>::solve_z()
 {
-	// #pragma omp parallel
-	// 	solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
-	// 							  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_);
+#pragma omp parallel
+	solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, a_scratch_[get_thread_num()], b_scratch_[get_thread_num()],
+							  c_scratch_[get_thread_num()], get_substrates_layout<3>());
 }
 
 template <typename real_t, bool aligned_x>
@@ -852,9 +1053,10 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve()
 {
 	if (this->problem_.dims == 1)
 	{
-		// #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, b_scratch_, c_scratch_,
-								  get_substrates_layout<1>(), get_diagonal_layout(this->problem_, this->problem_.nx));
+#pragma omp parallel
+		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
+								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+								  get_substrates_layout<1>());
 	}
 	// 	if (this->problem_.dims == 2)
 	// 	{
@@ -873,29 +1075,20 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve()
 	// #pragma omp parallel
 	// 		{
 	// 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, cx_,
-	// 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-	// 											 get_diagonal_layout(this->problem_, this->problem_.nx));
-	// #pragma omp barrier
-	// 			solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, cy_, get_substrates_layout<3>(),
-	// 									  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
-	// #pragma omp barrier
-	// 			solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
-	// 									  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_);
+	// 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y',
+	// 'm'>(), 											 get_diagonal_layout(this->problem_, this->problem_.nx));
+	// #pragma omp barrier 			solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, cy_,
+	// get_substrates_layout<3>(), 									  get_diagonal_layout(this->problem_,
+	// this->problem_.ny), x_tile_size_); #pragma omp barrier 			solve_slice_z_3d<index_t>(this->substrates_,
+	// az_, b1z_, cz_, get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nz),
+	// x_tile_size_);
 	// 		}
 	// 	}
 }
 
 template <typename real_t, bool aligned_x>
 cyclic_reduction_solver<real_t, aligned_x>::cyclic_reduction_solver()
-	: ax_(nullptr),
-	  b1x_(nullptr),
-	  ay_(nullptr),
-	  b1y_(nullptr),
-	  az_(nullptr),
-	  b1z_(nullptr),
-	  a_scratch_(nullptr),
-	  b_scratch_(nullptr),
-	  c_scratch_(nullptr)
+	: ax_(nullptr), b1x_(nullptr), ay_(nullptr), b1y_(nullptr), az_(nullptr), b1z_(nullptr)
 {}
 
 template <typename real_t, bool aligned_x>
@@ -917,11 +1110,11 @@ cyclic_reduction_solver<real_t, aligned_x>::~cyclic_reduction_solver()
 		std::free(b1z_);
 	}
 
-	if (a_scratch_)
+	for (std::size_t i = 0; i < b_scratch_.size(); i++)
 	{
-		std::free(a_scratch_);
-		std::free(b_scratch_);
-		std::free(c_scratch_);
+		std::free(a_scratch_[i]);
+		std::free(b_scratch_[i]);
+		std::free(c_scratch_[i]);
 	}
 }
 

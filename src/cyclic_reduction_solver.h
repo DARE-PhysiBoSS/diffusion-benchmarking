@@ -46,7 +46,7 @@ protected:
 	real_t *ay_, *b1y_;
 	real_t *az_, *b1z_;
 
-	real_t *a_scratch_, *b_scratch_, *c_scratch_;
+	std::vector<real_t*> a_scratch_, b_scratch_, c_scratch_;
 
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
