@@ -324,7 +324,7 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 template <typename index_t, typename real_t, typename density_layout_t>
 static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
-							 real_t* __restrict__ c, const density_layout_t dens_l)
+							 real_t* __restrict__ c, const density_layout_t dens_l, std::size_t x_tile_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
@@ -332,6 +332,8 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 	const index_t all_steps = (int)std::log2(n);
 	const index_t inner_steps = all_steps - 1;
 	const index_t inner_n = n / 2;
+
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
@@ -340,19 +342,26 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 #pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(), n);
+		noarr::traverser(blocked_dens_l).template for_dims<'b', 'X'>([=](auto inner) {
+			outer_divide<'y'>(densities, ac[s], b1[s], a, b, c,
+							  blocked_dens_l ^ noarr::fix<'s'>(s) ^ noarr::fix(inner.state()), noarr::neutral_proto(),
+							  n);
 
-		inner_cyclic_reduction<'y'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(),
-									inner_steps, inner_n);
+			inner_cyclic_reduction<'y'>(densities, a, b, c,
+										blocked_dens_l ^ noarr::fix<'s'>(s) ^ noarr::fix(inner.state())
+											^ noarr::step<'y'>(1, 2),
+										noarr::neutral_proto(), inner_steps, inner_n);
 
-		outer_join<'y'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(), n);
+			outer_join<'y'>(densities, ac[s], b1[s], blocked_dens_l ^ noarr::fix<'s'>(s) ^ noarr::fix(inner.state()),
+							noarr::neutral_proto(), n);
+		});
 	}
 }
 
 template <typename index_t, typename real_t, typename density_layout_t>
 static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
-							 real_t* __restrict__ c, const density_layout_t dens_l)
+							 real_t* __restrict__ c, const density_layout_t dens_l, std::size_t x_tile_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'y'>();
@@ -361,6 +370,8 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 	const index_t all_steps = (int)std::log2(n);
 	const index_t inner_steps = all_steps - 1;
 	const index_t inner_n = n / 2;
+
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
@@ -371,13 +382,37 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 	{
 		for (index_t z = 0; z < z_len; z++)
 		{
-			outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s', 'z'>(s, z),
-							  noarr::neutral_proto(), n);
+			{
+				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
+				const index_t X_len = body_dens_l | noarr::get_length<'X'>();
 
-			inner_cyclic_reduction<'y'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s', 'z'>(s, z),
-										noarr::neutral_proto(), inner_steps, inner_n);
+				for (index_t X = 0; X < X_len; X++)
+				{
+					outer_divide<'y'>(densities, ac[s], b1[s], a, b, c,
+									  body_dens_l ^ noarr::fix<'s', 'z', 'X'>(s, z, X), noarr::neutral_proto(), n);
 
-			outer_join<'y'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s', 'z'>(s, z), noarr::neutral_proto(), n);
+					inner_cyclic_reduction<'y'>(
+						densities, a, b, c, body_dens_l ^ noarr::fix<'s', 'z', 'X'>(s, z, X) ^ noarr::step<'y'>(1, 2),
+						noarr::neutral_proto(), inner_steps, inner_n);
+
+					outer_join<'y'>(densities, ac[s], b1[s], body_dens_l ^ noarr::fix<'s', 'z', 'X'>(s, z, X),
+									noarr::neutral_proto(), n);
+				}
+			}
+
+			{
+				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+
+				outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, body_dens_l ^ noarr::fix<'s', 'z', 'X'>(s, z, 0),
+								  noarr::neutral_proto(), n);
+
+				inner_cyclic_reduction<'y'>(densities, a, b, c,
+											body_dens_l ^ noarr::fix<'s', 'z', 'X'>(s, z, 0) ^ noarr::step<'y'>(1, 2),
+											noarr::neutral_proto(), inner_steps, inner_n);
+
+				outer_join<'y'>(densities, ac[s], b1[s], body_dens_l ^ noarr::fix<'s', 'z', 'X'>(s, z, 0),
+								noarr::neutral_proto(), n);
+			}
 		}
 	}
 }
@@ -385,7 +420,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 template <typename index_t, typename real_t, typename density_layout_t>
 static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ b,
-							 real_t* __restrict__ c, const density_layout_t dens_l)
+							 real_t* __restrict__ c, const density_layout_t dens_l, index_t x_tile_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
 	const index_t n = dens_l | noarr::get_length<'z'>();
@@ -395,20 +430,50 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 	const index_t inner_steps = all_steps - 1;
 	const index_t inner_n = n / 2;
 
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'x', 'b', 'X', 'x'>(x_tile_size);
+
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
 	const auto inner_dens_l = dens_l ^ noarr::step<'z'>(1, 2);
 
-	auto order = noarr::into_blocks_static<'y', 'b', 'Y', 'y'>(y_len / get_num_threads())
-				 ^ noarr::step<'Y'>(get_thread_num(), get_num_threads());
+	auto order = noarr::neutral_proto();
 
+#pragma omp for schedule(static) nowait collapse(2)
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		outer_divide<'z'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s'>(s), order, n);
+		for (index_t y = 0; y < y_len; y++)
+		{
+			{
+				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
+				const index_t X_len = body_dens_l | noarr::get_length<'X'>();
 
-		inner_cyclic_reduction<'z'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s'>(s), order, inner_steps, inner_n);
 
-		outer_join<'z'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s'>(s), order, n);
+				for (index_t X = 0; X < X_len; X++)
+				{
+					auto fix = noarr::fix<'s', 'X', 'y'>(s, X, y);
+
+					outer_divide<'z'>(densities, ac[s], b1[s], a, b, c, body_dens_l ^ fix, order, n);
+
+					inner_cyclic_reduction<'z'>(densities, a, b, c, body_dens_l ^ noarr::step<'z'>(1, 2) ^ fix, order,
+												inner_steps, inner_n);
+
+					outer_join<'z'>(densities, ac[s], b1[s], body_dens_l ^ fix, order, n);
+				}
+			}
+
+			{
+				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+
+				auto fix = noarr::fix<'s', 'X', 'y'>(s, 0, y);
+
+				outer_divide<'z'>(densities, ac[s], b1[s], a, b, c, body_dens_l ^ fix, order, n);
+
+				inner_cyclic_reduction<'z'>(densities, a, b, c, body_dens_l ^ noarr::step<'z'>(1, 2) ^ fix, order,
+											inner_steps, inner_n);
+
+				outer_join<'z'>(densities, ac[s], b1[s], body_dens_l ^ fix, order, n);
+			}
+		}
 	}
 }
 
@@ -446,14 +511,14 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve_y()
 #pragma omp parallel
 		solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
 								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-								  get_substrates_layout<2>());
+								  get_substrates_layout<2>(), x_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
 		solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
 								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-								  get_substrates_layout<3>());
+								  get_substrates_layout<3>(), x_tile_size_);
 	}
 }
 
@@ -462,7 +527,7 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve_z()
 {
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, a_scratch_[get_thread_num()], b_scratch_[get_thread_num()],
-							  c_scratch_[get_thread_num()], get_substrates_layout<3>());
+							  c_scratch_[get_thread_num()], get_substrates_layout<3>(), x_tile_size_);
 }
 
 template <typename real_t, bool aligned_x>
@@ -485,7 +550,7 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve()
 #pragma omp barrier
 			solve_slice_y_2d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-									  get_substrates_layout<2>());
+									  get_substrates_layout<2>(), x_tile_size_);
 		}
 	}
 	if (this->problem_.dims == 3)
@@ -498,11 +563,11 @@ void cyclic_reduction_solver<real_t, aligned_x>::solve()
 #pragma omp barrier
 			solve_slice_y_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-									  get_substrates_layout<3>());
+									  get_substrates_layout<3>(), x_tile_size_);
 #pragma omp barrier
 			solve_slice_z_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-									  get_substrates_layout<3>());
+									  get_substrates_layout<3>(), x_tile_size_);
 		}
 	}
 }
