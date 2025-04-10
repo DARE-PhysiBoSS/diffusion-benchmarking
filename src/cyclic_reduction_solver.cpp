@@ -274,17 +274,20 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
-	const auto inner_dens_l = dens_l ^ noarr::step<'x'>(1, 2);
+	const auto inner_dens_step = noarr::step<'x'>(1, 2);
+
+	const auto order = noarr::neutral_proto();
 
 #pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		outer_divide<'x'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(), n);
+		const auto fix = noarr::fix<'s'>(s);
 
-		inner_cyclic_reduction<'x'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(),
-									inner_steps, inner_n);
+		outer_divide<'x'>(densities, ac[s], b1[s], a, b, c, dens_l ^ fix, order, n);
 
-		outer_join<'x'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(), n);
+		inner_cyclic_reduction<'x'>(densities, a, b, c, dens_l ^ inner_dens_step ^ fix, order, inner_steps, inner_n);
+
+		outer_join<'x'>(densities, ac[s], b1[s], dens_l ^ fix, order, n);
 	}
 }
 
@@ -303,20 +306,23 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
-	const auto inner_dens_l = dens_l ^ noarr::step<'x'>(1, 2);
+	const auto inner_dens_step = noarr::step<'x'>(1, 2);
+
+	const auto order = noarr::neutral_proto();
 
 #pragma omp for schedule(static) collapse(2) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		for (index_t yz = 0; yz < m; yz++)
 		{
-			outer_divide<'x'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s', 'm'>(s, yz),
-							  noarr::neutral_proto(), n);
+			const auto fix = noarr::fix<'s', 'm'>(s, yz);
 
-			inner_cyclic_reduction<'x'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s', 'm'>(s, yz),
-										noarr::neutral_proto(), inner_steps, inner_n);
+			outer_divide<'x'>(densities, ac[s], b1[s], a, b, c, dens_l ^ fix, order, n);
 
-			outer_join<'x'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s', 'm'>(s, yz), noarr::neutral_proto(), n);
+			inner_cyclic_reduction<'x'>(densities, a, b, c, dens_l ^ inner_dens_step ^ fix, order, inner_steps,
+										inner_n);
+
+			outer_join<'x'>(densities, ac[s], b1[s], dens_l ^ fix, order, n);
 		}
 	}
 }
@@ -335,17 +341,20 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
-	const auto inner_dens_l = dens_l ^ noarr::step<'y'>(1, 2);
+	const auto inner_dens_step = noarr::step<'y'>(1, 2);
+
+	const auto order = noarr::neutral_proto();
 
 #pragma omp for schedule(static) nowait
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(), n);
+		const auto fix = noarr::fix<'s'>(s);
 
-		inner_cyclic_reduction<'y'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(),
-									inner_steps, inner_n);
+		outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, dens_l ^ fix, order, n);
 
-		outer_join<'y'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s'>(s), noarr::neutral_proto(), n);
+		inner_cyclic_reduction<'y'>(densities, a, b, c, dens_l ^ inner_dens_step ^ fix, order, inner_steps, inner_n);
+
+		outer_join<'y'>(densities, ac[s], b1[s], dens_l ^ fix, order, n);
 	}
 }
 
@@ -364,20 +373,23 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
-	const auto inner_dens_l = dens_l ^ noarr::step<'y'>(1, 2);
+	const auto inner_dens_step = noarr::step<'y'>(1, 2);
+
+	const auto order = noarr::neutral_proto();
 
 #pragma omp for schedule(static) nowait collapse(2)
 	for (index_t s = 0; s < substrates_count; s++)
 	{
 		for (index_t z = 0; z < z_len; z++)
 		{
-			outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s', 'z'>(s, z),
-							  noarr::neutral_proto(), n);
+			const auto fix = noarr::fix<'s', 'z'>(s, z);
 
-			inner_cyclic_reduction<'y'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s', 'z'>(s, z),
-										noarr::neutral_proto(), inner_steps, inner_n);
+			outer_divide<'y'>(densities, ac[s], b1[s], a, b, c, dens_l ^ fix, order, n);
 
-			outer_join<'y'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s', 'z'>(s, z), noarr::neutral_proto(), n);
+			inner_cyclic_reduction<'y'>(densities, a, b, c, dens_l ^ inner_dens_step ^ fix, order, inner_steps,
+										inner_n);
+
+			outer_join<'y'>(densities, ac[s], b1[s], dens_l ^ fix, order, n);
 		}
 	}
 }
@@ -397,18 +409,20 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 
 	// we are halving the number of unknowns into new arrays a, b, c
 	// but we are preserving densities array, so its indices need to be adjusted
-	const auto inner_dens_l = dens_l ^ noarr::step<'z'>(1, 2);
+	const auto inner_dens_step = noarr::step<'z'>(1, 2);
 
-	auto order = noarr::into_blocks_static<'y', 'b', 'Y', 'y'>(y_len / get_num_threads())
-				 ^ noarr::step<'Y'>(get_thread_num(), get_num_threads());
+	const auto order = noarr::into_blocks_static<'y', 'b', 'Y', 'y'>(std::max(y_len / get_num_threads(), 1))
+					   ^ noarr::step<'Y'>(get_thread_num(), get_num_threads());
 
 	for (index_t s = 0; s < substrates_count; s++)
 	{
-		outer_divide<'z'>(densities, ac[s], b1[s], a, b, c, dens_l ^ noarr::fix<'s'>(s), order, n);
+		const auto fix = noarr::fix<'s'>(s);
 
-		inner_cyclic_reduction<'z'>(densities, a, b, c, inner_dens_l ^ noarr::fix<'s'>(s), order, inner_steps, inner_n);
+		outer_divide<'z'>(densities, ac[s], b1[s], a, b, c, dens_l ^ fix, order, n);
 
-		outer_join<'z'>(densities, ac[s], b1[s], dens_l ^ noarr::fix<'s'>(s), order, n);
+		inner_cyclic_reduction<'z'>(densities, a, b, c, dens_l ^ inner_dens_step ^ fix, order, inner_steps, inner_n);
+
+		outer_join<'z'>(densities, ac[s], b1[s], dens_l ^ fix, order, n);
 	}
 }
 
