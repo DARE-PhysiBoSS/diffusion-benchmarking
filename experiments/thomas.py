@@ -139,29 +139,27 @@ def parallel_cyclic_reduction(a, b, c, d):
 
     for step in range(log_n):
         stride = 1 << step
-        indices = np.arange(stride, n, 2 * stride)
+        equations = (step + 1)
+        for eq_i in range(equations):
+            eq_n = n // equations
+            
+            for i in range(eq_n):
 
-        alpha = np.zeros_like(a)
-        beta = np.zeros_like(c)
+                idx = eq_i + i * stride
 
-        alpha[indices] = a[indices] / b[indices - stride]
-        beta[indices] = c[indices] / b[indices + stride]
+                if idx + stride >= n:
+                    alpha = a[idx] / b[idx - stride]
+                    b[idx] -= alpha * c[idx - stride]
+                    d[idx] -= alpha * d[idx - stride]
+                    a[idx] = -alpha * a[idx - stride]
+                else:
+                    alpha = a[idx] / b[idx - stride]
+                    beta = c[idx] / b[idx + stride]
+                    b[idx] -= alpha * c[idx - stride] + beta * a[idx + stride]
+                    d[idx] -= alpha * d[idx - stride] + beta * d[idx + stride]
+                    a[idx] = -alpha * a[idx - stride]
+                    c[idx] = -beta * c[idx + stride]
 
-        b[indices] -= alpha[indices] * c[indices - stride] + \
-            beta[indices] * a[indices + stride]
-        d[indices] -= alpha[indices] * d[indices - stride] + \
-            beta[indices] * d[indices + stride]
-
-        a[indices] = -alpha[indices] * a[indices - stride]
-        c[indices] = -beta[indices] * c[indices + stride]
-
-    x = np.zeros_like(d)
-    x[0] = d[0] / b[0]
-    for step in range(log_n - 1, -1, -1):
-        stride = 1 << step
-        indices = np.arange(stride, n, 2 * stride)
-        x[indices] = (d[indices] - a[indices] * x[indices - stride] -
-                      c[indices] * x[indices + stride]) / b[indices]
 
     return x.tolist()
 
