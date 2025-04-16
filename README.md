@@ -35,6 +35,29 @@ Instead of providing `--benchmark` command line parameter, one can use `--valida
 
 ## List of algorithms
 
-TBA
+The repository contains various variants of the diffusion solver, each containing either different kind of optimizations or overall completely different algorithm.
 
-See `get_solvers_map` function in `src/algorithms.cpp` for the whole list of algorithms and their names.
+The following table contains a list of implementations that can be tested together with their short description. The full description is located in the respective header files in `src` directory.
+
+| Name            | Full Name                                             | Description                                                                                   |
+| --------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **ref**         | *Reference Solver*                                    | The baseline reference solver used for validation and correctness checks.                     |
+| **lstc**        | *Least Compute*                                       | Optimized solver minimizing computational cost for Thomas algorithm.                          |
+| **lstcm**       | *Least Compute Multiplied*                            | Variant of `lstc` which expands (multiplies) the vectorization along x dimension.             |
+| **lstcma**      | *Least Compute Multiplied Aligned*                    | Variant of `lstcm` with aligned memory.                                                       |
+| **lstct**       | *Least Compute Temporal*                              | Variant of `lstc` with improved temporal locality of data.                                    |
+| **lstcta**      | *Least Compute Temporal Aligned*                      | Variant of `lstct` with aligned memory.                                                       |
+| **lstcs**       | *Least Compute Substrate*                             | Variant of `lstc` where substrate dimension is the outermost.                                 |
+| **lstcst**      | *Least Compute Substrate Temporal*                    | Variant of `lstcs` with improved temporal locality of data.                                   |
+| **lstcsta**     | *Least Compute Substrate Temporal Aligned*            | Variant of `lstcst` with aligned memory.                                                      |
+| **lstcstai**    | *Least Compute Substrate Temporal Aligned Intrinsics* | Variant of `lstcsta` which uses vector intrinsics to vectorize x dimension.                   |
+| **lstm**        | *Least Memory*                                        | Solver optimized for minimal memory accesses.                                                 |
+| **lstmt**       | *Least Memory Temporal*                               | Variant of `lstm` with improved temporal locality of data.                                    |
+| **lstmta**      | *Least Memory Temporal Aligned*                       | Variant of `lstmt` with aligned memory.                                                       |
+| **lstmtai**     | *Least Memory Temporal Aligned Intrinsics*            | Variant of `lstmta` which uses vector intrinsics to vectorize x dimension.                    |
+| **lapack**      | *LAPACK Thomas Solver*                                | Solver utilizing LAPACK for positive-definite tridiagonal systems. Only supports 1D problems. |
+| **lapack2**     | *General LAPACK Thomas Solver*                        | Solver utilizing LAPACK for general tridiagonal systems. Only supports 1D problems.           |
+| **full_lapack** | *Full LAPACK Solver*                                  | Solver using LAPACK for positive-definite banded systems. Supports all dimensions.            |
+| **avx256d**     | *SIMD Solver (AVX256 Double)*                         | SIMD-optimized solver using AVX256 intrinsics. Only for double precision.                     |
+| **cr**          | *Cyclic Reduction*                                    | Solver using cyclic reduction for tridiagonal systems.                                        |
+| **crt**         | *Cyclic Reduction Temporal*                           | Variant of `cr` with improved temporal locality of data.                                      |
