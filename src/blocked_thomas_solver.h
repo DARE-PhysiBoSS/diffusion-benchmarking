@@ -46,7 +46,7 @@ protected:
 	real_t *ay_, *b1y_;
 	real_t *az_, *b1z_;
 
-	std::vector<real_t*> a_scratch_, b_scratch_, c_scratch_;
+	std::vector<real_t*> a_scratch_, c_scratch_;
 
 	std::size_t block_size_;
 	std::size_t alignment_size_;
@@ -56,6 +56,8 @@ protected:
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
 public:
+	static constexpr index_t min_block_size = 2;
+
 	blocked_thomas_solver();
 
 	template <std::size_t dims = 3>
