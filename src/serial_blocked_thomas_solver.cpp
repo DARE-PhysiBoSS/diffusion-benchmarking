@@ -1,4 +1,4 @@
-#include "blocked_thomas_solver.h"
+#include "serial_blocked_thomas_solver.h"
 
 #include <cstddef>
 #include <cstdlib>
@@ -8,10 +8,11 @@
 #include "omp_helper.h"
 
 // a helper using for accessing static constexpr variables
-using alg = blocked_thomas_solver<double, true>;
+using alg = serial_blocked_thomas_solver<double, true>;
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims)
+void serial_blocked_thomas_solver<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape,
+																		index_t dims)
 {
 	// allocate memory for a and b1
 	a = (real_t*)std::malloc(this->problem_.substrates_count * sizeof(real_t));
@@ -28,7 +29,7 @@ void blocked_thomas_solver<real_t, aligned_x>::precompute_values(real_t*& a, rea
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::prepare(const max_problem_t& problem)
+void serial_blocked_thomas_solver<real_t, aligned_x>::prepare(const max_problem_t& problem)
 {
 	this->problem_ = problems::cast<std::int32_t, real_t>(problem);
 
@@ -44,14 +45,14 @@ void blocked_thomas_solver<real_t, aligned_x>::prepare(const max_problem_t& prob
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::tune(const nlohmann::json& params)
+void serial_blocked_thomas_solver<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
 	block_size_ = params.contains("block_size") ? (std::size_t)params["block_size"] : 100;
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::initialize()
+void serial_blocked_thomas_solver<real_t, aligned_x>::initialize()
 {
 	if (this->problem_.dims >= 1)
 		precompute_values(ax_, b1x_, this->problem_.dx, this->problem_.dims);
@@ -70,7 +71,8 @@ void blocked_thomas_solver<real_t, aligned_x>::initialize()
 }
 
 template <typename real_t, bool aligned_x>
-auto blocked_thomas_solver<real_t, aligned_x>::get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n)
+auto serial_blocked_thomas_solver<real_t, aligned_x>::get_diagonal_layout(const problem_t<index_t, real_t>& problem,
+																		  index_t n)
 {
 	if constexpr (aligned_x)
 	{
@@ -925,7 +927,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::solve_x()
+void serial_blocked_thomas_solver<real_t, aligned_x>::solve_x()
 {
 	if (this->problem_.dims == 1)
 	{
@@ -950,7 +952,7 @@ void blocked_thomas_solver<real_t, aligned_x>::solve_x()
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::solve_y()
+void serial_blocked_thomas_solver<real_t, aligned_x>::solve_y()
 {
 	if (this->problem_.dims == 2)
 	{
@@ -967,7 +969,7 @@ void blocked_thomas_solver<real_t, aligned_x>::solve_y()
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::solve_z()
+void serial_blocked_thomas_solver<real_t, aligned_x>::solve_z()
 {
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, a_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
@@ -975,7 +977,7 @@ void blocked_thomas_solver<real_t, aligned_x>::solve_z()
 }
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::solve()
+void serial_blocked_thomas_solver<real_t, aligned_x>::solve()
 {
 	if (this->problem_.dims == 1)
 	{
@@ -1013,12 +1015,12 @@ void blocked_thomas_solver<real_t, aligned_x>::solve()
 }
 
 template <typename real_t, bool aligned_x>
-blocked_thomas_solver<real_t, aligned_x>::blocked_thomas_solver()
+serial_blocked_thomas_solver<real_t, aligned_x>::serial_blocked_thomas_solver()
 	: ax_(nullptr), b1x_(nullptr), ay_(nullptr), b1y_(nullptr), az_(nullptr), b1z_(nullptr)
 {}
 
 template <typename real_t, bool aligned_x>
-blocked_thomas_solver<real_t, aligned_x>::~blocked_thomas_solver()
+serial_blocked_thomas_solver<real_t, aligned_x>::~serial_blocked_thomas_solver()
 {
 	if (b1x_)
 	{
@@ -1043,8 +1045,8 @@ blocked_thomas_solver<real_t, aligned_x>::~blocked_thomas_solver()
 	}
 }
 
-template class blocked_thomas_solver<float, false>;
-template class blocked_thomas_solver<double, false>;
+template class serial_blocked_thomas_solver<float, false>;
+template class serial_blocked_thomas_solver<double, false>;
 
-template class blocked_thomas_solver<float, true>;
-template class blocked_thomas_solver<double, true>;
+template class serial_blocked_thomas_solver<float, true>;
+template class serial_blocked_thomas_solver<double, true>;
