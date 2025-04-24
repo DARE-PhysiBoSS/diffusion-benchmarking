@@ -36,8 +36,8 @@ y/z dimensions are solved alongside tiled xs dimension
 */
 
 template <typename real_t, bool aligned_x>
-class blocked_thomas_solver : public locally_onedimensional_solver,
-							  public base_solver<real_t, blocked_thomas_solver<real_t, aligned_x>>
+class serial_blocked_thomas_solver : public locally_onedimensional_solver,
+									 public base_solver<real_t, serial_blocked_thomas_solver<real_t, aligned_x>>
 {
 protected:
 	using index_t = std::int32_t;
@@ -58,7 +58,7 @@ protected:
 public:
 	static constexpr index_t min_block_size = 2;
 
-	blocked_thomas_solver();
+	serial_blocked_thomas_solver();
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
@@ -81,5 +81,5 @@ public:
 
 	void solve() override;
 
-	~blocked_thomas_solver();
+	~serial_blocked_thomas_solver();
 };

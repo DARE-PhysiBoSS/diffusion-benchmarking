@@ -5,7 +5,6 @@
 #include <papi.h>
 
 #include "biofvm.h"
-#include "blocked_thomas_solver.h"
 #include "cyclic_reduction_solver.h"
 #include "cyclic_reduction_solver_t.h"
 #include "full_lapack_solver.h"
@@ -19,6 +18,7 @@
 #include "least_memory_thomas_solver.h"
 #include "least_memory_thomas_solver_t.h"
 #include "reference_thomas_solver.h"
+#include "serial_blocked_thomas_solver.h"
 #include "simd.h"
 #include "tridiagonal_solver.h"
 
@@ -49,7 +49,7 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
 	solvers.emplace("cr", []() { return std::make_unique<cyclic_reduction_solver<real_t, false>>(); });
 	solvers.emplace("crt", []() { return std::make_unique<cyclic_reduction_solver_t<real_t, false>>(); });
-	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
+	solvers.emplace("sblocked", []() { return std::make_unique<serial_blocked_thomas_solver<real_t, false>>(); });
 	return solvers;
 }
 
