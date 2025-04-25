@@ -18,7 +18,7 @@ endif()
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native)
+  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native -lpapi)
 endif()
 
 include(FetchContent)
@@ -66,7 +66,8 @@ target_compile_options(
 
 target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
-                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
+                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR}
+                  ${PAPI_INCLUDE_DIRS})
 
 target_link_libraries(diffuse nlohmann_json::nlohmann_json)
 
@@ -77,3 +78,16 @@ target_link_libraries(diffuse OpenMP::OpenMP_CXX)
 
 find_package(LAPACK REQUIRED)
 target_link_libraries(diffuse LAPACK::LAPACK)
+
+# Find and link PAPI
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PAPI REQUIRED papi)
+
+include_directories(BEFORE ${PAPI_INCLUDE_DIRS})
+target_include_directories(diffuse PUBLIC ${PAPI_INCLUDE_DIRS})
+target_compile_options(diffuse PUBLIC ${PAPI_CFLAGS_OTHER})
+target_link_libraries(diffuse ${PAPI_LIBRARIES})
+
+message(PAPI_INCLUDE_DIR="${PAPI_INCLUDE_DIRS}")
+message(PAPI_LIBRARIES="${PAPI_LIBRARIES}")
+message(PAPI_COMPILE_OPTIONS="${PAPI_CFLAGS_OTHER}")

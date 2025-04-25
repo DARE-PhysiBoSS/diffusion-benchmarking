@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <papi.h>
 
 #include "biofvm.h"
 #include "cyclic_reduction_solver.h"
@@ -19,6 +20,7 @@
 #include "reference_thomas_solver.h"
 #include "simd.h"
 #include "tridiagonal_solver.h"
+
 
 template <typename real_t>
 std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_solvers_map()
@@ -387,4 +389,101 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 		for (std::size_t i = 0; i < outer_iterations; i++)
 			benchmark_inner(alg, problem, params, kind);
 	}
+}
+
+struct EventData {
+    uint32_t Code;
+    std::string Deriv;
+    std::string Description;
+};
+
+void readPapiJson(std::map<std::string, EventData>& events, const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file) {
+        throw std::runtime_error("Cannot open file: " + filename  + "\n" +
+								 "Try running: $./scripts/obtain_counters.sh");
+    }
+
+    nlohmann::json j;
+    file >> j;
+
+    for (auto& [name, data] : j.items()) {
+        events[name] = EventData(
+            data["Code"].get<uint32_t>(),
+            data["Deriv"].get<std::string>(),
+            data["Description"].get<std::string>()
+		);
+    }
+}
+
+
+
+
+void algorithms::profile(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
+{
+	std::string csv_path;
+	if (params.contains("profile_output")) {
+		csv_path = params["profile_output"];
+	} else {
+		csv_path = "./profile.csv";
+	}
+	std::ofstream file(csv_path, std::ios::app);
+
+	auto solver = get_solver(alg);
+
+	solver->tune(params);
+	solver->prepare(problem);
+	solver->initialize();
+
+	std::map<std::string, EventData> counters_info; 
+
+	readPapiJson(counters_info, "./example-problems/counters.json");	
+
+	if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {
+        std::cerr << "PAPI library init error!" << std::endl;
+        return;
+    }
+
+	// Events to monitor
+    int events = PAPI_NULL;
+	std::vector<std::string> counters_names = params["papi_counters"].get<std::vector<std::string>>();
+	const int NUM_EVENTS = counters_names.size();
+    std::vector<long long> counters(NUM_EVENTS);
+
+	//add events
+	PAPI_create_eventset(&events);
+	for (int i = 0; i < NUM_EVENTS; ++i) {
+		PAPI_add_event(events, counters_info[counters_names[i]].Code);
+	}
+
+	file << counters_names[0];
+	for (int i = 1; i < NUM_EVENTS; ++i){
+		file << "," << counters_names[i];
+   	}
+	file << std::endl;
+
+	for (std::size_t i = 0; i < problem.iterations; i++)
+	{
+		// Start counters
+		if (PAPI_start(events) != PAPI_OK) {
+			std::cerr << "PAPI failed to start counters." << std::endl;
+			return;
+		}
+		solver->solve();
+
+		// Stop counters
+		if (PAPI_stop(events, counters.data()) != PAPI_OK) {
+			std::cerr << "PAPI failed to stop counters." << std::endl;
+			return;
+		}
+	   
+	   file << counters[0];
+	   for (int i = 1; i < NUM_EVENTS; ++i){
+			file << "," << counters[i];
+	   }
+	   file << std::endl;
+	   PAPI_reset(events); 
+	}
+
+	file.close();
 }

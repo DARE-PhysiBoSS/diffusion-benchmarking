@@ -53,6 +53,12 @@ int main(int argc, char** argv)
 		.help("The run of the algorithm will be benchmarked and outputed to standard output")
 		.flag()
 		.store_into(benchmark);
+	
+	bool profile;
+	group.add_argument("--profile")
+		.help("Algorithm will be profiled using PAPI counters indicated in params")
+		.flag()
+		.store_into(profile);
 
 	try
 	{
@@ -108,6 +114,10 @@ int main(int argc, char** argv)
 		else if (benchmark)
 		{
 			algs.benchmark(alg, problem, params);
+		}
+		else if (profile)
+		{
+			algs.profile(alg, problem, params);
 		}
 	}
 	catch (const std::exception& err)

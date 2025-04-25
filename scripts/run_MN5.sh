@@ -8,6 +8,7 @@
 #SBATCH -o output-%j
 #SBATCH -e error-%j
 ##SBATCH --exclusive
+#SBATCH --constraint=perfparanoid 
 
 
 export OMP_DISPLAY_ENV=true
@@ -17,8 +18,9 @@ export OMP_PLACES=cores
 
 module purge
 module load cmake/3.30.5
-module load gcc/13.2.0 openmpi/4.1.5-gcc mkl lapack/3.12-gcc ddt
+module load gcc/13.2.0 openmpi/4.1.5-gcc mkl lapack/3.12-gcc papi ddt
 
+./scripts/obtain_counters.sh
 
 # Define the list of algorithms to test
 algorithms=("lstc" "lstcm" "lstcma" "lstct" "lstcta" "lstcs" "lstcst" "lstcsta" "lstcstai" "lstm" "lstmt" "lstmta" "lstmtai" "avx256d" "biofvm" "lapack" "lapack2" "full_lapack")
@@ -30,6 +32,6 @@ params_file="example-problems/params.json"
 # Loop through each algorithm and run the command
 for alg in "${algorithms[@]}"; do
     echo "Running benchmark for algorithm: $alg"
-    build/diffuse --problem "$problem_file" --params "$params_file" --alg "$alg" --benchmark --double
+    build/diffuse --problem "$problem_file" --params "$params_file" --alg "$alg" --profile --double
     echo "-----------------------------------"
 done
