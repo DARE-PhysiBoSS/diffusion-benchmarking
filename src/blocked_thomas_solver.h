@@ -1,7 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <barrier>
 #include <functional>
+#include <memory>
 
 #include "base_solver.h"
 #include "omp_helper.h"
@@ -14,6 +16,12 @@ Restrictions:
 - dimension sizes must be divisible by block size
 - dimension sizes must all be the same
 */
+
+template <typename T>
+struct aligned_atomic
+{
+	alignas(std::hardware_destructive_interference_size) std::atomic<T> value;
+};
 
 template <typename real_t, bool aligned_x>
 class blocked_thomas_solver : public locally_onedimensional_solver,
@@ -33,7 +41,7 @@ protected:
 
 	using sync_func_t = std::function<void>;
 
-	std::unique_ptr<std::unique_ptr<std::barrier<>>[]> barriers_;
+	std::unique_ptr<aligned_atomic<long>[]> counters_;
 
 	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims);
 

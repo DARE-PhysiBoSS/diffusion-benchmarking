@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <thread>
 
 #include "noarr/structures/base/structs_common.hpp"
 #include "noarr/structures/extra/shortcuts.hpp"
@@ -71,10 +72,11 @@ void blocked_thomas_solver<real_t, aligned_x>::initialize()
 
 	auto barriers_count = (get_max_threads() + max_blocks - 1) / max_blocks;
 
-	barriers_ = std::make_unique<std::unique_ptr<std::barrier<>>[]>(barriers_count);
+	counters_ = std::make_unique<aligned_atomic<long>[]>(barriers_count);
+
 	for (std::size_t i = 0; i < barriers_count; i++)
 	{
-		barriers_[i] = std::make_unique<std::barrier<>>(max_blocks);
+		counters_[i].value = 0;
 	}
 }
 
@@ -96,69 +98,10 @@ auto blocked_thomas_solver<real_t, aligned_x>::get_diagonal_layout(const problem
 	}
 }
 
-// template <typename real_t, bool aligned_x>
-// auto blocked_thomas_solver<real_t, aligned_x>::get_synchronization_function()
-// {
-// 	auto dens_l = get_substrates_layout();
-// 	auto scratch_l = get_scratch_layout();
-
-// 	return [dens_l, scratch_l](real_t* __restrict__ densities, real_t* __restrict__ a, real_t* __restrict__ c,
-// 							   const index_t s, const index_t blocks_count) {
-// 		const index_t block_size = scratch_l | noarr::get_length<'i'>();
-
-// 		auto get_i = [block_size](index_t index) {
-// 			auto tid = index / 2;
-// 			auto i = index % 2;
-
-// 			return std::make_pair(tid, i);
-// 		};
-
-// 		for (index_t block_idx = 1; block_idx < blocks_count * 2; block_idx++)
-// 		{
-// 			const auto [tid, i] = get_i(block_idx);
-// 			const auto [prev_tid, prev_i] = get_i(block_idx - 1);
-// 			const auto dens_i = tid * block_size + i;
-// 			const auto prev_dens_i = prev_tid * block_size + prev_i;
-
-// 			const auto r = 1
-// 						   / (1
-// 							  - (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-// 									* (scratch_l | noarr::get_at<'t', 'i'>(c, prev_tid, prev_i)));
-
-// 			(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i)) *= r;
-
-// 			(dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s)) =
-// 				r
-// 				* ((dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s))
-// 				   - (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-// 						 * (dens_l | noarr::get_at<'x', 's'>(densities, prev_dens_i, s)));
-
-// 			// std::cout << "TF i: " << i << ", prev_i: " << prev_i << ", c: " << c[i]
-// 			// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
-// 		}
-
-// 		for (index_t block_idx = blocks_count * 2 - 2; block_idx >= 0; block_idx--)
-// 		{
-// 			const auto [tid, i] = get_i(block_idx);
-// 			const auto [next_tid, next_i] = get_i(block_idx + 1);
-// 			const auto dens_i = tid * block_size + i;
-// 			const auto next_dens_i = next_tid * block_size + next_i;
-
-// 			(dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s)) =
-// 				(dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s))
-// 				- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i))
-// 					  * (dens_l | noarr::get_at<'x', 's'>(densities, next_dens_i, s));
-
-// 			// std::cout << "TB i: " << i << ", next_i: " << next_i << ", c: " << c[i]
-// 			// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
-// 		}
-// 	};
-// }
-
-template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+template <typename index_t, typename real_t, typename counter_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
-							 const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ c,
-							 std::unique_ptr<std::barrier<>>* __restrict__ barriers, const density_layout_t dens_l,
+							 const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
+							 aligned_atomic<counter_t>* __restrict__ counters, const density_layout_t dens_l,
 							 const scratch_layout_t scratch_l, const index_t block_size)
 {
 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
@@ -169,10 +112,11 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	const auto tid = get_thread_num();
 	const auto thread_count = get_num_threads();
 
-	const index_t barrier_count = (thread_count + blocks_count - 1) / blocks_count;
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+	auto d = noarr::make_bag(dens_l, densities);
 
-	// if (tid == 0)
-	// 	std::cout << "Block count: " << blocks_count << std::endl;
+	const index_t barrier_count = (thread_count + blocks_count - 1) / blocks_count;
 
 	for (index_t idx = tid; idx < substrates_count * blocks_count; idx += thread_count)
 	{
@@ -189,159 +133,141 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 			index_t i;
 			for (i = block_start; i < block_start + 2; i++)
 			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+
 				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
 				const auto b_tmp = b1[s] + (i == 0 || i == n - 1 ? ac[s] : 0);
 				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
-				(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) = a_tmp / b_tmp;
-				(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) = c_tmp / b_tmp;
+				a[state] = a_tmp / b_tmp;
+				c[state] = c_tmp / b_tmp;
 
-				(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) /= b_tmp;
-
-				// std::cout << "F tid: " << tid << ", i: " << i - block_start << ", di: " << i << ", a_tmp: " << a_tmp
-				// 		  << ", b_tmp: " << b_tmp << ", c_tmp: " << c_tmp
-				// 		  << ", a: " << (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+				d.template at<'x', 's'>(i, s) /= b_tmp;
 			}
 
 			// Process the lower diagonal (forward)
 			for (; i < block_end; i++)
 			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+				const auto prev_state = noarr::idx<'t', 'i'>(tid, i - block_start - 1);
+
 				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
 				const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
 				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
-				const auto r = 1 / (b_tmp - a_tmp * (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start - 1)));
+				const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
 
-				(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) =
-					r * (0 - a_tmp * (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start - 1)));
-				(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) = r * c_tmp;
+				a[state] = r * (0 - a_tmp * a[prev_state]);
+				c[state] = r * c_tmp;
 
-				(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
-					r
-					* ((dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-					   - a_tmp * (dens_l | noarr::get_at<'x', 's'>(densities, i - 1, s)));
-
-				// std::cout << "F tid: " << tid << ", i: " << i - block_start << ", di: " << i << ", a_tmp: " << a_tmp
-				// 		  << ", a: " << (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+				d.template at<'x', 's'>(i, s) =
+					r * (d.template at<'x', 's'>(i, s) - a_tmp * d.template at<'x', 's'>(i - 1, s));
 			}
 
 			// Process the upper diagonal (backward)
 			for (i = block_end - 3; i >= block_start + 1; i--)
 			{
-				(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) -=
-					(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-					* (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s));
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+				const auto next_state = noarr::idx<'t', 'i'>(tid, i - block_start + 1);
 
-				(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) =
-					(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-					- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-						  * (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start + 1));
-				(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) =
-					0
-					- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-						  * (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start + 1));
+				d.template at<'x', 's'>(i, s) -= c[state] * d.template at<'x', 's'>(i + 1, s);
 
-				// std::cout << "B tid: " << tid << ", i: " << i - block_start << ", di: " << i
-				// 		  << ", a: " << (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+				a[state] = a[state] - c[state] * a[next_state];
+				c[state] = 0 - c[state] * c[next_state];
 			}
 
 			// Process the first row (backward)
 			{
-				const auto r = 1
-							   / (1
-								  - (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-										* (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start + 1)));
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+				const auto next_state = noarr::idx<'t', 'i'>(tid, i - block_start + 1);
 
-				(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
-					r
-					* ((dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-					   - (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-							 * (dens_l | noarr::get_at<'x', 's'>(densities, i + 1, s)));
+				const auto r = 1 / (1 - c[state] * a[next_state]);
 
-				(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) =
-					r * (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start));
-				(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) =
-					r
-					* (0
-					   - (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-							 * (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start + 1)));
+				d.template at<'x', 's'>(i, s) =
+					r * (d.template at<'x', 's'>(i, s) - c[state] * d.template at<'x', 's'>(i + 1, s));
 
-				// std::cout << "B tid: " << tid << ", i: " << i - block_start << ", di: " << i
-				// 		  << ", a: " << (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+				a[state] = r * a[state];
+				c[state] = r * (0 - c[state] * c[next_state]);
 			}
 		}
 
-		barriers[s % barrier_count]->arrive_and_wait();
-
-		// Second part of modified thomas algorithm
-		// We solve the system of equations that are composed of the first and last row of each block
-		// We do it using Thomas Algorithm
-		if (block_idx == 0)
 		{
-			auto get_i = [block_size, tid, thread_count, block_idx](index_t equation_idx) {
-				const index_t equation_block_idx = equation_idx / 2;
-				const index_t equation_block_offset = equation_idx % 2 * (block_size - 1);
+			const counter_t visit_count = s / barrier_count;
+			const counter_t last_epoch_end = visit_count * (blocks_count + 1);
+			const counter_t this_epoch_end = (visit_count + 1) * (blocks_count + 1);
 
-				const index_t equation_tid = (tid + equation_block_idx - block_idx) % thread_count;
-				const index_t equation_i = equation_block_offset;
-				const index_t equation_dens_i = equation_block_idx * block_size + equation_i;
+			auto& counter = counters[s % barrier_count].value;
 
-				return std::make_tuple(equation_tid, equation_i, equation_dens_i);
-			};
+			auto current_value = counter.load();
 
-			for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+			// sleep if a thread is too much ahead
+			while (current_value < last_epoch_end)
 			{
-				const auto [tid, i, dens_i] = get_i(equation_idx);
-				const auto [prev_tid, prev_i, prev_dens_i] = get_i(equation_idx - 1);
-
-				const auto r = 1
-							   / (1
-								  - (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-										* (scratch_l | noarr::get_at<'t', 'i'>(c, prev_tid, prev_i)));
-
-				(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i)) *= r;
-
-				(dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s)) =
-					r
-					* ((dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s))
-					   - (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-							 * (dens_l | noarr::get_at<'x', 's'>(densities, prev_dens_i, s)));
-
-				// std::cout << "TF tid: " << tid << ", i: " << i << ", di: " << dens_i << " ptid: " << prev_tid
-				// 		  << ", pi: " << prev_i << ", pdi: " << prev_dens_i
-				// 		  << ", a: " << (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i))
-				// 		  << ", pa: " << (scratch_l | noarr::get_at<'t', 'i'>(a, prev_tid, prev_i))
-				// 		  << ", pc: " << (scratch_l | noarr::get_at<'t', 'i'>(c, prev_tid, prev_i))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s)) << std::endl;
+				counter.wait(current_value);
+				current_value = counter.load();
 			}
 
-			for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+			// increment the counter
+			current_value = counter.fetch_add(1);
+
+			// Second part of modified thomas algorithm
+			// We solve the system of equations that are composed of the first and last row of each block
+			// We do it using Thomas Algorithm
+			if (current_value == this_epoch_end - 2)
 			{
-				const auto [tid, i, dens_i] = get_i(equation_idx);
-				const auto [next_tid, next_i, next_dens_i] = get_i(equation_idx + 1);
+				// bags for the middle phase
+				auto get_i = [block_size, tid, thread_count, block_idx](index_t equation_idx) {
+					const index_t equation_block_idx = equation_idx / 2;
+					const index_t equation_block_offset = equation_idx % 2 * (block_size - 1);
 
-				(dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s)) =
-					(dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s))
-					- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i))
-						  * (dens_l | noarr::get_at<'x', 's'>(densities, next_dens_i, s));
+					const index_t equation_tid = (tid + equation_block_idx - block_idx + thread_count) % thread_count;
+					const index_t equation_i = equation_block_offset;
+					const index_t equation_dens_i = equation_block_idx * block_size + equation_i;
 
-				// std::cout << "TB tid: " << tid << ", i: " << i << ", di: " << dens_i << " ntid: " << next_tid
-				// 		  << ", ni: " << next_i << ", ndi: " << next_dens_i
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, dens_i, s)) << std::endl;
+					return std::make_tuple(equation_tid, equation_i, equation_dens_i);
+				};
+
+				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+				{
+					const auto [tid, i, dens_i] = get_i(equation_idx);
+					const auto [prev_tid, prev_i, prev_dens_i] = get_i(equation_idx - 1);
+
+					const auto state = noarr::idx<'t', 'i'>(tid, i);
+					const auto prev_state = noarr::idx<'t', 'i'>(prev_tid, prev_i);
+
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					d.template at<'x', 's'>(dens_i, s) =
+						r * (d.template at<'x', 's'>(dens_i, s) - a[state] * d.template at<'x', 's'>(prev_dens_i, s));
+				}
+
+				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const auto [tid, i, dens_i] = get_i(equation_idx);
+					const auto [next_tid, next_i, next_dens_i] = get_i(equation_idx + 1);
+
+					const auto state = noarr::idx<'t', 'i'>(tid, i);
+
+					d.template at<'x', 's'>(dens_i, s) =
+						d.template at<'x', 's'>(dens_i, s) - c[state] * d.template at<'x', 's'>(next_dens_i, s);
+				}
+
+				// notify all threads that the last thread has finished
+				counter.store(this_epoch_end);
+				counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < this_epoch_end)
+				{
+					counter.wait(current_value);
+					current_value = counter.load();
+				}
 			}
 		}
-
-		barriers[s % barrier_count]->arrive_and_wait();
 
 		// Final part of modified thomas algorithm
 		// Solve the rest of the unknowns
@@ -351,199 +277,206 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 
 			for (index_t i = block_start + 1; i < block_end - 1; i++)
 			{
-				(dens_l | noarr::get_at<'x', 's'>(densities, i, s)) =
-					(dens_l | noarr::get_at<'x', 's'>(densities, i, s))
-					- (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-						  * (dens_l | noarr::get_at<'x', 's'>(densities, block_start, s))
-					- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-						  * (dens_l | noarr::get_at<'x', 's'>(densities, block_end - 1, s));
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
 
-				// std::cout << "C tid: " << tid << ", i: " << i - block_start << ", di: " << i
-				// 		  << ", a: " << (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-				// 		  << ", c: " << (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-				// 		  << ", d: " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+				d.template at<'x', 's'>(i, s) = d.template at<'x', 's'>(i, s)
+												- a[state] * d.template at<'x', 's'>(block_start, s)
+												- c[state] * d.template at<'x', 's'>(block_end - 1, s);
 			}
 		}
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+template <typename index_t, typename real_t, typename counter_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t* __restrict__ ac,
-									const real_t* __restrict__ b1, real_t* __restrict__ a, real_t* __restrict__ c,
-									std::unique_ptr<std::barrier<>>* __restrict__ barriers,
+									const real_t* __restrict__ b1, real_t* __restrict__ a_data,
+									real_t* __restrict__ c_data, aligned_atomic<counter_t>* __restrict__ counters,
 									const density_layout_t dens_l, const scratch_layout_t scratch_l,
 									const index_t block_size)
 {
-// 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
-// 	const index_t n = dens_l | noarr::get_length<'x'>();
-// 	const index_t m = dens_l | noarr::get_length<'m'>();
-// 	constexpr char swipe_dim = 'x';
+	constexpr char dim = 'x';
+	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
+	const index_t n = dens_l | noarr::get_length<dim>();
+	const index_t yz_len = dens_l | noarr::get_length<'m'>();
+
+	const index_t blocks_count = n / block_size;
+
+	const auto tid = get_thread_num();
+	const auto thread_count = get_num_threads();
+
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+
+	const index_t barrier_count = (thread_count + blocks_count - 1) / blocks_count;
+
+	for (index_t idx = tid; idx < substrates_count * yz_len * blocks_count; idx += thread_count)
+	{
+		const index_t s = idx / (blocks_count * yz_len);
+		const index_t yz = idx / blocks_count % yz_len;
+		const index_t block_idx = idx % blocks_count;
+
+		auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'm'>(s, yz), densities);
+
+		// First part of modified thomas algorithm
+		// We modify equations in blocks to have the first and the last equation form the tridiagonal system
+		{
+			const index_t block_start = block_idx * block_size;
+			const index_t block_end = block_start + block_size;
+
+			// Normalize the first and the second equation
+			index_t i;
+			for (i = block_start; i < block_start + 2; i++)
+			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + (i == 0 || i == n - 1 ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+				a[state] = a_tmp / b_tmp;
+				c[state] = c_tmp / b_tmp;
+
+				d.template at<dim>(i) /= b_tmp;
+			}
+
+			// Process the lower diagonal (forward)
+			for (; i < block_end; i++)
+			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+				const auto prev_state = noarr::idx<'t', 'i'>(tid, i - block_start - 1);
+
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+				const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+				a[state] = r * (0 - a_tmp * a[prev_state]);
+				c[state] = r * c_tmp;
+
+				d.template at<dim>(i) = r * (d.template at<dim>(i) - a_tmp * d.template at<'x'>(i - 1));
+			}
+
+			// Process the upper diagonal (backward)
+			for (i = block_end - 3; i >= block_start + 1; i--)
+			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+				const auto next_state = noarr::idx<'t', 'i'>(tid, i - block_start + 1);
+
+				d.template at<dim>(i) -= c[state] * d.template at<'x'>(i + 1);
+
+				a[state] = a[state] - c[state] * a[next_state];
+				c[state] = 0 - c[state] * c[next_state];
+			}
+
+			// Process the first row (backward)
+			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
+				const auto next_state = noarr::idx<'t', 'i'>(tid, i - block_start + 1);
+
+				const auto r = 1 / (1 - c[state] * a[next_state]);
+
+				d.template at<dim>(i) = r * (d.template at<dim>(i) - c[state] * d.template at<dim>(i + 1));
+
+				a[state] = r * a[state];
+				c[state] = r * (0 - c[state] * c[next_state]);
+			}
+		}
+
+		{
+			const counter_t visit_count = (idx / blocks_count) / barrier_count;
+			const counter_t last_epoch_end = visit_count * (blocks_count + 1);
+			const counter_t this_epoch_end = (visit_count + 1) * (blocks_count + 1);
+
+			auto& counter = counters[(idx / blocks_count) % barrier_count].value;
+
+			auto current_value = counter.load(std::memory_order::relaxed);
+
+			// sleep if a thread is too much ahead
+			while (current_value < last_epoch_end)
+			{
+				// counter.wait(current_value, std::memory_order::relaxed);
+				current_value = counter.load(std::memory_order::relaxed);
+			}
+
+			// increment the counter
+			current_value = counter.fetch_add(1, std::memory_order::relaxed);
+
+			// Second part of modified thomas algorithm
+			// We solve the system of equations that are composed of the first and last row of each block
+			// We do it using Thomas Algorithm
+			if (current_value == this_epoch_end - 2)
+			{
+				// bags for the middle phase
+				auto get_i = [block_size, tid, thread_count, block_idx](index_t equation_idx) {
+					const index_t equation_block_idx = equation_idx / 2;
+					const index_t equation_block_offset = equation_idx % 2 * (block_size - 1);
+
+					const index_t equation_tid = (tid + equation_block_idx - block_idx + thread_count) % thread_count;
+					const index_t equation_i = equation_block_offset;
+					const index_t equation_dens_i = equation_block_idx * block_size + equation_i;
+
+					return std::make_tuple(equation_tid, equation_i, equation_dens_i);
+				};
+
+				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+				{
+					const auto [tid, i, dens_i] = get_i(equation_idx);
+					const auto [prev_tid, prev_i, prev_dens_i] = get_i(equation_idx - 1);
+
+					const auto state = noarr::idx<'t', 'i'>(tid, i);
+					const auto prev_state = noarr::idx<'t', 'i'>(prev_tid, prev_i);
+
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					d.template at<dim>(dens_i) =
+						r * (d.template at<dim>(dens_i) - a[state] * d.template at<dim>(prev_dens_i));
+				}
+
+				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const auto [tid, i, dens_i] = get_i(equation_idx);
+					const auto [next_tid, next_i, next_dens_i] = get_i(equation_idx + 1);
+
+					const auto state = noarr::idx<'t', 'i'>(tid, i);
+
+					d.template at<dim>(dens_i) =
+						d.template at<dim>(dens_i) - c[state] * d.template at<dim>(next_dens_i);
+				}
 
 
-// 	const index_t blocks_count = n / block_size;
+				// notify all threads that the last thread has finished
+				counter.store(this_epoch_end, std::memory_order::relaxed);
+				counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < this_epoch_end)
+				{
+					// counter.wait(current_value, std::memory_order::relaxed);
+					current_value = counter.load(std::memory_order::relaxed);
+				}
+			}
+		}
 
-// 	const auto tid = get_thread_num();
-// 	const auto thread_count = get_num_threads();
+		// Final part of modified thomas algorithm
+		// Solve the rest of the unknowns
+		{
+			const index_t block_start = block_idx * block_size;
+			const index_t block_end = block_start + block_size;
 
-// 	const index_t barrier_count = (thread_count + blocks_count - 1) / blocks_count;
+			for (index_t i = block_start + 1; i < block_end - 1; i++)
+			{
+				const auto state = noarr::idx<'t', 'i'>(tid, i - block_start);
 
-// #pragma omp for schedule(static) collapse(2)
-// 	for (index_t s = 0; s < substrates_count; s++)
-// 	{
-// 		for (index_t yz = 0; yz < m; yz++)
-// 		{
-// 			const auto fixed_l = dens_l ^ noarr::fix<'s', 'm'>(s, yz);
-
-// 			// First part of modified thomas algorithm
-// 			// We modify equations in blocks to have the first and the last equation form the tridiagonal system
-// 			for (index_t block_idx = 0; block_idx < blocks_count; block_idx++)
-// 			{
-// 				const index_t block_start = block_idx * block_size;
-
-// 				const index_t block_end_tmp = block_start + block_size;
-// 				const index_t block_end = n - block_end_tmp <= alg::min_block_size ? n : block_end_tmp;
-
-// 				// Normalize the first and the second equation
-// 				index_t i;
-// 				for (i = block_start; i < block_start + 2; i++)
-// 				{
-// 					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
-// 					const auto b_tmp = b1[s] + (i == 0 || i == n - 1 ? ac[s] : 0);
-// 					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
-
-// 					(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) = a_tmp / b_tmp;
-// 					(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) = c_tmp / b_tmp;
-
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) /= b_tmp;
-// 				}
-
-// 				// Process the lower diagonal (forward)
-// 				for (; i < block_end; i++)
-// 				{
-// 					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
-// 					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
-// 					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
-
-// 					const auto r =
-// 						1 / (b_tmp - a_tmp * (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start - 1)));
-
-// 					(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) =
-// 						r * (0 - a_tmp * (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start - 1)));
-// 					(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) = r * c_tmp;
-
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) =
-// 						r
-// 						* ((fixed_l | noarr::get_at<swipe_dim>(densities, i))
-// 						   - a_tmp * (fixed_l | noarr::get_at<swipe_dim>(densities, i - 1)));
-// 				}
-
-// 				// Process the upper diagonal (backward)
-// 				for (i = block_end - 3; i >= block_start + 1; i--)
-// 				{
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) -=
-// 						(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 						* (fixed_l | noarr::get_at<swipe_dim>(densities, i + 1));
-
-// 					(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) =
-// 						(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-// 						- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 							  * (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start + 1));
-// 					(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) =
-// 						0
-// 						- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 							  * (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start + 1));
-// 				}
-
-// 				// Process the first row (backward)
-// 				{
-// 					const auto r = 1
-// 								   / (1
-// 									  - (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 											* (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start + 1)));
-
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) =
-// 						r
-// 						* ((fixed_l | noarr::get_at<swipe_dim>(densities, i))
-// 						   - (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 								 * (fixed_l | noarr::get_at<swipe_dim>(densities, i + 1)));
-
-// 					(scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start)) =
-// 						r * (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start));
-// 					(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start)) =
-// 						r
-// 						* (0
-// 						   - (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 								 * (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start + 1)));
-// 				}
-// 			}
-
-// 			// Second part of modified thomas algorithm
-// 			// We solve the system of equations that are composed of the first and last row of each block
-// 			// We do it using Thomas Algorithm
-// 			{
-// 				auto get_i = [block_size, tid, thread_count, block_idx](index_t equation_idx) {
-// 					const index_t equation_block_idx = equation_idx / 2;
-// 					const index_t equation_block_offset = equation_idx % 2 * (block_size - 1);
-
-// 					const index_t equation_tid = (tid + equation_block_idx - block_idx) % thread_count;
-// 					const index_t equation_i = equation_block_offset;
-// 					const index_t equation_dens_i = equation_block_idx * block_size + equation_i;
-
-// 					return std::make_tuple(equation_tid, equation_i, equation_dens_i);
-// 				};
-
-// 				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
-// 				{
-// 					const auto [tid, i, dens_i] = get_i(equation_idx);
-// 					const auto [prev_tid, prev_i, prev_dens_i] = get_i(equation_idx - 1);
-
-// 					const auto r = 1
-// 								   / (1
-// 									  - (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-// 											* (scratch_l | noarr::get_at<'t', 'i'>(c, prev_tid, prev_i)));
-
-// 					(scratch_l | noarr::get_at<'t', 'i'>(c, tid, i)) *= r;
-
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) =
-// 						r
-// 						* ((fixed_l | noarr::get_at<swipe_dim>(densities, i))
-// 						   - (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i))
-// 								 * (fixed_l | noarr::get_at<swipe_dim>(densities, prev_i)));
-// 				}
-
-// 				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
-// 				{
-// 					const auto [tid, i, dens_i] = get_i(equation_idx);
-// 					const auto [next_tid, next_i, next_dens_i] = get_i(equation_idx + 1);
-
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) =
-// 						(fixed_l | noarr::get_at<swipe_dim>(densities, i))
-// 						- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i))
-// 							  * (fixed_l | noarr::get_at<swipe_dim>(densities, next_i));
-// 				}
-// 			}
-
-// 			// Final part of modified thomas algorithm
-// 			// Solve the rest of the unknowns
-// 			for (index_t block_idx = 0; block_idx < blocks_count; block_idx++)
-// 			{
-// 				const index_t block_start = block_idx * block_size;
-
-// 				const index_t block_end_tmp = block_start + block_size;
-// 				const index_t block_end = n - block_end_tmp <= alg::min_block_size ? n : block_end_tmp;
-
-// 				for (index_t i = block_start + 1; i < block_end - 1; i++)
-// 				{
-// 					(fixed_l | noarr::get_at<swipe_dim>(densities, i)) =
-// 						(fixed_l | noarr::get_at<swipe_dim>(densities, i))
-// 						- (scratch_l | noarr::get_at<'t', 'i'>(a, tid, i - block_start))
-// 							  * (fixed_l | noarr::get_at<swipe_dim>(densities, block_start))
-// 						- (scratch_l | noarr::get_at<'t', 'i'>(c, tid, i - block_start))
-// 							  * (fixed_l | noarr::get_at<swipe_dim>(densities, block_end - 1));
-// 				}
-// 			}
-// 		}
-// 	}
+				d.template at<dim>(i) = d.template at<dim>(i) - a[state] * d.template at<dim>(block_start)
+										- c[state] * d.template at<dim>(block_end - 1);
+			}
+		}
+	}
 }
 
 template <typename index_t, typename real_t, typename density_layout_t>
@@ -1086,19 +1019,19 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 template <typename real_t, bool aligned_x>
 void blocked_thomas_solver<real_t, aligned_x>::solve_x()
 {
-// 	if (this->problem_.dims == 1)
-// 	{
+	if (this->problem_.dims == 1)
+	{
 #pragma omp parallel
-	solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, barriers_.get(),
-							  get_substrates_layout<1>(), get_scratch_layout(), block_size_);
-	// 	}
-	// 	else if (this->problem_.dims == 2)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-	// 										 c_scratch_[get_thread_num()],
-	// 										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(), block_size_);
-	// 	}
+		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, counters_.get(),
+								  get_substrates_layout<1>(), get_scratch_layout(), block_size_);
+	}
+	else if (this->problem_.dims == 2)
+	{
+#pragma omp parallel
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, counters_.get(),
+										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(), get_scratch_layout(),
+										 block_size_);
+	}
 	// 	else if (this->problem_.dims == 3)
 	// 	{
 	// #pragma omp parallel
