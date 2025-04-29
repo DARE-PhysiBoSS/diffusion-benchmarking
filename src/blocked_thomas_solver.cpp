@@ -1,5 +1,6 @@
 #include "blocked_thomas_solver.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
@@ -13,7 +14,10 @@
 using alg = blocked_thomas_solver<double, true>;
 
 template <typename real_t, bool aligned_x>
-void blocked_thomas_solver<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims)
+void blocked_thomas_solver<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims,
+																 index_t n, index_t& counters_count,
+																 std::unique_ptr<aligned_atomic<long>[]>& counters,
+																 index_t& max_threads)
 {
 	// allocate memory for a and b1
 	a = (real_t*)std::malloc(this->problem_.substrates_count * sizeof(real_t));
@@ -27,6 +31,17 @@ void blocked_thomas_solver<real_t, aligned_x>::precompute_values(real_t*& a, rea
 	for (index_t s = 0; s < this->problem_.substrates_count; s++)
 		b1[s] = 1 + this->problem_.decay_rates[s] * this->problem_.dt / dims
 				+ 2 * this->problem_.dt * this->problem_.diffusion_coefficients[s] / (shape * shape);
+
+	index_t blocks_count = n / block_size_; // TODO: handle remainder
+	max_threads = std::max<index_t>(get_max_threads(), blocks_count);
+
+	counters_count = (max_threads + blocks_count - 1) / blocks_count;
+	counters = std::make_unique<aligned_atomic<long>[]>(counters_count);
+
+	for (index_t i = 0; i < counters_count; i++)
+	{
+		counters[i].value.store(0, std::memory_order_relaxed);
+	}
 }
 
 template <typename real_t, bool aligned_x>
@@ -56,28 +71,19 @@ template <typename real_t, bool aligned_x>
 void blocked_thomas_solver<real_t, aligned_x>::initialize()
 {
 	if (this->problem_.dims >= 1)
-		precompute_values(ax_, b1x_, this->problem_.dx, this->problem_.dims);
+		precompute_values(ax_, b1x_, this->problem_.dx, this->problem_.dims, this->problem_.nx, countersx_count_,
+						  countersx_, max_threadsx_);
 	if (this->problem_.dims >= 2)
-		precompute_values(ay_, b1y_, this->problem_.dy, this->problem_.dims);
+		precompute_values(ay_, b1y_, this->problem_.dy, this->problem_.dims, this->problem_.ny, countersy_count_,
+						  countersy_, max_threadsy_);
 	if (this->problem_.dims >= 3)
-		precompute_values(az_, b1z_, this->problem_.dz, this->problem_.dims);
+		precompute_values(az_, b1z_, this->problem_.dz, this->problem_.dims, this->problem_.nz, countersz_count_,
+						  countersz_, max_threadsz_);
 
-	auto scratch_layout = get_scratch_layout();
+	auto scratch_layout = get_scratch_layout(std::max({ max_threadsx_, max_threadsy_, max_threadsz_ }));
 
 	a_scratch_ = (real_t*)std::malloc((scratch_layout | noarr::get_size()));
 	c_scratch_ = (real_t*)std::malloc((scratch_layout | noarr::get_size()));
-
-	auto max_n = this->problem_.nx;		   // TODO: handle different dimension sizes
-	auto max_blocks = max_n / block_size_; // TODO: handle remainder
-
-	auto barriers_count = (get_max_threads() + max_blocks - 1) / max_blocks;
-
-	counters_ = std::make_unique<aligned_atomic<long>[]>(barriers_count);
-
-	for (std::size_t i = 0; i < barriers_count; i++)
-	{
-		counters_[i].value = 0;
-	}
 }
 
 template <typename real_t, bool aligned_x>
@@ -116,7 +122,14 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 	auto c = noarr::make_bag(scratch_l, c_data);
 	auto d = noarr::make_bag(dens_l, densities);
 
-	const index_t barrier_count = (thread_count + blocks_count - 1) / blocks_count;
+	const index_t counter_count = (thread_count + blocks_count - 1) / blocks_count;
+
+	for (index_t counter_idx = tid; counter_idx < counter_count; counter_idx += thread_count)
+	{
+		counters[counter_idx].value.store(0, std::memory_order_relaxed);
+	}
+
+#pragma omp barrier
 
 	for (index_t idx = tid; idx < substrates_count * blocks_count; idx += thread_count)
 	{
@@ -192,23 +205,23 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 		}
 
 		{
-			const counter_t visit_count = s / barrier_count;
+			const counter_t visit_count = s / counter_count;
 			const counter_t last_epoch_end = visit_count * (blocks_count + 1);
 			const counter_t this_epoch_end = (visit_count + 1) * (blocks_count + 1);
 
-			auto& counter = counters[s % barrier_count].value;
+			auto& counter = counters[s % counter_count].value;
 
-			auto current_value = counter.load();
+			auto current_value = counter.load(std::memory_order_relaxed);
 
 			// sleep if a thread is too much ahead
 			while (current_value < last_epoch_end)
 			{
-				counter.wait(current_value);
-				current_value = counter.load();
+				counter.wait(current_value, std::memory_order_relaxed);
+				current_value = counter.load(std::memory_order_relaxed);
 			}
 
 			// increment the counter
-			current_value = counter.fetch_add(1);
+			current_value = counter.fetch_add(1, std::memory_order_relaxed);
 
 			// Second part of modified thomas algorithm
 			// We solve the system of equations that are composed of the first and last row of each block
@@ -255,7 +268,7 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 				}
 
 				// notify all threads that the last thread has finished
-				counter.store(this_epoch_end);
+				counter.store(this_epoch_end, std::memory_order_release);
 				counter.notify_all();
 			}
 			else
@@ -263,8 +276,8 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 				// wait for the last thread to finish
 				while (current_value < this_epoch_end)
 				{
-					counter.wait(current_value);
-					current_value = counter.load();
+					counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
 				}
 			}
 		}
@@ -307,9 +320,9 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 	auto a = noarr::make_bag(scratch_l, a_data);
 	auto c = noarr::make_bag(scratch_l, c_data);
 
-	const index_t barrier_count = (thread_count + blocks_count - 1) / blocks_count;
+	const index_t counters_count = (thread_count + blocks_count - 1) / blocks_count;
 
-	for (index_t idx = tid; idx < substrates_count * yz_len * blocks_count; idx += thread_count)
+	for (std::size_t idx = tid; idx < (std::size_t)substrates_count * yz_len * blocks_count; idx += thread_count)
 	{
 		const index_t s = idx / (blocks_count * yz_len);
 		const index_t yz = idx / blocks_count % yz_len;
@@ -384,11 +397,11 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 		}
 
 		{
-			const counter_t visit_count = (idx / blocks_count) / barrier_count;
+			const counter_t visit_count = (idx / blocks_count) / counters_count;
 			const counter_t last_epoch_end = visit_count * (blocks_count + 1);
 			const counter_t this_epoch_end = (visit_count + 1) * (blocks_count + 1);
 
-			auto& counter = counters[(idx / blocks_count) % barrier_count].value;
+			auto& counter = counters[(idx / blocks_count) % counters_count].value;
 
 			auto current_value = counter.load(std::memory_order::relaxed);
 
@@ -448,8 +461,8 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 
 
 				// notify all threads that the last thread has finished
-				counter.store(this_epoch_end, std::memory_order::relaxed);
-				counter.notify_all();
+				counter.store(this_epoch_end, std::memory_order::release);
+				// counter.notify_all();
 			}
 			else
 			{
@@ -457,7 +470,7 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 				while (current_value < this_epoch_end)
 				{
 					// counter.wait(current_value, std::memory_order::relaxed);
-					current_value = counter.load(std::memory_order::relaxed);
+					current_value = counter.load(std::memory_order::acquire);
 				}
 			}
 		}
@@ -1021,16 +1034,24 @@ void blocked_thomas_solver<real_t, aligned_x>::solve_x()
 {
 	if (this->problem_.dims == 1)
 	{
-#pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, counters_.get(),
-								  get_substrates_layout<1>(), get_scratch_layout(), block_size_);
+#pragma omp parallel num_threads(max_threadsx_)
+		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, countersx_.get(),
+								  get_substrates_layout<1>(), get_scratch_layout(max_threadsx_), block_size_);
 	}
 	else if (this->problem_.dims == 2)
 	{
-#pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, counters_.get(),
-										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(), get_scratch_layout(),
-										 block_size_);
+#pragma omp parallel num_threads(max_threadsx_)
+		{
+			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, countersx_.get(),
+											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+											 get_scratch_layout(max_threadsx_), block_size_);
+
+#pragma omp for
+			for (index_t i = 0; i < countersy_count_; i++)
+			{
+				countersy_[i].value.store(0, std::memory_order_relaxed);
+			}
+		}
 	}
 	// 	else if (this->problem_.dims == 3)
 	// 	{
@@ -1044,18 +1065,26 @@ void blocked_thomas_solver<real_t, aligned_x>::solve_x()
 template <typename real_t, bool aligned_x>
 void blocked_thomas_solver<real_t, aligned_x>::solve_y()
 {
-	// 	if (this->problem_.dims == 2)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
-	// 								  c_scratch_[get_thread_num()], get_substrates_layout<2>(), block_size_);
-	// 	}
-	// 	else if (this->problem_.dims == 3)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
-	// 								  c_scratch_[get_thread_num()], get_substrates_layout<3>(), block_size_);
-	// 	}
+	if (this->problem_.dims == 2)
+	{
+#pragma omp parallel
+		{
+#pragma omp for
+			for (index_t i = 0; i < countersx_count_; i++)
+			{
+				countersx_[i].value.store(0, std::memory_order_relaxed);
+			}
+		}
+		// #pragma omp parallel
+		// 		solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
+		// 								  c_scratch_[get_thread_num()], get_substrates_layout<2>(), block_size_);
+	}
+	else if (this->problem_.dims == 3)
+	{
+		// #pragma omp parallel
+		// 		solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, a_scratch_[get_thread_num()],
+		// 								  c_scratch_[get_thread_num()], get_substrates_layout<3>(), block_size_);
+	}
 }
 
 template <typename real_t, bool aligned_x>
