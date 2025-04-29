@@ -34,6 +34,11 @@ protected:
 	real_t *ay_, *b1y_;
 	real_t *az_, *b1z_;
 
+	std::unique_ptr<aligned_atomic<long>[]> countersx_, countersy_, countersz_;
+	index_t countersx_count_, countersy_count_, countersz_count_;
+
+	index_t max_threadsx_, max_threadsy_, max_threadsz_;
+
 	real_t *a_scratch_, *c_scratch_;
 
 	std::size_t block_size_;
@@ -41,9 +46,8 @@ protected:
 
 	using sync_func_t = std::function<void>;
 
-	std::unique_ptr<aligned_atomic<long>[]> counters_;
-
-	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims);
+	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t& counters_count,
+						   std::unique_ptr<aligned_atomic<long>[]>& counters, index_t& max_threads);
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
@@ -61,9 +65,9 @@ public:
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
 
-	auto get_scratch_layout() const
+	auto get_scratch_layout(index_t max_threads) const
 	{
-		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 't'>(block_size_, get_max_threads());
+		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 't'>(block_size_, max_threads);
 	}
 
 	std::function<void> get_synchronization_function();
