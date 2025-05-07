@@ -48,7 +48,7 @@ class least_memory_thomas_solver_d_t : public locally_onedimensional_solver,
 	real_t *ay_, *b1y_, *cy_;
 	real_t *az_, *b1z_, *cz_;
 
-	bool vectorized_x_;
+	bool use_intrinsics_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 
@@ -57,7 +57,7 @@ class least_memory_thomas_solver_d_t : public locally_onedimensional_solver,
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
 public:
-	least_memory_thomas_solver_d_t(bool vectorized_x);
+	least_memory_thomas_solver_d_t(bool use_intrinsics);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
