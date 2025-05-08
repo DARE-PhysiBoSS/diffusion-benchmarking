@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <iostream>
 #include <memory>
 
 #include "base_solver.h"
@@ -62,7 +63,17 @@ public:
 
 	auto get_scratch_layout() const
 	{
-		auto max_core_division = *std::max_element(cores_division_.begin(), cores_division_.end());
+		std::size_t max_core_division;
+		if (this->problem_.dims == 2)
+			max_core_division = std::max(cores_division_[0], cores_division_[1]);
+		else
+		{
+			std::vector<index_t> tmp = { cores_division_[0], cores_division_[1], cores_division_[2] };
+			std::sort(tmp.begin(), tmp.end(), std::greater<index_t>());
+
+			max_core_division = tmp[0] * tmp[1];
+		}
+
 		auto max_n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
 
 		return noarr::scalar<real_t>()
