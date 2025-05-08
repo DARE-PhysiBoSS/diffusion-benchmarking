@@ -82,7 +82,7 @@ void cubed_thomas_solver_t<real_t, aligned_x>::initialize()
 						  countersz_, max_threadsz_);
 
 	// cores_division_ = { 2, 4, 4 };
-	cores_division_ = { 4, 4 };
+	cores_division_ = { 4, 2 };
 
 	auto scratch_layout = get_scratch_layout();
 
@@ -120,22 +120,6 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 	const index_t n = dens_l | noarr::get_length<dim>();
 
-	const auto tid = get_thread_num();
-
-	const auto tid_x = tid % 4;
-	const auto tid_y = tid / 4;
-
-	const index_t block_size_x = 5;
-	const index_t block_size_y = 5;
-
-	const auto block_x_begin = tid_x * block_size_x;
-	const auto block_x_end = std::min(block_x_begin + block_size_x, 20);
-	const auto block_x_len = block_x_end - block_x_begin;
-
-	const auto block_y_begin = tid_y * block_size_y;
-	const auto block_y_end = std::min(block_y_begin + block_size_y, y_len);
-	const auto block_y_len = block_y_end - block_y_begin;
-
 	for (index_t s = 0; s < s_len; s++)
 	{
 		for (index_t z = 0; z < z_len; z++)
@@ -160,14 +144,6 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 					c[state] = c_tmp / b_tmp;
 
 					d[state] /= b_tmp;
-
-#pragma omp critical
-					// if (y + block_y_begin == 0 && get_thread_num() < 4)
-					{
-						std::cout << "F i: " << i + block_x_begin << ", a_tmp: " << a_tmp << ", b_tmp: " << b_tmp
-								  << ", c_tmp: " << c_tmp << ", a: " << a[state] << ", c: " << c[state]
-								  << ", d: " << d[state] << std::endl;
-					}
 				}
 
 				// Process the lower diagonal (forward)
@@ -186,14 +162,6 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 					c[state] = r * c_tmp;
 
 					d[state] = r * (d[state] - a_tmp * d[prev_state]);
-
-#pragma omp critical
-					// if (y + block_y_begin == 0 && get_thread_num() < 4)
-					{
-						std::cout << "F i: " << i + block_x_begin << ", a_tmp: " << a_tmp << ", b_tmp: " << b_tmp
-								  << ", c_tmp: " << c_tmp << ", a: " << a[state] << ", c: " << c[state]
-								  << ", d: " << d[state] << std::endl;
-					}
 				}
 
 				// Process the upper diagonal (backward)
@@ -206,13 +174,6 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 					a[state] = a[state] - c[state] * a[next_state];
 					c[state] = 0 - c[state] * c[next_state];
-
-#pragma omp critical
-					// if (y + block_y_begin == 0 && get_thread_num() < 4)
-					{
-						std::cout << "B i: " << i + block_x_begin << ", a: " << a[state] << ", c: " << c[state]
-								  << ", d: " << d[state] << std::endl;
-					}
 				}
 
 				// Process the first row (backward)
@@ -226,13 +187,6 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 					a[state] = r * a[state];
 					c[state] = r * (0 - c[state] * c[next_state]);
-
-#pragma omp critical
-					// if (y + block_y_begin == 0 && get_thread_num() < 4)
-					{
-						std::cout << "B i: " << i + block_x_begin << ", a: " << a[state] << ", c: " << c[state]
-								  << ", d: " << d[state] << std::endl;
-					}
 				}
 			}
 		}
@@ -251,25 +205,6 @@ static void solve_block_x_middle(real_t* __restrict__ densities, real_t* __restr
 	const index_t n = dens_l | noarr::get_length<dim>();
 
 	const index_t blocks_count = (n + block_size - 1) / block_size;
-
-	// const auto tid = get_thread_num();
-
-	// const auto tid_x = tid % 4;
-	// const auto tid_y = tid / 4;
-
-	// const index_t block_size_x = 5;
-	// const index_t block_size_y = 5;
-
-	// const auto block_x_begin = tid_x * block_size_x;
-	// const auto block_x_end = std::min(block_x_begin + block_size_x, 20);
-	// const auto block_x_len = block_x_end - block_x_begin;
-
-	// const auto block_y_begin = tid_y * block_size_y;
-	// const auto block_y_end = std::min(block_y_begin + block_size_y, y_len);
-	// const auto block_y_len = block_y_end - block_y_begin;
-
-	// #pragma omp critical
-	// 	std::cout << "tid: " << get_thread_num() << " blocks_count: " << blocks_count << std::endl;
 
 	for (index_t s = 0; s < s_len; s++)
 	{
@@ -300,13 +235,6 @@ static void solve_block_x_middle(real_t* __restrict__ densities, real_t* __restr
 					d[state] = r * (d[state] - a[state] * d[prev_state]);
 				}
 			}
-
-			// #pragma omp critical
-			// if (y + block_y_begin == 0 && get_thread_num() < 4)
-			// {
-			// 	std::cout << "TF i: " << get_i(equation_idx) << ", prev_i: " << get_i(equation_idx - 1)
-			// 			  << " y: " << y + block_y_begin << ", c: " << c[state] << ", d: " << d[state] << std::endl;
-			// }
 		}
 
 		for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
@@ -323,13 +251,6 @@ static void solve_block_x_middle(real_t* __restrict__ densities, real_t* __restr
 					d[state] = d[state] - c[state] * d[next_state];
 				}
 			}
-
-			// #pragma omp critical
-			// if (y + block_y_begin == 0 && get_thread_num() < 4)
-			// {
-			// 	std::cout << "TB i: " << get_i(equation_idx) << ", next_i: " << get_i(equation_idx + 1)
-			// 			  << " y: " << y + block_y_begin << ", c: " << c[state] << ", d: " << d[state] << std::endl;
-			// }
 		}
 	}
 }
@@ -343,23 +264,6 @@ static void solve_block_x_end(real_t* __restrict__ densities, real_t* __restrict
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 	const index_t n = dens_l | noarr::get_length<dim>();
-
-
-	const auto tid = get_thread_num();
-
-	const auto tid_x = tid % 4;
-	const auto tid_y = tid / 4;
-
-	const index_t block_size_x = 5;
-	const index_t block_size_y = 5;
-
-	const auto block_x_begin = tid_x * block_size_x;
-	const auto block_x_end = std::min(block_x_begin + block_size_x, 20);
-	const auto block_x_len = block_x_end - block_x_begin;
-
-	const auto block_y_begin = tid_y * block_size_y;
-	const auto block_y_end = std::min(block_y_begin + block_size_y, y_len);
-	const auto block_y_len = block_y_end - block_y_begin;
 
 	for (index_t s = 0; s < s_len; s++)
 	{
@@ -381,13 +285,6 @@ static void solve_block_x_end(real_t* __restrict__ densities, real_t* __restrict
 						const auto last_state = noarr::idx<dim>(n - 1);
 
 						d[state] = d[state] - a[state] * d[first_state] - c[state] * d[last_state];
-
-#pragma omp critical
-						// if (y + block_y_begin == 0 && get_thread_num() < 4)
-						{
-							std::cout << "C i: " << i + block_x_begin << ", a: " << a[state] << ", c: " << c[state]
-									  << ", d: " << d[state] << std::endl;
-						}
 					}
 				}
 			}
@@ -891,9 +788,6 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const densit
 	const index_t block_size_x = (x_len + cores_division[0] - 1) / cores_division[0];
 	const index_t block_size_y = (y_len + cores_division[1] - 1) / cores_division[1];
 
-	// std::cout << "block_size_x: " << block_size_x << std::endl;
-	// std::cout << "block_size_y: " << block_size_y << std::endl;
-
 #pragma omp parallel num_threads(cores_division[0] * cores_division[1])
 	{
 		const auto tid = get_thread_num();
@@ -908,12 +802,6 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const densit
 		const auto block_y_begin = tid_y * block_size_y;
 		const auto block_y_end = std::min(block_y_begin + block_size_y, y_len);
 		const auto block_y_len = block_y_end - block_y_begin;
-
-		// #pragma omp critical
-		// 		std::cout << "tid: " << tid << " tid_x: " << tid_x << " block_x_begin: " << block_x_begin
-		// 				  << " block_x_end: " << block_x_end << " block_x_len: " << block_x_len << " tid_y: " << tid_y
-		// 				  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
-		// 				  << " block_y_len: " << block_y_len << std::endl;
 
 		const auto thread_dens_l =
 			dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len) ^ noarr::slice<'y'>(block_y_begin, block_y_len);
@@ -966,13 +854,6 @@ static void solve_slice_y_2d_and_3d(real_t* __restrict__ densities, const densit
 		const auto block_y_begin = tid_y * block_size_y;
 		const auto block_y_end = std::min(block_y_begin + block_size_y, y_len);
 		const auto block_y_len = block_y_end - block_y_begin;
-
-		// #pragma omp critical
-		// 		std::cout << "tid: " << tid << " tid_x: " << tid_x << " tid_y: " << tid_y << " block_x_begin: " <<
-		// block_x_begin
-		// 				  << " block_x_end: " << block_x_end << " block_x_len: " << block_x_len
-		// 				  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
-		// 				  << " block_y_len: " << block_y_len << std::endl;
 
 		const auto thread_dens_l =
 			dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len) ^ noarr::slice<'y'>(block_y_begin, block_y_len);

@@ -65,7 +65,8 @@ public:
 		auto max_core_division = *std::max_element(cores_division_.begin(), cores_division_.end());
 		auto max_n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
 
-		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 'l'>(max_n, max_core_division);
+		return noarr::scalar<real_t>()
+			   ^ noarr::vectors<'i', 'l', 's'>(max_n, max_core_division, this->problem_.substrates_count);
 	}
 
 	std::function<void> get_synchronization_function();
