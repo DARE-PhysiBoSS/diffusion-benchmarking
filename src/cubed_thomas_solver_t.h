@@ -34,7 +34,6 @@ protected:
 
 	real_t *a_scratch_, *c_scratch_;
 
-	std::size_t block_size_;
 	std::size_t alignment_size_;
 	std::size_t x_tile_size_;
 

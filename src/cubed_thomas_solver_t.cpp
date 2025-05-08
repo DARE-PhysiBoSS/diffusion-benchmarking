@@ -63,7 +63,6 @@ void cubed_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& prob
 template <typename real_t, bool aligned_x>
 void cubed_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
-	block_size_ = params.contains("block_size") ? (std::size_t)params["block_size"] : 100;
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
@@ -208,16 +207,16 @@ static void solve_block_x_middle(real_t* __restrict__ densities, real_t* __restr
 
 	const index_t blocks_count = (n + block_size - 1) / block_size;
 
+	auto get_i = [block_size, n](index_t equation_idx) {
+		const index_t block_idx = equation_idx / 2;
+		const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
+		return std::min(i, n - 1);
+	};
+
 	for (index_t s = 0; s < s_len; s++)
 	{
 		auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), a_data);
 		auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), c_data);
-
-		auto get_i = [block_size, n](index_t equation_idx) {
-			const index_t block_idx = equation_idx / 2;
-			const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
-			return std::min(i, n - 1);
-		};
 
 		for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 		{
@@ -705,6 +704,9 @@ static void solve_block_z_end(real_t* __restrict__ densities, real_t* __restrict
 	}
 }
 
+
+bool do_sync = false;
+
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout_t dens_l,
 							const real_t* __restrict__ acx, const real_t* __restrict__ b1x,
@@ -756,13 +758,15 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 			solve_block_x_start<index_t>(densities, acx, b1x, a_data, c_data, thread_dens_l, thread_scratch_l,
 										 tid_x == 0, tid_x == cores_division[0] - 1);
 
+			if (do_sync)
+			{
 #pragma omp barrier
 
-			if (tid_x == 0)
-				solve_block_x_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_x);
+				if (tid_x == 0)
+					solve_block_x_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_x);
 
 #pragma omp barrier
-
+			}
 			solve_block_x_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
 		}
 
@@ -779,13 +783,15 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 			solve_block_y_start<index_t>(densities, acy, b1y, a_data, c_data, thread_dens_l, thread_scratch_l,
 										 tid_y == 0, tid_y == cores_division[1] - 1);
 
+			if (do_sync)
+			{
 #pragma omp barrier
 
-			if (tid_y == 0)
-				solve_block_y_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_y);
+				if (tid_y == 0)
+					solve_block_y_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_y);
 
 #pragma omp barrier
-
+			}
 			solve_block_y_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
 		}
 
@@ -803,11 +809,14 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 
 				solve_block_z_start<index_t>(densities, acz, b1z, a_data, c_data, thread_dens_l, thread_scratch_l,
 											 tid_z == 0, tid_z == cores_division[2] - 1);
-#pragma omp barrier
-				if (tid_z == 0)
-					solve_block_z_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_z);
-#pragma omp barrier
 
+				if (do_sync)
+				{
+#pragma omp barrier
+					if (tid_z == 0)
+						solve_block_z_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_z);
+#pragma omp barrier
+				}
 				solve_block_z_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
 			}
 		}
@@ -863,12 +872,15 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const densit
 			solve_block_x_start<index_t>(densities, ac, b1, a_data, c_data, thread_dens_l, thread_scratch_l, tid_x == 0,
 										 tid_x == cores_division[0] - 1);
 
+			if (do_sync)
+			{
 #pragma omp barrier
 
-			if (tid_x == 0)
-				solve_block_x_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_x);
+				if (tid_x == 0)
+					solve_block_x_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_x);
 
 #pragma omp barrier
+			}
 
 			solve_block_x_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
 		}
@@ -924,12 +936,15 @@ static void solve_slice_y_2d_and_3d(real_t* __restrict__ densities, const densit
 			solve_block_y_start<index_t>(densities, ac, b1, a_data, c_data, thread_dens_l, thread_scratch_l, tid_y == 0,
 										 tid_y == cores_division[1] - 1);
 
+			if (do_sync)
+			{
 #pragma omp barrier
 
-			if (tid_y == 0)
-				solve_block_y_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_y);
+				if (tid_y == 0)
+					solve_block_y_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_y);
 
 #pragma omp barrier
+			}
 
 			solve_block_y_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
 		}
@@ -984,10 +999,13 @@ static void solve_slice_z_2d_and_3d(real_t* __restrict__ densities, const densit
 
 			solve_block_z_start<index_t>(densities, ac, b1, a_data, c_data, thread_dens_l, thread_scratch_l, tid_z == 0,
 										 tid_z == cores_division[2] - 1);
+			if (do_sync)
+			{
 #pragma omp barrier
-			if (tid_z == 0)
-				solve_block_z_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_z);
+				if (tid_z == 0)
+					solve_block_z_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_z);
 #pragma omp barrier
+			}
 
 			solve_block_z_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
 		}
