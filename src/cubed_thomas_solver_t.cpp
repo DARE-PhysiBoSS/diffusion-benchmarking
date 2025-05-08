@@ -59,6 +59,7 @@ void cubed_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& prob
 	solver_utils::initialize_substrate(substrates_layout, this->substrates_, this->problem_);
 }
 
+int s_step = 1;
 bool do_sync = true;
 
 template <typename real_t, bool aligned_x>
@@ -72,6 +73,9 @@ void cubed_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& params
 
 	if (params.contains("sync"))
 		do_sync = (bool)params["sync"];
+
+	if (params.contains("s_step"))
+		s_step = (int)params["s_step"];
 }
 
 template <typename real_t, bool aligned_x>
@@ -117,13 +121,12 @@ auto cubed_thomas_solver_t<real_t, aligned_x>::get_diagonal_layout(const problem
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 								const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-								const density_layout_t dens_l, const scratch_layout_t scratch_l, const bool begin,
-								const bool end)
+								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t x_begin,
+								const index_t x_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
+								const index_t z_end)
 {
 	constexpr char dim = 'x';
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
-	const index_t z_len = dens_l | noarr::get_length<'z'>();
 	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), a_data);
@@ -132,19 +135,19 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 	for (index_t s = 0; s < s_len; s++)
 	{
-		for (index_t z = 0; z < z_len; z++)
+		for (index_t z = z_begin; z < z_end; z++)
 		{
-			for (index_t y = 0; y < y_len; y++)
+			for (index_t y = y_begin; y < y_end; y++)
 			{
 				// Normalize the first and the second equation
 				index_t i;
-				for (i = 0; i < 2; i++)
+				for (i = x_begin; i < x_begin + 2; i++)
 				{
 					const auto state = noarr::idx<'s', dim>(s, i);
 
-					const auto a_tmp = ac[s] * (begin && i == 0 ? 0 : 1);
-					const auto b_tmp = b1[s] + ((begin && i == 0) || (end && i == n - 1) ? ac[s] : 0);
-					const auto c_tmp = ac[s] * (end && i == n - 1 ? 0 : 1);
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
 					a[state] = a_tmp / b_tmp;
 					c[state] = c_tmp / b_tmp;
@@ -153,14 +156,14 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 				}
 
 				// Process the lower diagonal (forward)
-				for (; i < n; i++)
+				for (; i < x_end; i++)
 				{
 					const auto state = noarr::idx<'s', dim>(s, i);
 					const auto prev_state = noarr::idx<'s', dim>(s, i - 1);
 
-					const auto a_tmp = ac[s] * (begin && i == 0 ? 0 : 1);
-					const auto b_tmp = b1[s] + (end && i == n - 1 ? ac[s] : 0);
-					const auto c_tmp = ac[s] * (end && i == n - 1 ? 0 : 1);
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
 					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
 
@@ -174,7 +177,7 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 				}
 
 				// Process the upper diagonal (backward)
-				for (i = n - 3; i >= 1; i--)
+				for (i = x_end - 3; i >= x_begin + 1; i--)
 				{
 					const auto state = noarr::idx<'s', dim>(s, i);
 					const auto next_state = noarr::idx<'s', dim>(s, i + 1);
@@ -270,13 +273,12 @@ static void solve_block_x_middle(real_t* __restrict__ densities, real_t* __restr
 
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_x_end(real_t* __restrict__ densities, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-							  const density_layout_t dens_l, const scratch_layout_t scratch_l)
+							  const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t x_begin,
+							  const index_t x_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
+							  const index_t z_end)
 {
 	constexpr char dim = 'x';
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
-	const index_t z_len = dens_l | noarr::get_length<'z'>();
-	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), a_data);
 	auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), c_data);
@@ -284,21 +286,21 @@ static void solve_block_x_end(real_t* __restrict__ densities, real_t* __restrict
 
 	for (index_t s = 0; s < s_len; s++)
 	{
-		for (index_t z = 0; z < z_len; z++)
+		for (index_t z = z_begin; z < z_end; z++)
 		{
-			for (index_t y = 0; y < y_len; y++)
+			for (index_t y = y_begin; y < y_end; y++)
 			{
 				// Final part of modified thomas algorithm
 				// Solve the rest of the unknowns
 				{
-					for (index_t i = 1; i < n - 1; i++)
+					for (index_t i = x_begin + 1; i < x_end - 1; i++)
 					{
 						const auto state = noarr::idx<'s', dim>(s, i);
 
 						d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
 							d.template at<'s', 'y', 'z', dim>(s, y, z, i)
-							- a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, 0)
-							- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, n - 1);
+							- a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, x_begin)
+							- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, x_end - 1);
 					}
 				}
 			}
@@ -309,13 +311,12 @@ static void solve_block_x_end(real_t* __restrict__ densities, real_t* __restrict
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 								const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-								const density_layout_t dens_l, const scratch_layout_t scratch_l, const bool begin,
-								const bool end)
+								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t x_begin,
+								const index_t x_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
+								const index_t z_end)
 {
 	constexpr char dim = 'y';
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t z_len = dens_l | noarr::get_length<'z'>();
 	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), a_data);
@@ -324,43 +325,43 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 	for (index_t s = 0; s < s_len; s++)
 	{
-		for (index_t z = 0; z < z_len; z++)
+		for (index_t z = z_begin; z < z_end; z++)
 		{
 			// Normalize the first and the second equation
 			index_t i;
-			for (i = 0; i < 2; i++)
+			for (i = y_begin; i < y_begin + 2; i++)
 			{
 				const auto state = noarr::idx<'s', dim>(s, i);
 
-				const auto a_tmp = ac[s] * (begin && i == 0 ? 0 : 1);
-				const auto b_tmp = b1[s] + ((begin && i == 0) || (end && i == n - 1) ? ac[s] : 0);
-				const auto c_tmp = ac[s] * (end && i == n - 1 ? 0 : 1);
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
 				a[state] = a_tmp / b_tmp;
 				c[state] = c_tmp / b_tmp;
 
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'z', dim>(s, x, z, i) /= b_tmp;
 				}
 			}
 
 			// Process the lower diagonal (forward)
-			for (; i < n; i++)
+			for (; i < y_end; i++)
 			{
 				const auto state = noarr::idx<'s', dim>(s, i);
 				const auto prev_state = noarr::idx<'s', dim>(s, i - 1);
 
-				const auto a_tmp = ac[s] * (begin && i == 0 ? 0 : 1);
-				const auto b_tmp = b1[s] + (end && i == n - 1 ? ac[s] : 0);
-				const auto c_tmp = ac[s] * (end && i == n - 1 ? 0 : 1);
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
 				const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
 
 				a[state] = r * (0 - a_tmp * a[prev_state]);
 				c[state] = r * c_tmp;
 
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
 						r
@@ -370,12 +371,12 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 			}
 
 			// Process the upper diagonal (backward)
-			for (i = n - 3; i >= 1; i--)
+			for (i = y_end - 3; i >= y_begin + 1; i--)
 			{
 				const auto state = noarr::idx<'s', dim>(s, i);
 				const auto next_state = noarr::idx<'s', dim>(s, i + 1);
 
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'z', dim>(s, x, z, i) -=
 						c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, i + 1);
@@ -392,7 +393,7 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 				const auto r = 1 / (1 - c[state] * a[next_state]);
 
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
 						r
@@ -471,13 +472,12 @@ static void solve_block_y_middle(real_t* __restrict__ densities, real_t* __restr
 
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_y_end(real_t* __restrict__ densities, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-							  const density_layout_t dens_l, const scratch_layout_t scratch_l)
+							  const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t x_begin,
+							  const index_t x_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
+							  const index_t z_end)
 {
 	constexpr char dim = 'y';
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t z_len = dens_l | noarr::get_length<'z'>();
-	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), a_data);
 	auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), c_data);
@@ -485,21 +485,21 @@ static void solve_block_y_end(real_t* __restrict__ densities, real_t* __restrict
 
 	for (index_t s = 0; s < s_len; s++)
 	{
-		for (index_t z = 0; z < z_len; z++)
+		for (index_t z = z_begin; z < z_end; z++)
 		{
 			// Final part of modified thomas algorithm
 			// Solve the rest of the unknowns
 			{
-				for (index_t i = 1; i < n - 1; i++)
+				for (index_t i = y_begin + 1; i < y_end - 1; i++)
 				{
 					const auto state = noarr::idx<'s', dim>(s, i);
 
-					for (index_t x = 0; x < x_len; x++)
+					for (index_t x = x_begin; x < x_end; x++)
 					{
 						d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
 							d.template at<'s', 'x', 'z', dim>(s, x, z, i)
-							- a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, 0)
-							- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, n - 1);
+							- a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin)
+							- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, y_end - 1);
 					}
 				}
 			}
@@ -510,13 +510,12 @@ static void solve_block_y_end(real_t* __restrict__ densities, real_t* __restrict
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 								const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-								const density_layout_t dens_l, const scratch_layout_t scratch_l, const bool begin,
-								const bool end)
+								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t x_begin,
+								const index_t x_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
+								const index_t z_end)
 {
 	constexpr char dim = 'z';
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
 	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), a_data);
@@ -527,20 +526,20 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 	{
 		// Normalize the first and the second equation
 		index_t i;
-		for (i = 0; i < 2; i++)
+		for (i = z_begin; i < z_begin + 2; i++)
 		{
 			const auto state = noarr::idx<'s', dim>(s, i);
 
-			const auto a_tmp = ac[s] * (begin && i == 0 ? 0 : 1);
-			const auto b_tmp = b1[s] + ((begin && i == 0) || (end && i == n - 1) ? ac[s] : 0);
-			const auto c_tmp = ac[s] * (end && i == n - 1 ? 0 : 1);
+			const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+			const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+			const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
 			a[state] = a_tmp / b_tmp;
 			c[state] = c_tmp / b_tmp;
 
-			for (index_t y = 0; y < y_len; y++)
+			for (index_t y = y_begin; y < y_end; y++)
 			{
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'y', dim>(s, x, y, i) /= b_tmp;
 				}
@@ -548,23 +547,23 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 		}
 
 		// Process the lower diagonal (forward)
-		for (; i < n; i++)
+		for (; i < z_end; i++)
 		{
 			const auto state = noarr::idx<'s', dim>(s, i);
 			const auto prev_state = noarr::idx<'s', dim>(s, i - 1);
 
-			const auto a_tmp = ac[s] * (begin && i == 0 ? 0 : 1);
-			const auto b_tmp = b1[s] + (end && i == n - 1 ? ac[s] : 0);
-			const auto c_tmp = ac[s] * (end && i == n - 1 ? 0 : 1);
+			const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+			const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+			const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
 			const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
 
 			a[state] = r * (0 - a_tmp * a[prev_state]);
 			c[state] = r * c_tmp;
 
-			for (index_t y = 0; y < y_len; y++)
+			for (index_t y = y_begin; y < y_end; y++)
 			{
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
 						r
@@ -575,14 +574,14 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 		}
 
 		// Process the upper diagonal (backward)
-		for (i = n - 3; i >= 1; i--)
+		for (i = z_end - 3; i >= z_begin + 1; i--)
 		{
 			const auto state = noarr::idx<'s', dim>(s, i);
 			const auto next_state = noarr::idx<'s', dim>(s, i + 1);
 
-			for (index_t y = 0; y < y_len; y++)
+			for (index_t y = y_begin; y < y_end; y++)
 			{
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'y', dim>(s, x, y, i) -=
 						c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, i + 1);
@@ -600,9 +599,9 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 			const auto r = 1 / (1 - c[state] * a[next_state]);
 
-			for (index_t y = 0; y < y_len; y++)
+			for (index_t y = y_begin; y < y_end; y++)
 			{
-				for (index_t x = 0; x < x_len; x++)
+				for (index_t x = x_begin; x < x_end; x++)
 				{
 					d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
 						r
@@ -681,13 +680,12 @@ static void solve_block_z_middle(real_t* __restrict__ densities, real_t* __restr
 
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_z_end(real_t* __restrict__ densities, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-							  const density_layout_t dens_l, const scratch_layout_t scratch_l)
+							  const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t x_begin,
+							  const index_t x_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
+							  const index_t z_end)
 {
 	constexpr char dim = 'z';
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
-	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), a_data);
 	auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>(), c_data);
@@ -698,18 +696,18 @@ static void solve_block_z_end(real_t* __restrict__ densities, real_t* __restrict
 		// Final part of modified thomas algorithm
 		// Solve the rest of the unknowns
 		{
-			for (index_t i = 1; i < n - 1; i++)
+			for (index_t i = z_begin + 1; i < z_end - 1; i++)
 			{
 				const auto state = noarr::idx<'s', dim>(s, i);
 
-				for (index_t y = 0; y < y_len; y++)
+				for (index_t y = y_begin; y < y_end; y++)
 				{
-					for (index_t x = 0; x < x_len; x++)
+					for (index_t x = x_begin; x < x_end; x++)
 					{
 						d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
 							d.template at<'s', 'x', 'y', dim>(s, x, y, i)
-							- a[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, 0)
-							- c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, n - 1);
+							- a[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, z_begin)
+							- c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, z_end - 1);
 					}
 				}
 			}
@@ -753,20 +751,15 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 		const auto block_z_end = std::min(block_z_begin + block_size_z, z_len);
 		const auto block_z_len = block_z_end - block_z_begin;
 
-		const auto thread_dens_l = dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len)
-								   ^ noarr::slice<'y'>(block_y_begin, block_y_len)
-								   ^ noarr::slice<'z'>(block_z_begin, block_z_len);
-
 		// do x
 		{
 			const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(tid_y * cores_division[2] + tid_z);
-			const auto thread_scratch_l = lane_scratch_l ^ noarr::slice<'i'>(block_x_begin, block_x_len);
 
 			const auto lane_dens_l =
 				dens_l ^ noarr::slice<'y'>(block_y_begin, block_y_len) ^ noarr::slice<'z'>(block_z_begin, block_z_len);
 
-			solve_block_x_start<index_t>(densities, acx, b1x, a_data, c_data, thread_dens_l, thread_scratch_l,
-										 tid_x == 0, tid_x == cores_division[0] - 1);
+			solve_block_x_start<index_t>(densities, acx, b1x, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+										 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 
 			if (do_sync)
 			{
@@ -777,7 +770,8 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 
 #pragma omp barrier
 			}
-			solve_block_x_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
+			solve_block_x_end<index_t>(densities, a_data, c_data, dens_l, lane_scratch_l, block_x_begin, block_x_end,
+									   block_y_begin, block_y_end, block_z_begin, block_z_end);
 		}
 
 #pragma omp barrier
@@ -785,13 +779,12 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 		// do Y
 		{
 			const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(tid_x * cores_division[2] + tid_z);
-			const auto thread_scratch_l = lane_scratch_l ^ noarr::slice<'i'>(block_y_begin, block_y_len);
 
 			const auto lane_dens_l =
 				dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len) ^ noarr::slice<'z'>(block_z_begin, block_z_len);
 
-			solve_block_y_start<index_t>(densities, acy, b1y, a_data, c_data, thread_dens_l, thread_scratch_l,
-										 tid_y == 0, tid_y == cores_division[1] - 1);
+			solve_block_y_start<index_t>(densities, acy, b1y, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+										 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 
 			if (do_sync)
 			{
@@ -802,7 +795,8 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 
 #pragma omp barrier
 			}
-			solve_block_y_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
+			solve_block_y_end<index_t>(densities, a_data, c_data, dens_l, lane_scratch_l, block_x_begin, block_x_end,
+									   block_y_begin, block_y_end, block_z_begin, block_z_end);
 		}
 
 		if (z_len > 1)
@@ -812,13 +806,12 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 			// do Z
 			{
 				const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(tid_x * cores_division[1] + tid_y);
-				const auto thread_scratch_l = lane_scratch_l ^ noarr::slice<'i'>(block_z_begin, block_z_len);
 
 				const auto lane_dens_l = dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len)
 										 ^ noarr::slice<'y'>(block_y_begin, block_y_len);
 
-				solve_block_z_start<index_t>(densities, acz, b1z, a_data, c_data, thread_dens_l, thread_scratch_l,
-											 tid_z == 0, tid_z == cores_division[2] - 1);
+				solve_block_z_start<index_t>(densities, acz, b1z, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+											 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 
 				if (do_sync)
 				{
@@ -827,7 +820,8 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 						solve_block_z_middle(densities, a_data, c_data, lane_dens_l, lane_scratch_l, block_size_z);
 #pragma omp barrier
 				}
-				solve_block_z_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
+				solve_block_z_end<index_t>(densities, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+										   block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 			}
 		}
 	}
@@ -867,20 +861,15 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const densit
 		const auto block_z_end = std::min(block_z_begin + block_size_z, z_len);
 		const auto block_z_len = block_z_end - block_z_begin;
 
-		const auto thread_dens_l = dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len)
-								   ^ noarr::slice<'y'>(block_y_begin, block_y_len)
-								   ^ noarr::slice<'z'>(block_z_begin, block_z_len);
-
 		// do x
 		{
 			const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(tid_y * cores_division[2] + tid_z);
-			const auto thread_scratch_l = lane_scratch_l ^ noarr::slice<'i'>(block_x_begin, block_x_len);
 
 			const auto lane_dens_l =
 				dens_l ^ noarr::slice<'y'>(block_y_begin, block_y_len) ^ noarr::slice<'z'>(block_z_begin, block_z_len);
 
-			solve_block_x_start<index_t>(densities, ac, b1, a_data, c_data, thread_dens_l, thread_scratch_l, tid_x == 0,
-										 tid_x == cores_division[0] - 1);
+			solve_block_x_start<index_t>(densities, ac, b1, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+										 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 
 			if (do_sync)
 			{
@@ -892,7 +881,8 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const densit
 #pragma omp barrier
 			}
 
-			solve_block_x_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
+			solve_block_x_end<index_t>(densities, a_data, c_data, dens_l, lane_scratch_l, block_x_begin, block_x_end,
+									   block_y_begin, block_y_end, block_z_begin, block_z_end);
 		}
 	}
 }
@@ -931,20 +921,16 @@ static void solve_slice_y_2d_and_3d(real_t* __restrict__ densities, const densit
 		const auto block_z_end = std::min(block_z_begin + block_size_z, z_len);
 		const auto block_z_len = block_z_end - block_z_begin;
 
-		const auto thread_dens_l = dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len)
-								   ^ noarr::slice<'y'>(block_y_begin, block_y_len)
-								   ^ noarr::slice<'z'>(block_z_begin, block_z_len);
 
 		// do Y
 		{
 			const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(tid_x * cores_division[2] + tid_z);
-			const auto thread_scratch_l = lane_scratch_l ^ noarr::slice<'i'>(block_y_begin, block_y_len);
 
 			const auto lane_dens_l =
 				dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len) ^ noarr::slice<'z'>(block_z_begin, block_z_len);
 
-			solve_block_y_start<index_t>(densities, ac, b1, a_data, c_data, thread_dens_l, thread_scratch_l, tid_y == 0,
-										 tid_y == cores_division[1] - 1);
+			solve_block_y_start<index_t>(densities, ac, b1, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+										 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 
 			if (do_sync)
 			{
@@ -956,7 +942,8 @@ static void solve_slice_y_2d_and_3d(real_t* __restrict__ densities, const densit
 #pragma omp barrier
 			}
 
-			solve_block_y_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
+			solve_block_y_end<index_t>(densities, a_data, c_data, dens_l, lane_scratch_l, block_x_begin, block_x_end,
+									   block_y_begin, block_y_end, block_z_begin, block_z_end);
 		}
 	}
 }
@@ -995,20 +982,16 @@ static void solve_slice_z_2d_and_3d(real_t* __restrict__ densities, const densit
 		const auto block_z_end = std::min(block_z_begin + block_size_z, z_len);
 		const auto block_z_len = block_z_end - block_z_begin;
 
-		const auto thread_dens_l = dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len)
-								   ^ noarr::slice<'y'>(block_y_begin, block_y_len)
-								   ^ noarr::slice<'z'>(block_z_begin, block_z_len);
 
 		// do Z
 		{
 			const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(tid_x * cores_division[1] + tid_y);
-			const auto thread_scratch_l = lane_scratch_l ^ noarr::slice<'i'>(block_z_begin, block_z_len);
 
 			const auto lane_dens_l =
 				dens_l ^ noarr::slice<'x'>(block_x_begin, block_x_len) ^ noarr::slice<'y'>(block_y_begin, block_y_len);
 
-			solve_block_z_start<index_t>(densities, ac, b1, a_data, c_data, thread_dens_l, thread_scratch_l, tid_z == 0,
-										 tid_z == cores_division[2] - 1);
+			solve_block_z_start<index_t>(densities, ac, b1, a_data, c_data, dens_l, lane_scratch_l, block_x_begin,
+										 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 			if (do_sync)
 			{
 #pragma omp barrier
@@ -1017,7 +1000,8 @@ static void solve_slice_z_2d_and_3d(real_t* __restrict__ densities, const densit
 #pragma omp barrier
 			}
 
-			solve_block_z_end<index_t>(densities, a_data, c_data, thread_dens_l, thread_scratch_l);
+			solve_block_z_end<index_t>(densities, a_data, c_data, dens_l, lane_scratch_l, block_x_begin, block_x_end,
+									   block_y_begin, block_y_end, block_z_begin, block_z_end);
 		}
 	}
 }
