@@ -18,7 +18,7 @@ endif()
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native -lpapi)
+  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native)
 endif()
 
 include(FetchContent)
@@ -80,17 +80,15 @@ target_link_libraries(diffuse LAPACK::LAPACK)
 
 # Find and link PAPI
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAPI papi)
+pkg_check_modules(PAPI IMPORTED_TARGET papi)
 
 if(PAPI_FOUND)
 
-  target_include_directories(diffuse PRIVATE ${PAPI_INCLUDE_DIRS})
-  target_compile_options(diffuse PRIVATE ${PAPI_CFLAGS_OTHER})
-  target_link_libraries(diffuse ${PAPI_LINK_LIBRARIES})
+  target_link_libraries(diffuse PkgConfig::PAPI)
 
 else()
 
-  message("papi will be built from source")
+  message(STATUS "'papi' will be built from source")
 
   # Fetch papi
   FetchContent_Declare(
@@ -113,5 +111,7 @@ else()
 
   target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
   target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
+
+  set(CMAKE_PREFIX_PATH "${papi_BINARY_DIR}" CACHE PATH "Path to installed packages" FORCE)
 
 endif()
