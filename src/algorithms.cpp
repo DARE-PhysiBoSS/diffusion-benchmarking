@@ -118,19 +118,25 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 	solver->prepare(problem);
 	solver->initialize();
 
-	std::filesystem::path output_path(output_file);
-	auto init_output_path = (output_path.parent_path() / ("initial_" + output_path.filename().string()));
+	if (!output_file.empty())
+	{
+		std::filesystem::path output_path(output_file);
+		auto init_output_path = (output_path.parent_path() / ("initial_" + output_path.filename().string()));
 
-	auto init_output = open_file(init_output_path.string());
-	solver->save(init_output);
+		auto init_output = open_file(init_output_path.string());
+		solver->save(init_output);
+	}
 
 	for (std::size_t i = 0; i < problem.iterations; i++)
 	{
 		solver->solve();
 	}
 
-	auto output = open_file(output_file);
-	solver->save(output);
+	if (!output_file.empty())
+	{
+		auto output = open_file(output_file);
+		solver->save(output);
+	}
 }
 
 void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_problem_t& problem,

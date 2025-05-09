@@ -18,7 +18,8 @@ endif()
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -Wno-interference-size -march=native)
+  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic
+                                  -Wno-interference-size -march=native)
 endif()
 
 include(FetchContent)
@@ -88,7 +89,7 @@ if(PAPI_FOUND)
 
 else()
 
-  message(STATUS "'papi' will be built from source")
+  message(STATUS "'papi' will be built from source:")
 
   # Fetch papi
   FetchContent_Declare(
@@ -101,17 +102,19 @@ else()
                   WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
 
   add_custom_target(
-    papi_build ALL
+    papi_build
     BYPRODUCTS ${papi_BINARY_DIR}/lib/libpapi.a
     COMMAND make -j
     COMMAND make install
     WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
-    
+
   add_dependencies(diffuse papi_build)
 
   target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
   target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
 
-  set(CMAKE_PREFIX_PATH ${papi_BINARY_DIR} CACHE PATH "Path to installed packages" FORCE)
+  set(CMAKE_PREFIX_PATH
+      ${papi_BINARY_DIR}
+      CACHE PATH "Path to installed packages" FORCE)
 
 endif()

@@ -43,9 +43,9 @@ int main(int argc, char** argv)
 		.store_into(validate);
 
 	std::string output_file;
-	group.add_argument("--run_and_save")
-		.help("If present, the provided problem will be solved by the algorithm and results will be stored in the "
-			  "output file")
+	program.add_argument("--run")
+		.help("Run the algorithm. Optionally provide an output file path.")
+		.nargs(argparse::nargs_pattern::optional)
 		.store_into(output_file);
 
 	bool benchmark;
@@ -53,7 +53,7 @@ int main(int argc, char** argv)
 		.help("The run of the algorithm will be benchmarked and outputed to standard output")
 		.flag()
 		.store_into(benchmark);
-	
+
 	bool profile;
 	group.add_argument("--profile")
 		.help("Algorithm will be profiled using PAPI counters indicated in params")
@@ -107,7 +107,7 @@ int main(int argc, char** argv)
 		{
 			algs.validate(alg, problem, params);
 		}
-		else if (!output_file.empty())
+		else if (program.is_used("--run"))
 		{
 			algs.run(alg, problem, params, output_file);
 		}
