@@ -18,7 +18,7 @@ endif()
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native)
+  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -Wno-interference-size -march=native)
 endif()
 
 include(FetchContent)
@@ -112,6 +112,6 @@ else()
   target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
   target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
 
-  set(CMAKE_PREFIX_PATH "${papi_BINARY_DIR}" CACHE PATH "Path to installed packages" FORCE)
+  set(CMAKE_PREFIX_PATH ${papi_BINARY_DIR} CACHE PATH "Path to installed packages" FORCE)
 
 endif()

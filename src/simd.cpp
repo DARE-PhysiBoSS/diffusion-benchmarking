@@ -291,7 +291,7 @@ void simd<real_t>::solve_y()
             _mm256_storeu_pd(&substrates_[index + zd], aux1);
         }
         //Epilogo
-        index_t ep = thomas_j_jump - zd;
+        // index_t ep = thomas_j_jump - zd;
         index_t x_ini = zd / problem_.substrates_count;
         index_t d_ini = zd % problem_.substrates_count;
         index = index + (x_ini * thomas_i_jump);
@@ -323,7 +323,7 @@ void simd<real_t>::solve_y()
                 _mm256_storeu_pd(&substrates_[index_inc + zd], density_curr1);
             }
             //Epilogo
-            ep = thomas_j_jump - zd;
+            // ep = thomas_j_jump - zd;
             x_ini = zd / problem_.substrates_count;
             d_ini = zd % problem_.substrates_count;
             index_base = index_base + (x_ini * thomas_i_jump);
@@ -361,7 +361,7 @@ void simd<real_t>::solve_y()
             }
 
             //Epilogo
-            index_t ep = thomas_j_jump - zd;
+            // index_t ep = thomas_j_jump - zd;
             index_t x_ini = zd / problem_.substrates_count;
             index_t d_ini = zd % problem_.substrates_count;
             index_base = index_base + x_ini * thomas_i_jump;
