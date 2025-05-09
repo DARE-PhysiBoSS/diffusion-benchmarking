@@ -66,8 +66,7 @@ target_compile_options(
 
 target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
-                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR}
-                  ${PAPI_INCLUDE_DIRS})
+                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
 
 target_link_libraries(diffuse nlohmann_json::nlohmann_json)
 
@@ -81,13 +80,38 @@ target_link_libraries(diffuse LAPACK::LAPACK)
 
 # Find and link PAPI
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAPI REQUIRED papi)
+pkg_check_modules(PAPI papi)
 
-include_directories(BEFORE ${PAPI_INCLUDE_DIRS})
-target_include_directories(diffuse PUBLIC ${PAPI_INCLUDE_DIRS})
-target_compile_options(diffuse PUBLIC ${PAPI_CFLAGS_OTHER})
-target_link_libraries(diffuse ${PAPI_LIBRARIES})
+if(PAPI_FOUND)
 
-message(PAPI_INCLUDE_DIR="${PAPI_INCLUDE_DIRS}")
-message(PAPI_LIBRARIES="${PAPI_LIBRARIES}")
-message(PAPI_COMPILE_OPTIONS="${PAPI_CFLAGS_OTHER}")
+  target_include_directories(diffuse PRIVATE ${PAPI_INCLUDE_DIRS})
+  target_compile_options(diffuse PRIVATE ${PAPI_CFLAGS_OTHER})
+  target_link_libraries(diffuse ${PAPI_LINK_LIBRARIES})
+
+else()
+
+  message("papi will be built from source")
+
+  # Fetch papi
+  FetchContent_Declare(
+    papi
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    URL file://${CMAKE_CURRENT_SOURCE_DIR}/submodules/papi)
+  FetchContent_MakeAvailable(papi)
+
+  execute_process(COMMAND ./configure --prefix=${papi_BINARY_DIR}
+                  WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
+
+  add_custom_target(
+    papi_build ALL
+    BYPRODUCTS ${papi_BINARY_DIR}/lib/libpapi.a
+    COMMAND make -j
+    COMMAND make install
+    WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
+    
+  add_dependencies(diffuse papi_build)
+
+  target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
+  target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
+
+endif()
