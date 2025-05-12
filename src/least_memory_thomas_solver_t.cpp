@@ -172,10 +172,10 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;
-	constexpr index_t simd_length = hn::Lanes(d);
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(d);
 	using simd_t = hn::Vec<simd_tag>;
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'m', 'b', 'm', 'v'>(noarr::lit<simd_length>);
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'m', 'b', 'm', 'v'>(simd_length);
 
 	for (index_t s = 0; s < substrates_count; s++)
 	{
@@ -192,15 +192,15 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 #pragma omp for schedule(static) nowait
 			for (index_t yz = 0; yz < m; yz++)
 			{
+				// vector registers that hold the to be transposed x*yz plane
+				simd_t* rows = new simd_t[simd_length];
+
 				simd_t prev = hn::Zero(d);
 				real_t b_tmp = a_s / (b1_s + a_s);
 
 				// forward substitution until last simd_length elements
 				for (index_t i = 0; i < full_n - simd_length; i += simd_length)
 				{
-					// vector registers that hold the to be transposed x*yz plane
-					simd_t rows[simd_length];
-
 					// aligned loads
 					for (index_t v = 0; v < simd_length; v++)
 						rows[v] =
@@ -234,9 +234,6 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				// we are aligned to the vector size, so we can safely continue
 				// here we fuse the end of forward substitution and the beginning of backwards propagation
 				{
-					// vector registers that hold the to be transposed x*yz plane
-					simd_t rows[simd_length];
-
 					// aligned loads
 					for (index_t v = 0; v < simd_length; v++)
 						rows[v] = hn::Load(
@@ -268,12 +265,11 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 						auto b_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(b, full_n - simd_length, s)));
 
 						rows[simd_length - 1] =
-							hn::Mul(rows[simd_length - 1], hn::BroadcastLane<simd_length - 1>(b_tmp));
+							hn::Mul(rows[simd_length - 1], hn::Set(d, hn::ExtractLane(b_tmp, simd_length - 1)));
 						for (index_t v = simd_length - 2; v >= 0; v--)
 						{
-							b_tmp = hn::Slide1Up(d, b_tmp);
 							rows[v] = hn::Mul(hn::MulAdd(rows[v + 1], hn::Set(d, -a_s), rows[v]),
-											  hn::BroadcastLane<simd_length - 1>(b_tmp));
+											  hn::Set(d, hn::ExtractLane(b_tmp, v)));
 						}
 
 						prev = rows[0];
@@ -292,9 +288,6 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				// we continue with backwards substitution
 				for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
 				{
-					// vector registers that hold the to be transposed x*yz plane
-					simd_t rows[simd_length];
-
 					// aligned loads
 					for (index_t v = 0; v < simd_length; v++)
 						rows[v] =
@@ -308,11 +301,12 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 						auto b_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(b, i, s)));
 
 						rows[simd_length - 1] = hn::Mul(hn::MulAdd(prev, hn::Set(d, -a_s), rows[simd_length - 1]),
-														hn::BroadcastLane<simd_length - 1>(b_tmp));
-						static_rfor<simd_length - 2, 0>()([&](auto v) {
+														hn::Set(d, hn::ExtractLane(b_tmp, simd_length - 1)));
+						for (index_t v = simd_length - 2; v >= 0; v--)
+						{
 							rows[v] = hn::Mul(hn::MulAdd(rows[v + 1], hn::Set(d, -a_s), rows[v]),
-											  hn::BroadcastLane<v>(b_tmp));
-						});
+											  hn::Set(d, hn::ExtractLane(b_tmp, v)));
+						}
 
 						prev = rows[0];
 					}
@@ -325,6 +319,8 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 						hn::Store(rows[v], d,
 								  &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
 				}
+
+				delete[] rows;
 			}
 		}
 
