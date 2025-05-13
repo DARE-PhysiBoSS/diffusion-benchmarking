@@ -15,9 +15,8 @@ using alg = cubed_thomas_solver_t<double, true>;
 
 template <typename real_t, bool aligned_x>
 void cubed_thomas_solver_t<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims,
-																 index_t n, index_t& counters_count,
-																 std::unique_ptr<aligned_atomic<long>[]>& counters,
-																 index_t& max_threads)
+																 index_t, index_t&,
+																 std::unique_ptr<aligned_atomic<long>[]>&, index_t&)
 {
 	// allocate memory for a and b1
 	a = (real_t*)std::malloc(this->problem_.substrates_count * sizeof(real_t));
@@ -734,7 +733,7 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 	const index_t block_size_y = (y_len + cores_division[1] - 1) / cores_division[1];
 	const index_t block_size_z = (z_len + cores_division[2] - 1) / cores_division[2];
 
-	#pragma omp parallel num_threads(cores_division[0] * cores_division[1] * cores_division[2])
+#pragma omp parallel num_threads(cores_division[0] * cores_division[1] * cores_division[2])
 	{
 		const auto tid = get_thread_num();
 
