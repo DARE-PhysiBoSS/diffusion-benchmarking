@@ -6,12 +6,19 @@
 
 #include "algorithms.h"
 
+#include <sdv_tracing.h>
+
 int main(int argc, char** argv)
 {
 	// #define CSR_FLUSH_TO_ZERO (1 << 15)
 	// 	unsigned csr = __builtin_ia32_stmxcsr();
 	// 	csr |= CSR_FLUSH_TO_ZERO;
 	// 	__builtin_ia32_ldmxcsr(csr);
+
+	const char * v_names[] = {"Other","X","Y","Z", "y1", "y2", "y3"};
+	int values[] = {0,1,2,3, 4, 5, 6};
+	trace_name_event_and_values(1000, "code_region", sizeof(values)/sizeof(values[0]), values, v_names);
+	trace_init();
 
 	argparse::ArgumentParser program("diffuse");
 

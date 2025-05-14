@@ -18,8 +18,7 @@ endif()
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic
-                                  -Wno-interference-size -march=native)
+  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic)
 endif()
 
 include(FetchContent)
@@ -58,9 +57,13 @@ option(HWY_ENABLE_EXAMPLES OFF)
 
 FetchContent_MakeAvailable(highway)
 
+set(base_src_files "src/main.cpp" "src/algorithms.cpp" "src/problem.cpp" "src/reference_thomas_solver.cpp")
+
 file(GLOB src_files "src/*")
 
-add_executable(diffuse ${src_files})
+set(src_files "src/least_compute_thomas_solver_t.cpp" "src/least_memory_thomas_solver_d_t.cpp")
+
+add_executable(diffuse ${src_files} ${base_src_files})
 
 target_compile_options(
   diffuse PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${DIFFUSE_CPP_COMPILE_OPTIONS}>)
@@ -69,15 +72,15 @@ target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
                   ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
 
-target_link_libraries(diffuse nlohmann_json::nlohmann_json)
+target_link_libraries(diffuse nlohmann_json::nlohmann_json $ENV{SDV_TRACE_C_LINK})
 
-target_link_libraries(diffuse hwy)
+# target_link_libraries(diffuse hwy)
 
-find_package(OpenMP REQUIRED)
-target_link_libraries(diffuse OpenMP::OpenMP_CXX)
+# find_package(OpenMP REQUIRED)
+# target_link_libraries(diffuse OpenMP::OpenMP_CXX)
 
-find_package(LAPACK REQUIRED)
-target_link_libraries(diffuse LAPACK::LAPACK)
+# find_package(LAPACK REQUIRED)
+# target_link_libraries(diffuse LAPACK::LAPACK)
 
 # Find and link PAPI
 find_package(PkgConfig REQUIRED)

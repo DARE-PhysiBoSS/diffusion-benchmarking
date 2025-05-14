@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include <sdv_tracing.h>
+
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t[]>& b,
 																		 std::unique_ptr<real_t[]>& c,
@@ -800,6 +802,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::solve_x()
 {
+	trace_event_and_value(1000,1);
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
@@ -820,11 +823,13 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve_x()
 										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 										 get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
+	trace_event_and_value(1000,0);
 }
 
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::solve_y()
 {
+	trace_event_and_value(1000,2);
 	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
@@ -839,15 +844,19 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve_y()
 								  get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_),
 								  substrate_copies_, xs_tile_size_);
 	}
+	trace_event_and_value(1000,0);
 }
 
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::solve_z()
 {
+	trace_event_and_value(1000,3);
 #pragma omp parallel
 	solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
 							  get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_),
 							  substrate_copies_, xs_tile_size_);
+							  
+	trace_event_and_value(1000,0);
 }
 
 template <typename real_t, bool aligned_x>

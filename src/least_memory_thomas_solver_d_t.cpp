@@ -5,6 +5,8 @@
 
 #include "vector_transpose_helper.h"
 
+#include <sdv_tracing.h>
+
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, real_t*& c,
 																		  index_t shape, index_t dims, index_t n)
@@ -67,7 +69,16 @@ template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
-	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
+
+	if (params.contains("alignment_size"))
+		alignment_size_ = (std::size_t)params["alignment_size"];
+	else
+	{
+		using simd_tag = hn::ScalableTag<real_t>;
+		simd_tag t;
+		index_t simd_length = hn::Lanes(t);
+		alignment_size_ = simd_length * sizeof(real_t);
+	}
 }
 
 template <typename real_t, bool aligned_x>
@@ -158,210 +169,210 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 											  const real_t* __restrict__ b1, const real_t* __restrict__ back_c,
 											  const density_layout_t dens_l, const diagonal_layout_t diag_l)
 {
-	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
-	const index_t n = dens_l | noarr::get_length<'x'>();
+// 	const index_t substrates_count = dens_l | noarr::get_length<'s'>();
+// 	const index_t n = dens_l | noarr::get_length<'x'>();
 
-	using simd_tag = hn::ScalableTag<real_t>;
-	simd_tag d;
-	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(d);
-	using simd_t = hn::Vec<simd_tag>;
+// 	using simd_tag = hn::ScalableTag<real_t>;
+// 	simd_tag d;
+// 	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(d);
+// 	using simd_t = hn::Vec<simd_tag>;
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'m', 'b', 'm', 'v'>(simd_length);
+// 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'m', 'b', 'm', 'v'>(simd_length);
 
-	for (index_t s = 0; s < substrates_count; s++)
-	{
-		const real_t a_s = a[s];
-		const real_t b1_s = b1[s];
+// 	for (index_t s = 0; s < substrates_count; s++)
+// 	{
+// 		const real_t a_s = a[s];
+// 		const real_t b1_s = b1[s];
 
-		// vectorized body
-		{
-			const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
+// 		// vectorized body
+// 		{
+// 			const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
 
-			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-			const index_t m = body_dens_l | noarr::get_length<'m'>();
+// 			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
+// 			const index_t m = body_dens_l | noarr::get_length<'m'>();
 
-#pragma omp for schedule(static) nowait
-			for (index_t yz = 0; yz < m; yz++)
-			{
-				real_t a_tmp = 0;
-				real_t b_tmp = b1_s + a_s;
-				real_t c_tmp = a_s;
-				simd_t prev = hn::Zero(d);
-				// vector registers that hold the to be transposed x*yz plane
-				simd_t* rows = new simd_t[simd_length + 1];
+// #pragma omp for schedule(static) nowait
+// 			for (index_t yz = 0; yz < m; yz++)
+// 			{
+// 				real_t a_tmp = 0;
+// 				real_t b_tmp = b1_s + a_s;
+// 				real_t c_tmp = a_s;
+// 				simd_t prev = hn::Zero(d);
+// 				// vector registers that hold the to be transposed x*yz plane
+// 				simd_t* rows = new simd_t[simd_length + 1];
 
-				// forward substitution until last simd_length elements
-				for (index_t i = 0; i < full_n - simd_length; i += simd_length)
-				{
-					rows[0] = prev;
+// 				// forward substitution until last simd_length elements
+// 				for (index_t i = 0; i < full_n - simd_length; i += simd_length)
+// 				{
+// 					rows[0] = prev;
 
-					// aligned loads
-					for (index_t v = 0; v < simd_length; v++)
-						rows[v + 1] =
-							hn::Load(d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
+// 					// aligned loads
+// 					for (index_t v = 0; v < simd_length; v++)
+// 						rows[v + 1] =
+// 							hn::Load(d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
 
-					// transposition to enable vectorization
-					transpose(rows + 1);
+// 					// transposition to enable vectorization
+// 					transpose(rows + 1);
 
-					// actual forward substitution (vectorized)
-					{
-						for (index_t v = 1; v < simd_length + 1; v++)
-						{
-							const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
+// 					// actual forward substitution (vectorized)
+// 					{
+// 						for (index_t v = 1; v < simd_length + 1; v++)
+// 						{
+// 							const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
 
-							rows[v] = hn::Mul(hn::MulAdd(rows[v - 1], hn::Set(d, -a_tmp), rows[v]), hn::Set(d, r));
+// 							rows[v] = hn::Mul(hn::MulAdd(rows[v - 1], hn::Set(d, -a_tmp), rows[v]), hn::Set(d, r));
 
-							a_tmp = a_s;
-							b_tmp = b1_s;
-							c_tmp = a_s * r;
-						};
+// 							a_tmp = a_s;
+// 							b_tmp = b1_s;
+// 							c_tmp = a_s * r;
+// 						};
 
-						prev = rows[simd_length];
-					}
+// 						prev = rows[simd_length];
+// 					}
 
-					// transposition back to the original form
-					transpose(rows + 1);
+// 					// transposition back to the original form
+// 					transpose(rows + 1);
 
-					// aligned stores
-					for (index_t v = 0; v < simd_length; v++)
-						hn::Store(rows[v + 1], d,
-								  &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
-				}
+// 					// aligned stores
+// 					for (index_t v = 0; v < simd_length; v++)
+// 						hn::Store(rows[v + 1], d,
+// 								  &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
+// 				}
 
-				// we are aligned to the vector size, so we can safely continue
-				// here we fuse the end of forward substitution and the beginning of backwards propagation
-				{
-					rows[0] = prev;
+// 				// we are aligned to the vector size, so we can safely continue
+// 				// here we fuse the end of forward substitution and the beginning of backwards propagation
+// 				{
+// 					rows[0] = prev;
 
-					// aligned loads
-					for (index_t v = 0; v < simd_length; v++)
-						rows[v + 1] = hn::Load(
-							d, &(body_dens_l
-								 | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, full_n - simd_length, s)));
+// 					// aligned loads
+// 					for (index_t v = 0; v < simd_length; v++)
+// 						rows[v + 1] = hn::Load(
+// 							d, &(body_dens_l
+// 								 | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, full_n - simd_length, s)));
 
-					// transposition to enable vectorization
-					transpose(rows + 1);
+// 					// transposition to enable vectorization
+// 					transpose(rows + 1);
 
-					index_t remainder_work = n % simd_length;
-					remainder_work += remainder_work == 0 ? simd_length : 0;
+// 					index_t remainder_work = n % simd_length;
+// 					remainder_work += remainder_work == 0 ? simd_length : 0;
 
-					// the rest of forward part
-					{
-						for (index_t v = 0; v < remainder_work; v++)
-						{
-							const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
+// 					// the rest of forward part
+// 					{
+// 						for (index_t v = 0; v < remainder_work; v++)
+// 						{
+// 							const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
 
-							rows[v + 1] = hn::Mul(hn::MulAdd(rows[v], hn::Set(d, -a_tmp), rows[v + 1]), hn::Set(d, r));
+// 							rows[v + 1] = hn::Mul(hn::MulAdd(rows[v], hn::Set(d, -a_tmp), rows[v + 1]), hn::Set(d, r));
 
-							a_tmp = a_s;
-							b_tmp = b1_s + (v == remainder_work - 2 ? a_s : 0);
-							c_tmp = a_s * r;
-						}
-					}
+// 							a_tmp = a_s;
+// 							b_tmp = b1_s + (v == remainder_work - 2 ? a_s : 0);
+// 							c_tmp = a_s * r;
+// 						}
+// 					}
 
-					// the begin of backward part
-					{
-						auto c = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(back_c, full_n - simd_length, s)));
+// 					// the begin of backward part
+// 					{
+// 						auto c = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(back_c, full_n - simd_length, s)));
 
-						for (index_t v = simd_length - 2; v >= 0; v--)
-						{
-							rows[v + 1] = hn::NegMulAdd(rows[v + 2], hn::Set(d, hn::ExtractLane(c, v)), rows[v + 1]);
-						}
+// 						for (index_t v = simd_length - 2; v >= 0; v--)
+// 						{
+// 							rows[v + 1] = hn::NegMulAdd(rows[v + 2], hn::Set(d, hn::ExtractLane(c, v)), rows[v + 1]);
+// 						}
 
-						prev = rows[1];
-					}
+// 						prev = rows[1];
+// 					}
 
-					// transposition back to the original form
-					transpose(rows + 1);
+// 					// transposition back to the original form
+// 					transpose(rows + 1);
 
-					// aligned stores
-					for (index_t v = 0; v < simd_length; v++)
-						hn::Store(rows[v + 1], d,
-								  &(body_dens_l
-									| noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, full_n - simd_length, s)));
-				}
+// 					// aligned stores
+// 					for (index_t v = 0; v < simd_length; v++)
+// 						hn::Store(rows[v + 1], d,
+// 								  &(body_dens_l
+// 									| noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, full_n - simd_length, s)));
+// 				}
 
-				// we continue with backwards substitution
-				for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
-				{
-					rows[simd_length] = prev;
+// 				// we continue with backwards substitution
+// 				for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
+// 				{
+// 					rows[simd_length] = prev;
 
-					// aligned loads
-					for (index_t v = 0; v < simd_length; v++)
-						rows[v] =
-							hn::Load(d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
+// 					// aligned loads
+// 					for (index_t v = 0; v < simd_length; v++)
+// 						rows[v] =
+// 							hn::Load(d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
 
-					// transposition to enable vectorization
-					transpose(rows);
+// 					// transposition to enable vectorization
+// 					transpose(rows);
 
-					// backward propagation
-					{
-						auto c = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(back_c, i, s)));
+// 					// backward propagation
+// 					{
+// 						auto c = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(back_c, i, s)));
 
-						for (index_t v = simd_length - 1; v >= 0; v--)
-						{
-							rows[v] = hn::NegMulAdd(rows[v + 1], hn::Set(d, hn::ExtractLane(c, v)), rows[v]);
-						}
+// 						for (index_t v = simd_length - 1; v >= 0; v--)
+// 						{
+// 							rows[v] = hn::NegMulAdd(rows[v + 1], hn::Set(d, hn::ExtractLane(c, v)), rows[v]);
+// 						}
 
-						prev = rows[0];
-					}
+// 						prev = rows[0];
+// 					}
 
-					// transposition back to the original form
-					transpose(rows);
+// 					// transposition back to the original form
+// 					transpose(rows);
 
-					// aligned stores
-					for (index_t v = 0; v < simd_length; v++)
-						hn::Store(rows[v], d,
-								  &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
-				}
+// 					// aligned stores
+// 					for (index_t v = 0; v < simd_length; v++)
+// 						hn::Store(rows[v], d,
+// 								  &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
+// 				}
 
-				delete[] rows;
-			}
-		}
+// 				delete[] rows;
+// 			}
+// 		}
 
-		// yz remainder
-		{
-			auto rem_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
-			const index_t v_len = rem_dens_l | noarr::get_length<'v'>();
+// 		// yz remainder
+// 		{
+// 			auto rem_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>);
+// 			const index_t v_len = rem_dens_l | noarr::get_length<'v'>();
 
-#pragma omp for schedule(static) nowait
-			for (index_t yz = 0; yz < v_len; yz++)
-			{
-				const real_t a_s = a[s];
-				const real_t b1_s = b1[s];
-				const auto d = noarr::make_bag(rem_dens_l ^ noarr::fix<'s', 'm', 'v'>(s, noarr::lit<0>, yz), densities);
-				const auto c = noarr::make_bag(diag_l ^ noarr::fix<'s'>(s), back_c);
+// #pragma omp for schedule(static) nowait
+// 			for (index_t yz = 0; yz < v_len; yz++)
+// 			{
+// 				const real_t a_s = a[s];
+// 				const real_t b1_s = b1[s];
+// 				const auto d = noarr::make_bag(rem_dens_l ^ noarr::fix<'s', 'm', 'v'>(s, noarr::lit<0>, yz), densities);
+// 				const auto c = noarr::make_bag(diag_l ^ noarr::fix<'s'>(s), back_c);
 
-				real_t a_tmp = 0;
-				real_t b_tmp = b1_s + a_s;
-				real_t c_tmp = a_s;
-				real_t prev = 0;
+// 				real_t a_tmp = 0;
+// 				real_t b_tmp = b1_s + a_s;
+// 				real_t c_tmp = a_s;
+// 				real_t prev = 0;
 
-				for (index_t i = 0; i < n; i++)
-				{
-					const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
+// 				for (index_t i = 0; i < n; i++)
+// 				{
+// 					const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
 
-					real_t curr = d.template at<'x'>(i);
-					curr = r * (curr - a_tmp * prev);
-					d.template at<'x'>(i) = curr;
+// 					real_t curr = d.template at<'x'>(i);
+// 					curr = r * (curr - a_tmp * prev);
+// 					d.template at<'x'>(i) = curr;
 
-					a_tmp = a_s;
-					b_tmp = b1_s + (i == n - 2 ? a_s : 0);
-					c_tmp = a_s * r;
-					prev = curr;
-				}
+// 					a_tmp = a_s;
+// 					b_tmp = b1_s + (i == n - 2 ? a_s : 0);
+// 					c_tmp = a_s * r;
+// 					prev = curr;
+// 				}
 
-				for (index_t i = n - 2; i >= 0; i--)
-				{
-					real_t curr = d.template at<'x'>(i);
-					curr = curr - c.template at<'i'>(i) * prev;
-					d.template at<'x'>(i) = curr;
+// 				for (index_t i = n - 2; i >= 0; i--)
+// 				{
+// 					real_t curr = d.template at<'x'>(i);
+// 					curr = curr - c.template at<'i'>(i) * prev;
+// 					d.template at<'x'>(i) = curr;
 
-					prev = curr;
-				}
-			}
-		}
-	}
+// 					prev = curr;
+// 				}
+// 			}
+// 		}
+// 	}
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
@@ -805,6 +816,7 @@ static void solve_slice_z_3d_intrinsics(real_t* __restrict__ densities, const re
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_x()
 {
+	trace_event_and_value(1000,1);
 	if (use_intrinsics_)
 	{
 		if (this->problem_.dims == 1)
@@ -851,11 +863,13 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_x()
 											 get_diagonal_layout(this->problem_, this->problem_.nx));
 		}
 	}
+	trace_event_and_value(1000,0);
 }
 
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_y()
 {
+	trace_event_and_value(1000,2);
 	if (use_intrinsics_)
 	{
 		if (this->problem_.dims == 2)
@@ -886,11 +900,13 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_y()
 									  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_);
 		}
 	}
+	trace_event_and_value(1000,0);
 }
 
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_z()
 {
+	trace_event_and_value(1000,3);
 	if (use_intrinsics_)
 	{
 #pragma omp parallel
@@ -903,6 +919,7 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_z()
 		solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
 								  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_);
 	}
+	trace_event_and_value(1000,0);
 }
 
 template <typename real_t, bool aligned_x>
