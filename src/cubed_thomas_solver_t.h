@@ -39,6 +39,8 @@ protected:
 
 	std::array<index_t, 3> cores_division_;
 
+	std::size_t max_cores_groups_;
+
 	using sync_func_t = std::function<void>;
 
 	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t& counters_count,
@@ -62,21 +64,10 @@ public:
 
 	auto get_scratch_layout() const
 	{
-		std::size_t max_core_division;
-		if (this->problem_.dims == 2)
-			max_core_division = std::max(cores_division_[0], cores_division_[1]);
-		else
-		{
-			std::vector<index_t> tmp = { cores_division_[0], cores_division_[1], cores_division_[2] };
-			std::sort(tmp.begin(), tmp.end(), std::greater<index_t>());
-
-			max_core_division = tmp[0] * tmp[1];
-		}
-
 		auto max_n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
 
 		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'i', 'l', 's'>(max_n, max_core_division, this->problem_.substrates_count);
+			   ^ noarr::vectors<'i', 'l', 's'>(max_n, max_cores_groups_, this->problem_.substrates_count);
 	}
 
 	std::function<void> get_synchronization_function();
