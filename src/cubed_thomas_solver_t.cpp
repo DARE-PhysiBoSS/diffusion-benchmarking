@@ -1054,33 +1054,39 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 				solve_block_x_start<index_t>(densities, acx, b1x, a_data, c_data, epoch_x, countersx[lane_id].value,
 											 block_size_x, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
 											 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
+			}
 
+			if (do_sync)
+			{
 #pragma omp barrier
+			}
 
-				// do Y
+			// do Y
+			{
+				const auto lane_id = tid_x * cores_division[2] + tid_z;
+				const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
+
+				solve_block_y_start<index_t>(densities, acy, b1y, a_data, c_data, epoch_y, countersy[lane_id].value,
+											 block_size_y, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
+											 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
+			}
+
+			if (z_len > 1)
+			{
+				if (do_sync)
 				{
-					const auto lane_id = tid_x * cores_division[2] + tid_z;
-					const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
-
-					solve_block_y_start<index_t>(densities, acy, b1y, a_data, c_data, epoch_y, countersy[lane_id].value,
-												 block_size_y, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
-												 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
+#pragma omp barrier
 				}
 
-				if (z_len > 1)
+				// do Z
 				{
-#pragma omp barrier
+					const auto lane_id = tid_x * cores_division[1] + tid_y;
+					const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
 
-					// do Z
-					{
-						const auto lane_id = tid_x * cores_division[1] + tid_y;
-						const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
-
-						solve_block_z_start<index_t>(densities, acz, b1z, a_data, c_data, epoch_z,
-													 countersz[lane_id].value, block_size_z, dens_l, lane_scratch_l, s,
-													 s + s_step, block_x_begin, block_x_end, block_y_begin, block_y_end,
-													 block_z_begin, block_z_end, x_tile_size);
-					}
+					solve_block_z_start<index_t>(densities, acz, b1z, a_data, c_data, epoch_z, countersz[lane_id].value,
+												 block_size_z, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
+												 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end,
+												 x_tile_size);
 				}
 			}
 		}
