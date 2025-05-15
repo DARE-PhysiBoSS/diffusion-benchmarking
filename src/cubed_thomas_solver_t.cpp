@@ -249,13 +249,12 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 						return std::min(i, n - 1);
 					};
 
-					auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), a_data);
-					auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), c_data);
-
 					for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 					{
-						const auto state = noarr::idx<dim>(get_i(equation_idx));
-						const auto prev_state = noarr::idx<dim>(get_i(equation_idx - 1));
+						const index_t i = get_i(equation_idx);
+						const index_t prev_i = get_i(equation_idx - 1);
+						const auto state = noarr::idx<'s', 'i'>(s, i);
+						const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
 						const auto r = 1 / (1 - a[state] * c[prev_state]);
 
@@ -263,22 +262,24 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 						for (index_t y = y_begin; y < y_end; y++)
 						{
-							auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'y', 'z'>(s, y, z), densities);
-
-							d[state] = r * (d[state] - a[state] * d[prev_state]);
+							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+								r
+								* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+								   - a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, prev_i));
 						}
 					}
 
 					for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
 					{
-						const auto state = noarr::idx<dim>(get_i(equation_idx));
-						const auto next_state = noarr::idx<dim>(get_i(equation_idx + 1));
+						const index_t i = get_i(equation_idx);
+						const index_t next_i = get_i(equation_idx + 1);
+						const auto state = noarr::idx<'s', 'i'>(s, i);
 
 						for (index_t y = y_begin; y < y_end; y++)
 						{
-							auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'y', 'z'>(s, y, z), densities);
-
-							d[state] = d[state] - c[state] * d[next_state];
+							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+								d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+								- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, next_i);
 						}
 					}
 
@@ -299,8 +300,6 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 			for (index_t y = y_begin; y < y_end; y++)
 			{
-				// #pragma omp barrier
-
 				// Final part of modified thomas algorithm
 				// Solve the rest of the unknowns
 				{
@@ -534,9 +533,6 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 				if (current_value == epoch * epoch_size - 1)
 				{
-					auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), a_data);
-					auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), c_data);
-
 					auto get_i = [block_size, n](index_t equation_idx) {
 						const index_t block_idx = equation_idx / 2;
 						const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
@@ -545,8 +541,10 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 					for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 					{
-						const auto state = noarr::idx<dim>(get_i(equation_idx));
-						const auto prev_state = noarr::idx<dim>(get_i(equation_idx - 1));
+						const index_t i = get_i(equation_idx);
+						const index_t prev_i = get_i(equation_idx - 1);
+						const auto state = noarr::idx<'s', 'i'>(s, i);
+						const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
 						const auto r = 1 / (1 - a[state] * c[prev_state]);
 
@@ -554,22 +552,24 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 						for (index_t x = x_begin; x < x_end; x++)
 						{
-							auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'x', 'z'>(s, x, z), densities);
-
-							d[state] = r * (d[state] - a[state] * d[prev_state]);
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								r
+								* (d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+								   - a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, prev_i));
 						}
 					}
 
 					for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
 					{
-						const auto state = noarr::idx<dim>(get_i(equation_idx));
-						const auto next_state = noarr::idx<dim>(get_i(equation_idx + 1));
+						const index_t i = get_i(equation_idx);
+						const index_t next_i = get_i(equation_idx + 1);
+						const auto state = noarr::idx<'s', 'i'>(s, i);
 
 						for (index_t x = x_begin; x < x_end; x++)
 						{
-							auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'x', 'z'>(s, x, z), densities);
-
-							d[state] = d[state] - c[state] * d[next_state];
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+								- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, next_i);
 						}
 					}
 
@@ -788,8 +788,8 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 					for (index_t x = x_begin; x < x_begin + x_len; x++)
 					{
-						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i) -=
-							c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i + 1);
+						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) -=
+							c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i + 1);
 					}
 
 					a[state] = a[state] - c[state] * a[next_state];
@@ -805,10 +805,10 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 					for (index_t x = x_begin; x < x_begin + x_len; x++)
 					{
-						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i) =
+						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
 							r
-							* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i)
-							   - c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i + 1));
+							* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+							   - c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i + 1));
 					}
 
 					a[state] = r * a[state];
@@ -828,9 +828,6 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 					if (current_value == epoch * epoch_size - 1)
 					{
-						auto a = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), a_data);
-						auto c = noarr::make_bag(scratch_l ^ noarr::rename<'i', dim>() ^ noarr::fix<'s'>(s), c_data);
-
 						auto get_i = [block_size, n](index_t equation_idx) {
 							const index_t block_idx = equation_idx / 2;
 							const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
@@ -839,8 +836,10 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 						for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 						{
-							const auto state = noarr::idx<dim>(get_i(equation_idx));
-							const auto prev_state = noarr::idx<dim>(get_i(equation_idx - 1));
+							const index_t i = get_i(equation_idx);
+							const index_t prev_i = get_i(equation_idx - 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
 							const auto r = 1 / (1 - a[state] * c[prev_state]);
 
@@ -848,22 +847,25 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 							for (index_t x = x_begin; x < x_begin + x_len; x++)
 							{
-								auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'x', 'y'>(s, X * x_tile_size +x, y), densities);
-
-								d[state] = r * (d[state] - a[state] * d[prev_state]);
+								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+									r
+									* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+									   - a[state]
+											 * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, prev_i));
 							}
 						}
 
 						for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
 						{
-							const auto state = noarr::idx<dim>(get_i(equation_idx));
-							const auto next_state = noarr::idx<dim>(get_i(equation_idx + 1));
+							const index_t i = get_i(equation_idx);
+							const index_t next_i = get_i(equation_idx + 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
 
 							for (index_t x = x_begin; x < x_begin + x_len; x++)
 							{
-								auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'x', 'y'>(s, X * x_tile_size +x, y), densities);
-
-								d[state] = d[state] - c[state] * d[next_state];
+								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+									d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+									- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, next_i);
 							}
 						}
 
@@ -891,10 +893,10 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 						for (index_t x = x_begin; x < x_begin + x_len; x++)
 						{
-							d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i) =
-								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, i)
-								- a[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, z_begin)
-								- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size +x, y, z_end - 1);
+							d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+								- a[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, z_begin)
+								- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, z_end - 1);
 						}
 					}
 				}
