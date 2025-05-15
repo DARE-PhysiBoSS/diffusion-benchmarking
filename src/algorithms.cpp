@@ -136,10 +136,7 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 		solver->save(init_output);
 	}
 
-	for (std::size_t i = 0; i < problem.iterations; i++)
-	{
-		solver->solve();
-	}
+	solver->solve();
 
 	if (!output_file.empty())
 	{
@@ -486,31 +483,28 @@ void algorithms::profile(const std::string& alg, const max_problem_t& problem, c
 	}
 	file << std::endl;
 
-	for (std::size_t i = 0; i < problem.iterations; i++)
+	// Start counters
+	if (PAPI_start(events) != PAPI_OK)
 	{
-		// Start counters
-		if (PAPI_start(events) != PAPI_OK)
-		{
-			std::cerr << "PAPI failed to start counters." << std::endl;
-			return;
-		}
-		solver->solve();
-
-		// Stop counters
-		if (PAPI_stop(events, counters.data()) != PAPI_OK)
-		{
-			std::cerr << "PAPI failed to stop counters." << std::endl;
-			return;
-		}
-
-		file << counters[0];
-		for (int i = 1; i < NUM_EVENTS; ++i)
-		{
-			file << "," << counters[i];
-		}
-		file << std::endl;
-		PAPI_reset(events);
+		std::cerr << "PAPI failed to start counters." << std::endl;
+		return;
 	}
+	solver->solve();
+
+	// Stop counters
+	if (PAPI_stop(events, counters.data()) != PAPI_OK)
+	{
+		std::cerr << "PAPI failed to stop counters." << std::endl;
+		return;
+	}
+
+	file << counters[0];
+	for (int i = 1; i < NUM_EVENTS; ++i)
+	{
+		file << "," << counters[i];
+	}
+	file << std::endl;
+	PAPI_reset(events);
 
 	file.close();
 }

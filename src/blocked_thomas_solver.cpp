@@ -1189,10 +1189,10 @@ void blocked_thomas_solver<real_t, aligned_x>::solve()
 	// 		{
 	// 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 	// 											 c_scratch_[get_thread_num()],
-	// 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-	// block_size_); #pragma omp barrier 			solve_slice_y_2d<index_t>(this->substrates_, ax_, b1x_,
-	// a_scratch_[get_thread_num()], 									  c_scratch_[get_thread_num()],
-	// get_substrates_layout<2>(), block_size_);
+	// 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(), block_size_);
+	// #pragma omp barrier
+	// 			solve_slice_y_2d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
+	// 									  c_scratch_[get_thread_num()], get_substrates_layout<2>(), block_size_);
 	// 		}
 	// 	}
 	// 	if (this->problem_.dims == 3)
@@ -1206,8 +1206,8 @@ void blocked_thomas_solver<real_t, aligned_x>::solve()
 	// 			solve_slice_y_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 	// 									  c_scratch_[get_thread_num()], get_substrates_layout<3>(), block_size_);
 	// #pragma omp barrier
-	// 			solve_slice_z_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-	// 									  c_scratch_[get_thread_num()], get_substrates_layout<3>(), block_size_);
+	// 			solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, a_scratch_, c_scratch_, countersz_.get(),
+	// 									  get_substrates_layout<3>(), get_scratch_layout(max_threadsz_), block_size_);
 	// 		}
 	// 	}
 }

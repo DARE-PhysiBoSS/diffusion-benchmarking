@@ -141,20 +141,23 @@ void lapack_thomas_solver<real_t>::solve_z()
 template <typename real_t>
 void lapack_thomas_solver<real_t>::solve()
 {
-	if (this->problem_.dims == 1)
+	for (index_t i = 0; i < this->problem_.iterations; i++)
 	{
-		solve_x();
-	}
-	else if (this->problem_.dims == 2)
-	{
-		solve_x();
-		solve_y();
-	}
-	else if (this->problem_.dims == 3)
-	{
-		solve_x();
-		solve_y();
-		solve_z();
+		if (this->problem_.dims == 1)
+		{
+			solve_x();
+		}
+		else if (this->problem_.dims == 2)
+		{
+			solve_x();
+			solve_y();
+		}
+		else if (this->problem_.dims == 3)
+		{
+			solve_x();
+			solve_y();
+			solve_z();
+		}
 	}
 }
 

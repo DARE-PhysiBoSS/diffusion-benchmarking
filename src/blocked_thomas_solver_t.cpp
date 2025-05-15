@@ -749,7 +749,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 		const auto remainder = x_len % x_tile_size;
 		const auto x_len_remainder = remainder == 0 ? x_tile_size : remainder;
 		const auto x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
-		
+
 		// First part of modified thomas algorithm
 		// We modify equations in blocks to have the first and the last equation form the tridiagonal system
 		{
@@ -1230,39 +1230,46 @@ void blocked_thomas_solver_t<real_t, aligned_x>::solve_z()
 template <typename real_t, bool aligned_x>
 void blocked_thomas_solver_t<real_t, aligned_x>::solve()
 {
-	// 	if (this->problem_.dims == 1)
-	// 	{
-	// #pragma omp parallel
-	// 		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-	// 								  c_scratch_[get_thread_num()], get_substrates_layout<1>(), block_size_);
-	// 	}
-	// 	if (this->problem_.dims == 2)
-	// 	{
-	// #pragma omp parallel
-	// 		{
-	// 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-	// 											 c_scratch_[get_thread_num()],
-	// 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-	// block_size_); #pragma omp barrier 			solve_slice_y_2d<index_t>(this->substrates_, ax_, b1x_,
-	// a_scratch_[get_thread_num()], 									  c_scratch_[get_thread_num()],
-	// get_substrates_layout<2>(), block_size_);
-	// 		}
-	// 	}
-	// 	if (this->problem_.dims == 3)
-	// 	{
-	// #pragma omp parallel
-	// 		{
-	// 			solve_slice_x_2d_and_3d<index_t>(
-	// 				this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-	// 				get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(), block_size_);
-	// #pragma omp barrier
-	// 			solve_slice_y_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-	// 									  c_scratch_[get_thread_num()], get_substrates_layout<3>(), block_size_);
-	// #pragma omp barrier
-	// 			solve_slice_z_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-	// 									  c_scratch_[get_thread_num()], get_substrates_layout<3>(), block_size_);
-	// 		}
-	// 	}
+// 	if (this->problem_.dims == 1)
+// 	{
+// #pragma omp parallel
+
+// 		for (index_t i = 0; i < this->problem_.iterations; i++)
+// 			solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, countersx_.get(),
+// 									  get_substrates_layout<1>(), get_scratch_layout(max_threadsx_), block_size_);
+// 	}
+// 	if (this->problem_.dims == 2)
+// 	{
+// #pragma omp parallel
+// 		for (index_t i = 0; i < this->problem_.iterations; i++)
+// 		{
+// 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, countersx_.get(),
+// 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+// 											 get_scratch_layout(max_threadsx_), block_size_);
+// #pragma omp barrier
+// 			solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, a_scratch_, c_scratch_, countersy_.get(),
+// 									  get_substrates_layout<2>(), get_scratch_layout(max_threadsx_), block_size_,
+// 									  x_tile_size_);
+// 		}
+// 	}
+// 	if (this->problem_.dims == 3)
+// 	{
+// #pragma omp parallel
+// 		for (index_t i = 0; i < this->problem_.iterations; i++)
+// 		{
+// 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_, c_scratch_, countersx_.get(),
+// 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+// 											 get_scratch_layout(max_threadsx_), block_size_);
+// #pragma omp barrier
+// 			solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, a_scratch_, c_scratch_, countersy_.get(),
+// 									  get_substrates_layout<3>(), get_scratch_layout(max_threadsx_), block_size_,
+// 									  x_tile_size_);
+// #pragma omp barrier
+// 			solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, a_scratch_, c_scratch_, countersz_.get(),
+// 									  get_substrates_layout<3>(), get_scratch_layout(max_threadsz_), block_size_,
+// 									  x_tile_size_);
+// 		}
+// 	}
 }
 
 template <typename real_t, bool aligned_x>

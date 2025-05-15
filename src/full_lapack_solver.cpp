@@ -142,21 +142,24 @@ void full_lapack_solver<real_t>::solve()
 {
 	auto dens_l = get_substrates_layout();
 
-#pragma omp for schedule(static) nowait
-	for (index_t s = 0; s < this->problem_.substrates_count; s++)
+	for (index_t i = 0; i < this->problem_.iterations; i++)
 	{
-		const std::size_t begin_offset = (dens_l | noarr::offset<'x', 'y', 'z', 's'>(0, 0, 0, s)) / sizeof(real_t);
+#pragma omp for schedule(static) nowait
+		for (index_t s = 0; s < this->problem_.substrates_count; s++)
+		{
+			const std::size_t begin_offset = (dens_l | noarr::offset<'x', 'y', 'z', 's'>(0, 0, 0, s)) / sizeof(real_t);
 
-		int info;
-		int n = this->problem_.nx * this->problem_.ny * this->problem_.nz;
-		int kd =
-			1 * (this->problem_.dims >= 2 ? this->problem_.nx : 1) * (this->problem_.dims >= 3 ? this->problem_.ny : 1);
-		int rhs = 1;
-		int ldab = kd + 1;
-		pbtrs("L", &n, &kd, &rhs, ab_[s].get(), &ldab, this->substrates_ + begin_offset, &n, &info);
+			int info;
+			int n = this->problem_.nx * this->problem_.ny * this->problem_.nz;
+			int kd = 1 * (this->problem_.dims >= 2 ? this->problem_.nx : 1)
+					 * (this->problem_.dims >= 3 ? this->problem_.ny : 1);
+			int rhs = 1;
+			int ldab = kd + 1;
+			pbtrs("L", &n, &kd, &rhs, ab_[s].get(), &ldab, this->substrates_ + begin_offset, &n, &info);
 
-		if (info != 0)
-			throw std::runtime_error("LAPACK pbtrs failed with error code " + std::to_string(info));
+			if (info != 0)
+				throw std::runtime_error("LAPACK pbtrs failed with error code " + std::to_string(info));
+		}
 	}
 }
 

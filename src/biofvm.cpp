@@ -152,9 +152,12 @@ void biofvm<real_t>::prepare(const max_problem_t& problem)
 template <typename real_t>
 void biofvm<real_t>::solve()
 {
-	solve_x();
-	solve_y();
-	solve_z();
+	for (index_t i = 0; i < this->problem_.iterations; i++)
+	{
+		solve_x();
+		solve_y();
+		solve_z();
+	}
 }
 
 template <typename real_t>

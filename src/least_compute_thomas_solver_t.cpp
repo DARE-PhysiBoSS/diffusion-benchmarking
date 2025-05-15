@@ -856,12 +856,14 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
-								  get_diagonal_layout(this->problem_, this->problem_.nx));
+		for (index_t i = 0; i < this->problem_.iterations; i++)
+			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+									  get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
@@ -876,6 +878,7 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),

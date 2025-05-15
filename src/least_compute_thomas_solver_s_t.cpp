@@ -798,12 +798,14 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, bx_, cx_, ex_, get_substrates_layout<1>(),
-								  get_diagonal_layout(this->problem_, this->problem_.nx));
+		for (index_t i = 0; i < this->problem_.iterations; i++)
+			solve_slice_x_1d<index_t>(this->substrates_, bx_, cx_, ex_, get_substrates_layout<1>(),
+									  get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			if (vectorized_x_)
 				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, bx_, cx_, ex_,
@@ -822,6 +824,7 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			if (vectorized_x_)
 				solve_slice_x_2d_and_3d_transpose<index_t>(

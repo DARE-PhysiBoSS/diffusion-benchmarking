@@ -1275,9 +1275,10 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 	}
 	else
 	{
-		solve_2d_and_3d(this->substrates_, get_substrates_layout<3>(), ax_, b1x_, ay_, b1y_, az_, b1z_, a_scratch_,
-						c_scratch_, countersx_.get(), countersy_.get(), countersz_.get(), get_scratch_layout(),
-						cores_division_, x_tile_size_);
+		for (index_t i = 0; i < this->problem_.iterations; i++)
+			solve_2d_and_3d(this->substrates_, get_substrates_layout<3>(), ax_, b1x_, ay_, b1y_, az_, b1z_, a_scratch_,
+							c_scratch_, countersx_.get(), countersy_.get(), countersz_.get(), get_scratch_layout(),
+							cores_division_, x_tile_size_);
 	}
 }
 
