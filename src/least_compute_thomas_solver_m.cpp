@@ -565,6 +565,7 @@ void least_compute_thomas_solver_m<real_t, aligned_x>::solve()
 			solve_slice_y_2d<index_t>(
 				this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
 				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_));
+#pragma omp barrier
 		}
 	}
 	else if (this->problem_.dims == 3)
@@ -583,6 +584,7 @@ void least_compute_thomas_solver_m<real_t, aligned_x>::solve()
 			solve_slice_z_3d<index_t>(
 				this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
 				get_diagonal_layout_c(this->problem_, this->problem_.ny, (index_t)substrate_copies_));
+#pragma omp barrier
 		}
 	}
 }

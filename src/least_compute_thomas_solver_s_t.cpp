@@ -831,6 +831,7 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 				solve_slice_y_2d<index_t>(this->substrates_, by_, cy_, ey_, get_substrates_layout<2>(),
 										  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_, s,
 										  s + s_step_length);
+#pragma omp barrier
 			}
 		}
 	}
@@ -861,6 +862,7 @@ void least_compute_thomas_solver_s_t<real_t, aligned_x>::solve()
 				solve_slice_z_3d<index_t>(this->substrates_, bz_, cz_, ez_, get_substrates_layout<3>(),
 										  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_, s,
 										  s + s_step_length);
+#pragma omp barrier
 			}
 		}
 	}

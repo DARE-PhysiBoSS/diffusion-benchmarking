@@ -579,6 +579,7 @@ void cyclic_reduction_solver_t<real_t, aligned_x>::solve()
 			solve_slice_y_2d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
 									  get_substrates_layout<2>(), x_tile_size_);
+#pragma omp barrier
 		}
 	}
 	if (this->problem_.dims == 3)
@@ -597,6 +598,7 @@ void cyclic_reduction_solver_t<real_t, aligned_x>::solve()
 			solve_slice_z_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
 									  get_substrates_layout<3>(), x_tile_size_);
+#pragma omp barrier
 		}
 	}
 }

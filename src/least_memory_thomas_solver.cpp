@@ -388,6 +388,7 @@ void least_memory_thomas_solver<real_t>::solve()
 #pragma omp barrier
 			solve_slice_y_2d<index_t>(this->substrates_, ay_.get(), b1y_.get(), by_.get(), get_substrates_layout<2>(),
 									  get_diagonal_layout(this->problem_, this->problem_.ny));
+#pragma omp barrier
 		}
 	}
 	if (this->problem_.dims == 3)
@@ -404,6 +405,7 @@ void least_memory_thomas_solver<real_t>::solve()
 #pragma omp barrier
 			solve_slice_z_3d<index_t>(this->substrates_, az_.get(), b1z_.get(), bz_.get(), get_substrates_layout<3>(),
 									  get_diagonal_layout(this->problem_, this->problem_.nz));
+#pragma omp barrier
 		}
 	}
 }
