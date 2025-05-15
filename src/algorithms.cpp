@@ -58,7 +58,7 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
 	solvers.emplace("blockedt", []() { return std::make_unique<blocked_thomas_solver_t<real_t, false>>(); });
 	solvers.emplace("blockedta", []() { return std::make_unique<blocked_thomas_solver_t<real_t, true>>(); });
-	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, false>>(); });
+	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(); });
 	return solvers;
 }
 
