@@ -51,6 +51,7 @@ class least_memory_thomas_solver_d_t : public locally_onedimensional_solver,
 	bool use_intrinsics_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
+	index_t substrate_step_;
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
