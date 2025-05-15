@@ -189,7 +189,9 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	if (try_get_adi_solver(alg))
+	benchmark_kind kind = get_benchmark_kind(params);
+
+	if (try_get_adi_solver(alg) && kind == benchmark_kind::per_dimension)
 	{
 		double max_absolute_diff_x = 0.;
 		double max_absolute_diff_y = 0.;
@@ -360,16 +362,7 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	benchmark_kind kind = benchmark_kind::per_dimension;
-
-	if (params.contains("benchmark_kind"))
-	{
-		auto kind_str = params["benchmark_kind"].get<std::string>();
-		if (kind_str == "full_solve")
-			kind = benchmark_kind::full_solve;
-		else if (kind_str == "per_dimension")
-			kind = benchmark_kind::per_dimension;
-	}
+	benchmark_kind kind = get_benchmark_kind(params);
 
 	// make header
 	{
@@ -507,4 +500,20 @@ void algorithms::profile(const std::string& alg, const max_problem_t& problem, c
 	PAPI_reset(events);
 
 	file.close();
+}
+
+benchmark_kind algorithms::get_benchmark_kind(const nlohmann::json& params)
+{
+	benchmark_kind kind = benchmark_kind::per_dimension;
+
+	if (params.contains("benchmark_kind"))
+	{
+		auto kind_str = params["benchmark_kind"].get<std::string>();
+		if (kind_str == "full_solve")
+			kind = benchmark_kind::full_solve;
+		else if (kind_str == "per_dimension")
+			kind = benchmark_kind::per_dimension;
+	}
+
+	return kind;
 }

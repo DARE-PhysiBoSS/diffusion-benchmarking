@@ -35,6 +35,8 @@ class algorithms
 	std::unique_ptr<diffusion_solver> get_solver(const std::string& alg);
 	std::unique_ptr<locally_onedimensional_solver> try_get_adi_solver(const std::string& alg);
 
+	benchmark_kind get_benchmark_kind(const nlohmann::json& params);
+
 public:
 	algorithms(bool double_precision, bool verbose);
 
