@@ -18,7 +18,7 @@ endif()
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native -lpapi)
+  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic -march=native -lpapi -O3)
 endif()
 
 include(FetchContent)
@@ -91,3 +91,52 @@ target_link_libraries(diffuse ${PAPI_LIBRARIES})
 message(PAPI_INCLUDE_DIR="${PAPI_INCLUDE_DIRS}")
 message(PAPI_LIBRARIES="${PAPI_LIBRARIES}")
 message(PAPI_COMPILE_OPTIONS="${PAPI_CFLAGS_OTHER}")
+
+find_package(MPI)
+if (MPI_FOUND)
+
+  file(GLOB mpi_src_files "src/mpi/*")
+
+  set(SHARED_SOURCES
+      src/solver_utils.h
+      src/algorithms.cpp
+      src/omp_helper.h
+      src/problem.cpp
+      src/reference_thomas_solver.cpp)
+
+  add_executable(diffuse_mpi ${mpi_src_files} ${SHARED_SOURCES})
+  target_compile_options(
+    diffuse_mpi PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${DIFFUSE_CPP_COMPILE_OPTIONS}>)
+  target_include_directories(
+    diffuse_mpi PRIVATE ${noarr_structures_SOURCE_DIR}/include
+                        ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR}
+                        ${PAPI_INCLUDE_DIRS})
+
+  target_link_libraries(diffuse_mpi nlohmann_json::nlohmann_json)
+
+  target_link_libraries(diffuse_mpi hwy)
+
+  find_package(OpenMP REQUIRED)
+  target_link_libraries(diffuse_mpi OpenMP::OpenMP_CXX)
+
+  find_package(LAPACK REQUIRED)
+  target_link_libraries(diffuse_mpi LAPACK::LAPACK)
+
+  # Find and link PAPI
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(PAPI REQUIRED papi)
+
+  target_include_directories(diffuse_mpi PRIVATE ${MPI_CXX_INCLUDE_DIRS})
+  target_link_libraries(diffuse_mpi MPI::MPI_CXX)
+
+
+  include_directories(BEFORE ${PAPI_INCLUDE_DIRS})
+  target_include_directories(diffuse_mpi PUBLIC ${PAPI_INCLUDE_DIRS})
+  target_compile_options(diffuse_mpi PUBLIC ${PAPI_CFLAGS_OTHER})
+  target_link_libraries(diffuse_mpi ${PAPI_LIBRARIES})
+  target_compile_definitions(diffuse_mpi PUBLIC USE_MPI)
+
+
+else()
+  message(STATUS "MPI not found, not compiling MPI version")
+endif()

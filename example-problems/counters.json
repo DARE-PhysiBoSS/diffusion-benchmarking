@@ -1,0 +1,212 @@
+{
+  "PAPI_L1_DCM": {
+    "Code": 2147483648,
+    "Deriv": "No",
+    "Description": "Level 1 data cache misses"
+  },
+  "PAPI_L1_ICM": {
+    "Code": 2147483649,
+    "Deriv": "No",
+    "Description": "Level 1 instruction cache misses"
+  },
+  "PAPI_L2_DCM": {
+    "Code": 2147483650,
+    "Deriv": "No",
+    "Description": "Level 2 data cache misses"
+  },
+  "PAPI_L2_ICM": {
+    "Code": 2147483651,
+    "Deriv": "No",
+    "Description": "Level 2 instruction cache misses"
+  },
+  "PAPI_L1_TCM": {
+    "Code": 2147483654,
+    "Deriv": "Yes",
+    "Description": "Level 1 cache misses"
+  },
+  "PAPI_L2_TCM": {
+    "Code": 2147483655,
+    "Deriv": "No",
+    "Description": "Level 2 cache misses"
+  },
+  "PAPI_L3_TCM": {
+    "Code": 2147483656,
+    "Deriv": "No",
+    "Description": "Level 3 cache misses"
+  },
+  "PAPI_CA_SHR": {
+    "Code": 2147483658,
+    "Deriv": "No",
+    "Description": "Requests for exclusive access to shared cache line"
+  },
+  "PAPI_L3_LDM": {
+    "Code": 2147483662,
+    "Deriv": "No",
+    "Description": "Level 3 load misses"
+  },
+  "PAPI_L2_LDM": {
+    "Code": 2147483673,
+    "Deriv": "No",
+    "Description": "Level 2 load misses"
+  },
+  "PAPI_BR_UCN": {
+    "Code": 2147483690,
+    "Deriv": "Yes",
+    "Description": "Unconditional branch instructions"
+  },
+  "PAPI_BR_CN": {
+    "Code": 2147483691,
+    "Deriv": "No",
+    "Description": "Conditional branch instructions"
+  },
+  "PAPI_BR_TKN": {
+    "Code": 2147483692,
+    "Deriv": "No",
+    "Description": "Conditional branch instructions taken"
+  },
+  "PAPI_BR_NTK": {
+    "Code": 2147483693,
+    "Deriv": "No",
+    "Description": "Conditional branch instructions not taken"
+  },
+  "PAPI_BR_MSP": {
+    "Code": 2147483694,
+    "Deriv": "No",
+    "Description": "Conditional branch instructions mispredicted"
+  },
+  "PAPI_BR_PRC": {
+    "Code": 2147483695,
+    "Deriv": "Yes",
+    "Description": "Conditional branch instructions correctly predicted"
+  },
+  "PAPI_TOT_INS": {
+    "Code": 2147483698,
+    "Deriv": "No",
+    "Description": "Instructions completed"
+  },
+  "PAPI_FP_INS": {
+    "Code": 2147483700,
+    "Deriv": "Yes",
+    "Description": "Floating point instructions"
+  },
+  "PAPI_LD_INS": {
+    "Code": 2147483701,
+    "Deriv": "No",
+    "Description": "Load instructions"
+  },
+  "PAPI_SR_INS": {
+    "Code": 2147483702,
+    "Deriv": "No",
+    "Description": "Store instructions"
+  },
+  "PAPI_BR_INS": {
+    "Code": 2147483703,
+    "Deriv": "No",
+    "Description": "Branch instructions"
+  },
+  "PAPI_VEC_INS": {
+    "Code": 2147483704,
+    "Deriv": "Yes",
+    "Description": "Vector/SIMD instructions (could include integer)"
+  },
+  "PAPI_TOT_CYC": {
+    "Code": 2147483707,
+    "Deriv": "No",
+    "Description": "Total cycles"
+  },
+  "PAPI_LST_INS": {
+    "Code": 2147483708,
+    "Deriv": "Yes",
+    "Description": "Load/store instructions completed"
+  },
+  "PAPI_L2_DCA": {
+    "Code": 2147483713,
+    "Deriv": "No",
+    "Description": "Level 2 data cache accesses"
+  },
+  "PAPI_L3_DCA": {
+    "Code": 2147483714,
+    "Deriv": "No",
+    "Description": "Level 3 data cache accesses"
+  },
+  "PAPI_L2_DCR": {
+    "Code": 2147483716,
+    "Deriv": "No",
+    "Description": "Level 2 data cache reads"
+  },
+  "PAPI_L3_DCR": {
+    "Code": 2147483717,
+    "Deriv": "No",
+    "Description": "Level 3 data cache reads"
+  },
+  "PAPI_L2_ICH": {
+    "Code": 2147483722,
+    "Deriv": "No",
+    "Description": "Level 2 instruction cache hits"
+  },
+  "PAPI_L2_ICA": {
+    "Code": 2147483725,
+    "Deriv": "No",
+    "Description": "Level 2 instruction cache accesses"
+  },
+  "PAPI_L3_ICA": {
+    "Code": 2147483726,
+    "Deriv": "No",
+    "Description": "Level 3 instruction cache accesses"
+  },
+  "PAPI_L2_ICR": {
+    "Code": 2147483728,
+    "Deriv": "No",
+    "Description": "Level 2 instruction cache reads"
+  },
+  "PAPI_L3_ICR": {
+    "Code": 2147483729,
+    "Deriv": "No",
+    "Description": "Level 3 instruction cache reads"
+  },
+  "PAPI_L2_TCA": {
+    "Code": 2147483737,
+    "Deriv": "Yes",
+    "Description": "Level 2 total cache accesses"
+  },
+  "PAPI_L3_TCA": {
+    "Code": 2147483738,
+    "Deriv": "No",
+    "Description": "Level 3 total cache accesses"
+  },
+  "PAPI_L2_TCR": {
+    "Code": 2147483740,
+    "Deriv": "Yes",
+    "Description": "Level 2 total cache reads"
+  },
+  "PAPI_FP_OPS": {
+    "Code": 2147483750,
+    "Deriv": "Yes",
+    "Description": "Floating point operations"
+  },
+  "PAPI_SP_OPS": {
+    "Code": 2147483751,
+    "Deriv": "Yes",
+    "Description": "Floating point operations; optimized to count scaled single precision vector operations"
+  },
+  "PAPI_DP_OPS": {
+    "Code": 2147483752,
+    "Deriv": "Yes",
+    "Description": "Floating point operations; optimized to count scaled double precision vector operations"
+  },
+  "PAPI_VEC_SP": {
+    "Code": 2147483753,
+    "Deriv": "Yes",
+    "Description": "Single precision vector/SIMD instructions"
+  },
+  "PAPI_VEC_DP": {
+    "Code": 2147483754,
+    "Deriv": "Yes",
+    "Description": "Double precision vector/SIMD instructions"
+  },
+  "PAPI_REF_CYC": {
+    "Code": 2147483755,
+    "Deriv": "No",
+    "Description": "Reference clock cycles"
+  }
+}

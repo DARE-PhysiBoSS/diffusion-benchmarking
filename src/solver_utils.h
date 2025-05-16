@@ -1,7 +1,8 @@
 #pragma once
 
 #include <math.h>
-
+#include <iostream>
+#include <fstream>
 #include <noarr/traversers.hpp>
 
 #include "noarr/structures/extra/funcs.hpp"
@@ -60,6 +61,20 @@ public:
 		}
 	}
 
+	template <typename index_t, typename real_t>
+	static void initialize_substrate(auto substrates_layout, real_t* substrates,
+									 const problem_t<index_t, real_t>& problem, std::vector<index_t> subdomain)
+	{
+		if (problem.gaussian_pulse)
+		{
+			initialize_gaussian_pulse(substrates_layout, substrates, problem, subdomain);
+		}
+		else
+		{
+			initialize_substrate_constant(substrates_layout, substrates, problem.initial_conditions.data());
+		}
+	}
+
 	template <typename real_t>
 	static void initialize_substrate_constant(auto substrates_layout, real_t* substrates,
 											  const real_t* initial_conditions)
@@ -86,15 +101,98 @@ public:
 										  const problem_t<index_t, real_t>& problem)
 	{
 		constexpr real_t initial_pulse_time = 0.01;
-
+		//std::ofstream outFile("./ref.env");
 		omp_trav_for_each(noarr::traverser(substrates_layout), [&](auto state) {
 			index_t s = noarr::get_index<'s'>(state);
 			index_t x = noarr::get_index<'x'>(state);
 			index_t y = noarr::get_index<'y'>(state);
 			index_t z = noarr::get_index<'z'>(state);
-
+			//std::cout << "Reference"
+			//std::cout << "x: " << x << ", y: " << y << ", z: " << z << " -> " << gaussian_analytical_solution(s, x, y, z, initial_pulse_time, problem) << std::endl;
+			
+			//outFile << "(" << x << "," << y << "," << z << ")  -> " << gaussian_analytical_solution(s, x, y, z, initial_pulse_time, problem) << std::endl;
+			//(substrates_layout | noarr::get_at(substrates, state)) =
 			(substrates_layout | noarr::get_at(substrates, state)) =
 				gaussian_analytical_solution(s, x, y, z, initial_pulse_time, problem);
 		});
+		//outFile.close();
 	}
+
+	template <typename index_t, typename real_t>
+	static void initialize_gaussian_pulse(auto substrates_layout, real_t* substrates,
+										  const problem_t<index_t, real_t>& problem, std::vector<index_t> subdomain)
+	{
+		constexpr real_t initial_pulse_time = 0.01;
+
+		index_t x_len =subdomain[1] - subdomain[0];
+		index_t y_len =subdomain[3] - subdomain[2];
+		index_t z_len =subdomain[5] - subdomain[4]; 
+		
+		/*
+		for (int i = subdomain[0]; i < subdomain[1]; i++)
+			for (int j = subdomain[2]; j < subdomain[3]; j++)
+				for (int k = subdomain[4]; k < subdomain[5]; k++)
+					for (int s = problem.substrates)
+
+		std::cout << "New Rank:" << subdomain[0] << " " << subdomain[1] << " " << subdomain[2] << " " << subdomain[3] << " "
+				  << subdomain[4] << " " << subdomain[5] << std::endl;
+		omp_trav_for_each(noarr::traverser(substrates_layout 
+			^ noarr::slice<'x'>(subdomain[0], x_len) ^ noarr::slice<'y'>(subdomain[2], y_len) ^ noarr::slice<'z'>(subdomain[4], z_len) ), [&](auto state) {
+			index_t s = noarr::get_index<'s'>(state);
+			index_t x = noarr::get_index<'x'>(state);
+			index_t y = noarr::get_index<'y'>(state);
+			index_t z = noarr::get_index<'z'>(state);
+
+			std::cout << "x: " << x << ", y: " << y << ", z: " << z << std::endl;
+			});
+		
+		*/
+		//std::ofstream outFile("./mpi.env", std::ios::app);
+		omp_trav_for_each(noarr::traverser(substrates_layout) 
+			//^ noarr::slice<'x'>(subdomain[0], x_len) ^ noarr::slice<'y'>(subdomain[2], y_len) ^ noarr::slice<'z'>(subdomain[4], z_len) )
+			, [&](auto state) {
+			index_t s = noarr::get_index<'s'>(state);
+			index_t x = noarr::get_index<'x'>(state);
+			index_t y = noarr::get_index<'y'>(state);
+			index_t z = noarr::get_index<'z'>(state);
+			
+			
+			//outFile << "(" << x << "," << y << "," << z + subdomain[4] << ") -> " << gaussian_analytical_solution(s, x, y, z + subdomain[4], initial_pulse_time, problem) << std::endl;
+			(substrates_layout | noarr::get_at(substrates, state)) =
+				gaussian_analytical_solution(s, x + subdomain[0], y + subdomain[2], z + subdomain[4], initial_pulse_time, problem);
+		});
+		//outFile.close();
+	}
+	/*
+	template <typename index_t, typename real_t>
+	static void apply_dirichlet_conditons(auto substrates_layout, real_t* substrates,
+										  const problem_t<index_t, real_t>& problem, std::vector<index_t> subdomain)
+	{
+		constexpr real_t initial_pulse_time = 0.01;
+
+		index_t x_len =subdomain[1] - subdomain[0];
+		index_t y_len =subdomain[3] - subdomain[2];
+		index_t z_len =subdomain[5] - subdomain[4]; 
+		
+		//z borders
+		#pragma omp parallel for collapse(2)
+		for (int i = 0; i < problem.nx; ++i)
+			for (int j = 0; j < problem.ny; ++j) {
+				substrate_layout
+			}
+
+		
+		omp_trav_for_each(noarr::traverser(substrates_layout) 
+			//^ noarr::slice<'x'>(subdomain[0], x_len) ^ noarr::slice<'y'>(subdomain[2], y_len) ^ noarr::slice<'z'>(subdomain[4], z_len) )
+			, [&](auto state) {
+			index_t s = noarr::get_index<'s'>(state);
+			index_t x = noarr::get_index<'x'>(state);
+			index_t y = noarr::get_index<'y'>(state);
+			index_t z = noarr::get_index<'z'>(state);
+
+			//std::cout << "x: " << x << ", y: " << y << ", z: " << z + subdomain[4] << " -> " << gaussian_analytical_solution(s, x, y, z + subdomain[4], initial_pulse_time, problem) << std::endl;
+			(substrates_layout | noarr::get_at(substrates, state)) =
+				gaussian_analytical_solution(s, x, y, z + subdomain[4], initial_pulse_time, problem);
+		});
+	}*/	
 };

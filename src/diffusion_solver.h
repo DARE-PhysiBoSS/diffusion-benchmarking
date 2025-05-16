@@ -1,12 +1,22 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
 
 #include "problem.h"
 
 class diffusion_solver
 {
 public:
+
+	#ifdef USE_MPI
+		using index_t = std::int32_t; 
+		index_t x_min, y_min, z_min;
+		index_t x_max, y_max, z_max;
+		MPI_Comm mpi_comm;
+	#endif
 	// Allocates common resources
 	virtual void prepare(const max_problem_t& problem) = 0;
 

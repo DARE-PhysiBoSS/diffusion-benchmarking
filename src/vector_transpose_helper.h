@@ -2,7 +2,10 @@
 
 #include <type_traits>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <hwy/highway.h>
+#pragma GCC diagnostic pop
 
 namespace hn = hwy::HWY_NAMESPACE;
 

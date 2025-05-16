@@ -12,5 +12,5 @@
     "diffusion_coefficients": 10000,
     "decay_rates": 0.01,
     "initial_conditions": 1000,
-    "gaussian_pulse": false
+    "gaussian_pulse": true
 }

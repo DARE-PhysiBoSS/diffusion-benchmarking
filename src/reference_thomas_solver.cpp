@@ -145,7 +145,7 @@ void reference_thomas_solver<real_t>::solve_z()
 	auto dens_l = get_substrates_layout();
 	auto diag_l =
 		noarr::scalar<real_t>() ^ noarr::vectors<'s', 'i'>(this->problem_.substrates_count, this->problem_.nz);
-
+	
 	for (index_t z = 1; z < this->problem_.nz; z++)
 	{
 		for (index_t y = 0; y < this->problem_.ny; y++)
@@ -173,7 +173,7 @@ void reference_thomas_solver<real_t>::solve_z()
 			}
 		}
 	}
-
+	
 	for (index_t z = this->problem_.nz - 2; z >= 0; z--)
 	{
 		for (index_t y = 0; y < this->problem_.ny; y++)

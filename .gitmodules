@@ -10,3 +10,6 @@
 [submodule "submodules/highway"]
 	path = submodules/highway
 	url = https://github.com/google/highway.git
+[submodule "submodules/papi"]
+	path = submodules/papi
+	url = https://github.com/icl-utk-edu/papi.git
