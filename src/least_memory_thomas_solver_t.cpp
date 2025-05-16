@@ -87,6 +87,14 @@ void least_memory_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json&
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 	substrate_step_ =
 		params.contains("substrate_step") ? (index_t)params["substrate_step"] : this->problem_.substrates_count;
+
+	if (vectorized_x_)
+	{
+		using simd_tag = hn::ScalableTag<real_t>;
+		simd_tag d;
+		std::size_t vector_length = hn::Lanes(d) * sizeof(real_t);
+		alignment_size_ = std::max(alignment_size_, vector_length);
+	}
 }
 
 template <typename real_t, bool aligned_x>
