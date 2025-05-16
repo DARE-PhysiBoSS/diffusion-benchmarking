@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "base_solver.h"
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
@@ -58,6 +60,9 @@ class least_memory_thomas_solver_d_t : public locally_onedimensional_solver,
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
 public:
+	std::unique_ptr<real_t[]> a_data = std::make_unique<real_t[]>(this->problem_.nz * this->problem_.substrates_count);
+	std::unique_ptr<real_t[]> c_data = std::make_unique<real_t[]>(this->problem_.nz * this->problem_.substrates_count);
+
 	least_memory_thomas_solver_d_t(bool use_intrinsics);
 
 	template <std::size_t dims = 3>

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <iostream>
 
+#include "omp_helper.h"
 #include "vector_transpose_helper.h"
 
 template <typename real_t, bool aligned_x>
@@ -417,6 +418,62 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 	}
 }
 
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+static void solve_slice_3d(real_t* __restrict__ densities, const real_t* __restrict__ a, const real_t* __restrict__ b1,
+						   const real_t* __restrict__ back_c, const density_layout_t dens_l,
+						   const diagonal_layout_t diag_l, const index_t s_begin, const index_t s_end,
+						   const index_t y_begin, const index_t y_end)
+{
+	constexpr char dim = 'x';
+	const index_t n = dens_l | noarr::get_length<dim>();
+	const index_t z_len = dens_l | noarr::get_length<'z'>();
+
+	const auto d = noarr::make_bag(dens_l, densities);
+	const auto c = noarr::make_bag(diag_l, back_c);
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+#pragma omp for schedule(static) nowait
+		for (index_t z = 0; z < z_len; z++)
+		{
+			for (index_t y = y_begin; y < y_end; y++)
+			{
+				const real_t a_s = a[s];
+				const real_t b1_s = b1[s];
+
+				real_t a_tmp = 0;
+				real_t b_tmp = b1_s + a_s;
+				real_t c_tmp = a_s;
+				real_t prev = 0;
+
+				for (index_t i = 0; i < n; i++)
+				{
+					const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
+
+					real_t curr = d.template at<dim, 'y', 'z', 's'>(i, y, z, s);
+					curr = r * (curr - a_tmp * prev);
+					d.template at<dim, 'y', 'z', 's'>(i, y, z, s) = curr;
+
+					a_tmp = a_s;
+					b_tmp = b1_s + (i == n - 2 ? a_s : 0);
+					c_tmp = a_s * r;
+					prev = curr;
+				}
+
+				for (index_t i = n - 2; i >= 0; i--)
+				{
+					real_t curr = d.template at<dim, 'y', 'z', 's'>(i, y, z, s);
+					curr = curr - c.template at<'i', 's'>(i, s) * prev;
+					d.template at<dim, 'y', 'z', 's'>(i, y, z, s) = curr;
+
+					prev = curr;
+				}
+			}
+		}
+	}
+}
+
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __restrict__ a,
 							 const real_t* __restrict__ b1, const real_t* __restrict__ back_c,
@@ -553,9 +610,9 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(x_tile_size);
 	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
 
-#pragma omp for schedule(static) nowait collapse(3)
 	for (index_t s = s_begin; s < s_end; s++)
 	{
+#pragma omp for schedule(static) nowait
 		for (index_t z = 0; z < z_len; z++)
 		{
 			for (index_t X = 0; X < X_len; X++)
@@ -676,10 +733,9 @@ template <typename index_t, typename real_t, typename density_layout_t, typename
 static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ a,
 							 const real_t* __restrict__ b1, const real_t* __restrict__ back_c,
 							 const density_layout_t dens_l, const diagonal_layout_t diag_l, std::size_t x_tile_size,
-							 const index_t s_begin, const index_t s_end)
+							 const index_t s_begin, const index_t s_end, const index_t y_begin, const index_t y_end)
 {
 	constexpr char dim = 'z';
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
 	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(x_tile_size);
@@ -688,7 +744,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 #pragma omp for schedule(static) nowait collapse(3)
 	for (index_t s = s_begin; s < s_end; s++)
 	{
-		for (index_t y = 0; y < y_len; y++)
+		for (index_t y = y_begin; y < y_end; y++)
 		{
 			for (index_t X = 0; X < X_len; X++)
 			{
@@ -804,6 +860,234 @@ static void solve_slice_z_3d_intrinsics(real_t* __restrict__ densities, const re
 	}
 }
 
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+								const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
+								index_t& epoch, std::atomic<long>& counter, const index_t block_size,
+								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t s_begin,
+								const index_t s_end, const index_t x_begin, const index_t x_end, const index_t y_begin,
+								const index_t y_end, const index_t z_begin, const index_t z_end,
+								const index_t x_tile_size)
+{
+	constexpr char dim = 'z';
+	const index_t n = dens_l | noarr::get_length<dim>();
+
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+	auto d = noarr::make_bag(dens_l, densities);
+
+	const index_t X_len = (x_end - x_begin + x_tile_size - 1) / x_tile_size;
+
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t X = 0; X < X_len; X++)
+			{
+				const index_t remainder = (x_end - x_begin) % x_tile_size;
+				const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+				const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
+
+				// Normalize the first and the second equation
+				index_t i;
+				for (i = z_begin; i < z_begin + 2; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					a[state] = a_tmp / b_tmp;
+					c[state] = c_tmp / b_tmp;
+
+					for (index_t x = x_begin; x < x_begin + x_len; x++)
+					{
+						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) /= b_tmp;
+					}
+				}
+
+				// Process the lower diagonal (forward)
+				for (; i < z_end; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+					a[state] = r * (0 - a_tmp * a[prev_state]);
+					c[state] = r * c_tmp;
+
+					for (index_t x = x_begin; x < x_begin + x_len; x++)
+					{
+						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+							r
+							* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+							   - a_tmp * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i - 1));
+					}
+				}
+
+				// Process the upper diagonal (backward)
+				for (i = z_end - 3; i >= z_begin + 1; i--)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+					for (index_t x = x_begin; x < x_begin + x_len; x++)
+					{
+						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) -=
+							c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i + 1);
+					}
+
+					a[state] = a[state] - c[state] * a[next_state];
+					c[state] = 0 - c[state] * c[next_state];
+				}
+
+				// Process the first row (backward)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+					const auto r = 1 / (1 - c[state] * a[next_state]);
+
+					for (index_t x = x_begin; x < x_begin + x_len; x++)
+					{
+						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+							r
+							* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+							   - c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i + 1));
+					}
+
+					a[state] = r * a[state];
+					c[state] = r * (0 - c[state] * c[next_state]);
+				}
+			}
+		}
+	}
+
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		epoch++;
+		// Second part of modified thomas algorithm
+		// We solve the system of equations that are composed of the first and last row of each block
+		// We do it using Thomas Algorithm
+		{
+			const index_t blocks_count = (n + block_size - 1) / block_size;
+			const index_t epoch_size = blocks_count + 1;
+			// std::cout << blocks_count << std::endl;
+
+			// increment the counter
+			auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			if (current_value == epoch * epoch_size - 1)
+			{
+				auto get_i = [block_size, n](index_t equation_idx) {
+					const index_t block_idx = equation_idx / 2;
+					const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
+					return std::min(i, n - 1);
+				};
+
+				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t prev_i = get_i(equation_idx - 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					for (index_t y = y_begin; y < y_end; y++)
+					{
+						for (index_t X = 0; X < X_len; X++)
+						{
+							const index_t remainder = (x_end - x_begin) % x_tile_size;
+							const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+							const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
+
+							for (index_t x = x_begin; x < x_begin + x_len; x++)
+							{
+								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+									r
+									* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+									   - a[state]
+											 * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, prev_i));
+							}
+						}
+					}
+				}
+
+				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t next_i = get_i(equation_idx + 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t y = y_begin; y < y_end; y++)
+					{
+						for (index_t X = 0; X < X_len; X++)
+						{
+							const index_t remainder = (x_end - x_begin) % x_tile_size;
+							const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+							const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
+
+							for (index_t x = x_begin; x < x_begin + x_len; x++)
+							{
+								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+									d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
+									- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, next_i);
+							}
+						}
+					}
+				}
+
+				// notify all threads that the last thread has finished
+				counter.fetch_add(1, std::memory_order_acq_rel);
+				// counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < epoch * epoch_size)
+				{
+					// counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
+				}
+			}
+		}
+	}
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		// Final part of modified thomas algorithm
+		// Solve the rest of the unknowns
+		{
+			for (index_t i = z_begin + 1; i < z_end - 1; i++)
+			{
+				const auto state = noarr::idx<'s', 'i'>(s, i);
+
+				for (index_t y = y_begin; y < y_end; y++)
+				{
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
+							d.template at<'s', 'x', 'y', dim>(s, x, y, i)
+							- a[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, z_begin)
+							- c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, z_end - 1);
+					}
+				}
+			}
+		}
+	}
+}
+
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_x()
 {
@@ -850,9 +1134,9 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_x()
 		else if (this->problem_.dims == 3)
 		{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d<index_t>(
-				this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-				get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
+			solve_slice_3d<index_t>(this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>(),
+									get_diagonal_layout(this->problem_, this->problem_.nx), 0,
+									this->problem_.substrates_count, 0, this->problem_.ny);
 		}
 	}
 }
@@ -911,13 +1195,15 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_z()
 #pragma omp parallel
 		solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
 								  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_, 0,
-								  this->problem_.substrates_count);
+								  this->problem_.substrates_count, 0, this->problem_.ny);
 	}
 }
 
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve()
 {
+	std::atomic<int> counter(0);
+
 	if (!use_intrinsics_)
 	{
 		if (this->problem_.dims == 1)
@@ -950,26 +1236,58 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve()
 		}
 		if (this->problem_.dims == 3)
 		{
-#pragma omp parallel
-			for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
-			{
-				for (index_t i = 0; i < this->problem_.iterations; i++)
-				{
-					auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+			auto scratch_l =
+				noarr::scalar<real_t>() ^ noarr::vectors<'i', 's'>(this->problem_.nz, this->problem_.substrates_count);
 
-					solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, cx_,
-													 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-													 get_diagonal_layout(this->problem_, this->problem_.nx), s,
-													 s + s_step_length);
-#pragma omp barrier
-					solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, cy_, get_substrates_layout<3>(),
-											  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_, s,
-											  s + s_step_length);
-#pragma omp barrier
-					solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
-											  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_, s,
-											  s + s_step_length);
-#pragma omp barrier
+			std::atomic<long> counter(0);
+
+#pragma omp parallel
+			{
+				auto tid = get_thread_num();
+				index_t epoch_z = 0;
+
+				const index_t block_size_y = (this->problem_.ny) / get_num_threads();
+
+				auto block_y_begin = tid * block_size_y;
+				auto block_y_end = std::min(block_y_begin + block_size_y, this->problem_.ny);
+
+				block_y_begin = 0;
+				block_y_end = this->problem_.ny;
+
+				auto z_len = this->problem_.nz;
+
+				const index_t block_size_z = z_len / get_num_threads();
+
+				const auto block_z_begin = tid * block_size_z;
+				const auto block_z_end = std::min(block_z_begin + block_size_z, z_len);
+
+				for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
+				{
+					for (index_t i = 0; i < this->problem_.iterations; i++)
+					{
+						auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
+						solve_slice_3d<index_t>(this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>(),
+												get_diagonal_layout(this->problem_, this->problem_.nx), s,
+												s + s_step_length, block_y_begin, block_y_end);
+						// #pragma omp barrier
+						solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, cy_, get_substrates_layout<3>(),
+												  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_,
+												  s, s + s_step_length);
+						// #pragma omp barrier
+						// solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
+						// 						  get_diagonal_layout(this->problem_, this->problem_.nz),
+						// x_tile_size_, 						  s, s + s_step_length, block_y_begin, block_y_end);
+
+						{
+							solve_block_z_start<index_t>(this->substrates_, az_, b1z_, a_data.get(), c_data.get(),
+														 epoch_z, counter, block_size_z, get_substrates_layout<3>(),
+														 scratch_l, s, s + s_step_length, 0, this->problem_.nx, 0,
+														 this->problem_.ny, block_z_begin, block_z_end, x_tile_size_);
+						}
+
+						// #pragma omp barrier
+					}
 				}
 			}
 		}
@@ -1007,25 +1325,34 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve()
 		if (this->problem_.dims == 3)
 		{
 #pragma omp parallel
-			for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
 			{
-				for (index_t i = 0; i < this->problem_.iterations; i++)
-				{
-					auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+				ReusableBusyWaitBarrier barrier(counter, get_num_threads());
 
-					solve_slice_x_2d_and_3d_transpose<index_t>(
-						this->substrates_, ax_, b1x_, cx_,
-						get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-						get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
-#pragma omp barrier
-					solve_slice_y_3d_intrinsics<index_t>(this->substrates_, ay_, b1y_, cy_, get_substrates_layout<3>(),
-														 get_diagonal_layout(this->problem_, this->problem_.ny), s,
-														 s + s_step_length);
-#pragma omp barrier
-					solve_slice_z_3d_intrinsics<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
-														 get_diagonal_layout(this->problem_, this->problem_.nz), s,
-														 s + s_step_length);
-#pragma omp barrier
+				for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
+				{
+					for (index_t i = 0; i < this->problem_.iterations; i++)
+					{
+						auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
+						solve_slice_x_2d_and_3d_transpose<index_t>(
+							this->substrates_, ax_, b1x_, cx_,
+							get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
+
+						// #pragma omp barrier
+
+						solve_slice_y_3d_intrinsics<index_t>(
+							this->substrates_, ay_, b1y_, cy_, get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.ny), s, s + s_step_length);
+
+						// #pragma omp barrier
+
+						solve_slice_z_3d_intrinsics<index_t>(
+							this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length);
+
+						// #pragma omp barrier
+					}
 				}
 			}
 		}

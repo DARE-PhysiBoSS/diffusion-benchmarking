@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
 #include <math.h>
 
 #include <noarr/traversers.hpp>
@@ -97,4 +99,28 @@ public:
 				gaussian_analytical_solution(s, x, y, z, initial_pulse_time, problem);
 		});
 	}
+};
+
+class ReusableBusyWaitBarrier
+{
+public:
+	ReusableBusyWaitBarrier(std::atomic<int>& counter, int threads)
+		: thread_count(threads), counter(counter), generation(0)
+	{}
+
+	void wait()
+	{
+		generation++;
+		auto local_count = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+		while (local_count < generation * thread_count)
+		{
+			local_count = counter.load(std::memory_order_acquire);
+		}
+	}
+
+private:
+	int thread_count;
+	std::atomic<int>& counter;
+	int generation;
 };
