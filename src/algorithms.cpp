@@ -290,8 +290,11 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 	auto compute_mean_and_std = [](const std::vector<std::size_t>& times) {
 		double mean = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
-		double sq_sum = std::inner_product(times.begin(), times.end(), times.begin(), 0.0);
-		double std_dev = std::sqrt(sq_sum / times.size() - mean * mean);
+		std::vector<double> variances(times.size());
+		std::transform(times.begin(), times.end(), variances.begin(),
+					   [mean](double x) { return (x - mean) * (x - mean); });
+		double variance = std::accumulate(variances.begin(), variances.end(), 0.0) / times.size();
+		double std_dev = std::sqrt(variance);
 		return std::make_pair(mean, std_dev);
 	};
 
