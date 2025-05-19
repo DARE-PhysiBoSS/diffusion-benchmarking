@@ -81,5 +81,9 @@ public:
 
 	void solve() override;
 
+	void solve_1d();
+	void solve_2d();
+	void solve_3d();
+
 	~least_memory_thomas_solver_d_t();
 };
