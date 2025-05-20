@@ -1373,50 +1373,74 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_x()
 {
 	if (use_intrinsics_)
 	{
-		if (this->problem_.dims == 1)
+		if (use_fused_ && this->problem_.dims > 1)
 		{
 #pragma omp parallel
-			solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, cx_, get_substrates_layout<1>(),
-									  get_diagonal_layout(this->problem_, this->problem_.nx), 0,
-									  this->problem_.substrates_count);
+			solve_slice_xy_fused_transpose<index_t>(
+				this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, get_substrates_layout<3>(),
+				get_diagonal_layout(this->problem_, this->problem_.nx),
+				get_diagonal_layout(this->problem_, this->problem_.ny), 0, this->problem_.substrates_count);
 		}
-		else if (this->problem_.dims == 2)
+		else
 		{
+			if (this->problem_.dims == 1)
+			{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d_transpose<index_t>(
-				this->substrates_, ax_, b1x_, cx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-				get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
-		}
-		else if (this->problem_.dims == 3)
-		{
+				solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, cx_, get_substrates_layout<1>(),
+										  get_diagonal_layout(this->problem_, this->problem_.nx), 0,
+										  this->problem_.substrates_count);
+			}
+			else if (this->problem_.dims == 2)
+			{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d_transpose<index_t>(
-				this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-				get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
+				solve_slice_x_2d_and_3d_transpose<index_t>(
+					this->substrates_, ax_, b1x_, cx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+					get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
+			}
+			else if (this->problem_.dims == 3)
+			{
+#pragma omp parallel
+				solve_slice_x_2d_and_3d_transpose<index_t>(
+					this->substrates_, ax_, b1x_, cx_,
+					get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+					get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
+			}
 		}
 	}
 	else
 	{
-		if (this->problem_.dims == 1)
+		if (use_fused_ && this->problem_.dims > 1)
 		{
 #pragma omp parallel
-			solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, cx_, get_substrates_layout<1>(),
-									  get_diagonal_layout(this->problem_, this->problem_.nx), 0,
-									  this->problem_.substrates_count);
+			solve_slice_xy_fused<index_t>(this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, get_substrates_layout<3>(),
+										  get_diagonal_layout(this->problem_, this->problem_.nx),
+										  get_diagonal_layout(this->problem_, this->problem_.ny), 0,
+										  this->problem_.substrates_count);
 		}
-		else if (this->problem_.dims == 2)
+		else
 		{
+			if (this->problem_.dims == 1)
+			{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d<index_t>(
-				this->substrates_, ax_, b1x_, cx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-				get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
-		}
-		else if (this->problem_.dims == 3)
-		{
+				solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, cx_, get_substrates_layout<1>(),
+										  get_diagonal_layout(this->problem_, this->problem_.nx), 0,
+										  this->problem_.substrates_count);
+			}
+			else if (this->problem_.dims == 2)
+			{
 #pragma omp parallel
-			solve_slice_x_2d_and_3d<index_t>(
-				this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-				get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
+				solve_slice_x_2d_and_3d<index_t>(
+					this->substrates_, ax_, b1x_, cx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+					get_diagonal_layout(this->problem_, this->problem_.nx), 0, this->problem_.substrates_count);
+			}
+			else if (this->problem_.dims == 3)
+			{
+#pragma omp parallel
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, cx_,
+												 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+												 get_diagonal_layout(this->problem_, this->problem_.nx), 0,
+												 this->problem_.substrates_count);
+			}
 		}
 	}
 }
@@ -1424,6 +1448,9 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_x()
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_y()
 {
+	if (use_fused_)
+		return;
+
 	if (use_intrinsics_)
 	{
 #pragma omp parallel
