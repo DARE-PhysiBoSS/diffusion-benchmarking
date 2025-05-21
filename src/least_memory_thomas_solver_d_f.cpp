@@ -318,7 +318,7 @@ static void solve_slice_xy_fused(real_t* __restrict__ densities, const real_t* _
 
 
 			{
-				real_t r_z;
+				real_t r_z = 0;
 
 				for (index_t x = 0; x < x_len; x++)
 				{
@@ -338,8 +338,10 @@ template <typename index_t, typename real_t, typename density_layout_t, typename
 static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const real_t* __restrict__ ax,
 										   const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
 										   const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-										   const real_t* __restrict__ back_cy, const density_layout_t dens_l,
-										   const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l,
+										   const real_t* __restrict__ back_cy, const real_t* __restrict__ az,
+										   const real_t* __restrict__ b1z, const real_t* __restrict__ back_cz,
+										   const density_layout_t dens_l, const diagonal_layout_t diagx_l,
+										   const diagonal_layout_t diagy_l, const diagonal_layout_t diagz_l,
 										   const index_t s_begin, const index_t s_end)
 {
 	const index_t n = dens_l | noarr::get_length<'x'>();
@@ -354,17 +356,22 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'y', 'b', 'y', 'v'>(simd_length);
 
-#pragma omp for schedule(static) nowait collapse(2)
+#pragma omp for schedule(static) nowait
 	for (index_t s = s_begin; s < s_end; s++)
 	{
+		const real_t a_s = ax[s];
+		const real_t b1_s = b1x[s];
+
+		const real_t ay_s = ay[s];
+		const real_t b1y_s = b1y[s];
+
+		const real_t az_s = az[s];
+		const real_t b1z_s = b1z[s];
+
+		real_t cz_tmp = az_s;
+
 		for (index_t z = 0; z < z_len; z++)
 		{
-			const real_t a_s = ax[s];
-			const real_t b1_s = b1x[s];
-
-			const real_t ay_s = ay[s];
-			const real_t b1y_s = b1y[s];
-
 			real_t ay_tmp = 0;
 			real_t by_tmp = b1y_s + ay_s;
 			real_t cy_tmp = ay_s;
@@ -591,9 +598,6 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 				const index_t v_len = rem_dens_l | noarr::get_length<'v'>();
 				const auto c = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), back_cx);
 
-				real_t r_y;
-
-
 				for (index_t y = y_len_full - v_len; y < y_len_full; y++)
 				{
 					real_t a_tmp = 0;
@@ -601,65 +605,11 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 					real_t c_tmp = a_s;
 					real_t prev = 0;
 
-					for (index_t i = 0; i < n; i++)
-					{
-						const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
+					x_forward(d, s, z, y, a_s, b1_s, a_tmp, b_tmp, c_tmp, prev);
 
-						real_t curr = d.template at<'y', 'x'>(y, i);
-						curr = r * (curr - a_tmp * prev);
-						d.template at<'y', 'x'>(y, i) = curr;
+					x_backward(d, c, s, z, y, prev, inside_data<real_t> { ay_s, b1y_s, cy_tmp });
 
-						a_tmp = a_s;
-						b_tmp = b1_s + (i == n - 2 ? a_s : 0);
-						c_tmp = a_s * r;
-						prev = curr;
-					}
-
-					for (index_t i = n - 2; i >= 0; i--)
-					{
-						real_t curr = d.template at<'y', 'x'>(y, i);
-						curr = curr - c.template at<'i'>(i) * prev;
-						d.template at<'y', 'x'>(y, i) = curr;
-
-						real_t prev_y = prev;
-						prev = curr;
-
-						if (y == 0)
-						{
-							r_y = 1 / (b1y_s + ay_s);
-
-							prev_y *= r_y;
-
-							d.template at<'x', 'y'>(i + 1, 0) = prev_y;
-						}
-						else
-						{
-							const real_t b_tmp = b1y_s + (y == y_len_full - 1 ? ay_s : 0);
-							r_y = 1 / (b_tmp - ay_s * cy_tmp);
-
-							prev_y = r_y * (prev_y - ay_s * d.template at<'x', 'y'>(i + 1, y - 1));
-							d.template at<'x', 'y'>(i + 1, y) = prev_y;
-						}
-					}
-
-					if (y == 0)
-					{
-						r_y = 1 / (b1y_s + ay_s);
-
-						prev *= r_y;
-
-						d.template at<'x', 'y'>(0, 0) = prev;
-					}
-					else
-					{
-						const real_t b_tmp = b1y_s + (y == y_len_full - 1 ? ay_s : 0);
-						r_y = 1 / (b_tmp - ay_s * cy_tmp);
-
-						prev = r_y * (prev - ay_s * d.template at<'x', 'y'>(0, y - 1));
-						d.template at<'x', 'y'>(0, y) = prev;
-					}
-
-					cy_tmp = ay_s * r_y;
+					y_forward_inside_x<true>(d, s, z, y, 0, ay_s, b1y_s, cy_tmp, prev);
 				}
 			}
 
@@ -669,20 +619,99 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 
 				const auto c = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), back_cy);
 
+				real_t r_z = 0;
+
 				for (index_t X = 0; X < X_len; X++)
 				{
-					const auto d = noarr::make_bag(
-						blocked_dens_l ^ noarr::fix<'s', 'z', 'b', 'X'>(s, z, noarr::lit<0>, X), densities);
+					const auto d =
+						noarr::make_bag(blocked_dens_l ^ noarr::fix<'s', 'b', 'X'>(s, noarr::lit<0>, X), densities);
 
-					simd_t prev = hn::Load(t, &d.template at<'y', 'x'>(y_len_full - 1, 0));
+					simd_t prev = hn::Load(t, &d.template at<'z', 'y', 'x'>(z, y_len_full - 1, 0));
 
 					for (index_t i = y_len_full - 2; i >= 0; i--)
 					{
-						simd_t curr = hn::Load(t, &d.template at<'y', 'x'>(i, 0));
+						simd_t curr = hn::Load(t, &d.template at<'z', 'y', 'x'>(z, i, 0));
 						curr = hn::MulAdd(hn::Set(t, -c.template at<'i'>(i)), prev, curr);
-						hn::Store(curr, t, &d.template at<'y', 'x'>(i, 0));
+						hn::Store(curr, t, &d.template at<'z', 'y', 'x'>(z, i, 0));
 
+						simd_t prev_z = prev;
 						prev = curr;
+
+						if (z == 0)
+						{
+							const real_t r_z = 1 / (b1z_s + az_s);
+
+							prev_z = hn::Mul(prev_z, hn::Set(t, r_z));
+
+							hn::Store(prev_z, t, &d.template at<'z', 'x', 'y'>(z, 0, i + 1));
+						}
+						else
+						{
+							const real_t b_tmp = b1z_s + (z == z_len - 1 ? az_s : 0);
+							const real_t r_z = 1 / (b_tmp - az_s * cz_tmp);
+
+							simd_t tmp = hn::Load(t, &d.template at<'z', 'x', 'y'>(z - 1, 0, i + 1));
+
+							prev_z = hn::Mul(hn::Set(t, r_z), hn::MulAdd(hn::Set(t, -az_s), tmp, prev_z));
+
+							hn::Store(prev_z, t, &d.template at<'z', 'x', 'y'>(z, 0, i + 1));
+						}
+					}
+
+					if (z == 0)
+					{
+						r_z = 1 / (b1z_s + az_s);
+
+						prev = hn::Mul(prev, hn::Set(t, r_z));
+
+						hn::Store(prev, t, &d.template at<'z', 'x', 'y'>(z, 0, 0));
+					}
+					else
+					{
+						const real_t b_tmp = b1z_s + (z == z_len - 1 ? az_s : 0);
+						r_z = 1 / (b_tmp - az_s * cz_tmp);
+
+						simd_t tmp = hn::Load(t, &d.template at<'z', 'x', 'y'>(z - 1, 0, 0));
+
+						prev = hn::Mul(hn::Set(t, r_z), hn::MulAdd(hn::Set(t, -az_s), tmp, prev));
+
+						hn::Store(prev, t, &d.template at<'z', 'x', 'y'>(z, 0, 0));
+					}
+				}
+
+				cz_tmp = az_s * r_z;
+			}
+		}
+
+		{
+			constexpr index_t x_tile_multiple = 1;
+
+			auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+			const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+			for (index_t y = 0; y < y_len_full; y++)
+			{
+				for (index_t X = 0; X < X_len; X++)
+				{
+					const auto d = noarr::make_bag(
+						blocked_dens_l ^ noarr::fix<'s', 'y', 'b', 'X'>(s, y, noarr::lit<0>, X), densities);
+					const auto c = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), back_cz);
+
+					simd_t prev[x_tile_multiple];
+
+					for (index_t x = 0; x < x_tile_multiple; x++)
+						prev[x] = hn::Load(t, &d.template at<'z', 'y', 'x'>(z_len - 1, y, x * simd_length));
+
+					for (index_t i = z_len - 2; i >= 0; i--)
+					{
+						for (index_t x = 0; x < x_tile_multiple; x++)
+						{
+							simd_t curr = hn::Load(t, &d.template at<'z', 'x'>(i, x * simd_length));
+							curr = hn::MulAdd(hn::Set(t, -c.template at<'i'>(i)), prev[x], curr);
+							hn::Store(curr, t, &d.template at<'z', 'x'>(i, x * simd_length));
+
+							prev[x] = curr;
+						}
 					}
 				}
 			}
@@ -901,11 +930,10 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve()
 					get_diagonal_layout(this->problem_, this->problem_.nx),
 					get_diagonal_layout(this->problem_, this->problem_.ny),
 					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length);
-// #pragma omp barrier
-// 				solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
-// 										  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_, s,
-// 										  s + s_step_length);
-// #pragma omp barrier
+				// #pragma omp barrier
+				// 				solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
+				// 										  get_diagonal_layout(this->problem_, this->problem_.nz),
+				// x_tile_size_, s, 										  s + s_step_length); #pragma omp barrier
 			}
 		}
 	}
@@ -919,14 +947,15 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve()
 				auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
 				solve_slice_xy_fused_transpose<index_t>(
-					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, get_substrates_layout<3>(),
+					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, az_, b1z_, cz_, get_substrates_layout<3>(),
 					get_diagonal_layout(this->problem_, this->problem_.nx),
-					get_diagonal_layout(this->problem_, this->problem_.ny), s, s + s_step_length);
-#pragma omp barrier
-				solve_slice_z_3d_intrinsics_dispatch<index_t>(
-					this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
-					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length, x_tile_size_);
-#pragma omp barrier
+					get_diagonal_layout(this->problem_, this->problem_.ny),
+					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length);
+				// #pragma omp barrier
+				// 				solve_slice_z_3d_intrinsics_dispatch<index_t>(
+				// 					this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
+				// 					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length,
+				// x_tile_size_); #pragma omp barrier
 			}
 		}
 	}

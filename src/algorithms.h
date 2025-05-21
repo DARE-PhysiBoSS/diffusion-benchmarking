@@ -21,7 +21,7 @@ class algorithms
 
 	bool verbose_;
 
-	static constexpr double relative_difference_print_threshold_ = 0.01;
+	static constexpr double relative_difference_print_threshold_ = 0.001;
 	static constexpr double absolute_difference_print_threshold_ = 1e-6;
 
 	std::pair<double, double> common_validate(diffusion_solver& alg, diffusion_solver& ref,
