@@ -753,7 +753,7 @@ static void solve_slice_xy_fused(real_t* __restrict__ densities, const real_t* _
 			const real_t ay_s = ay[s];
 			const real_t b1y_s = b1y[s];
 
-			real_t c_tmp_y = a_s;
+			real_t c_tmp_y = ay_s;
 
 			real_t r_y;
 
