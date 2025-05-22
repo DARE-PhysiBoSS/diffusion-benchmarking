@@ -4,6 +4,7 @@
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
 
+#include "blocked_thomas_solver.h"
 /*
 The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
 For dimension x:
@@ -49,6 +50,9 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	real_t *az_, *b1z_, *cz_;
 
 	real_t *a_scratch_, *c_scratch_;
+	
+	std::unique_ptr<aligned_atomic<long>[]> countersx_, countersy_, countersz_;
+	index_t countersx_count_, countersy_count_, countersz_count_;
 
 	bool use_intrinsics_;
 	bool use_blocked_;
