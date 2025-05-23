@@ -9,6 +9,7 @@
 #include "noarr/structures/base/structs_common.hpp"
 #include "noarr/structures/extra/shortcuts.hpp"
 #include "omp_helper.h"
+#include "problem.h"
 
 // a helper using for accessing static constexpr variables
 using alg = cubed_thomas_solver_t<double, true>;
@@ -60,7 +61,6 @@ void cubed_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& prob
 }
 
 int s_step = 1;
-bool do_sync = true;
 
 template <typename real_t, bool aligned_x>
 void cubed_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& params)
@@ -70,9 +70,6 @@ void cubed_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& params
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
 														: std::array<index_t, 3> { 2, 2, 2 };
 
-
-	if (params.contains("sync"))
-		do_sync = (bool)params["sync"];
 
 	if (params.contains("s_step"))
 		s_step = (int)params["s_step"];
@@ -116,10 +113,18 @@ void cubed_thomas_solver_t<real_t, aligned_x>::initialize()
 		countersz_[i].value.store(0, std::memory_order_relaxed);
 	}
 
-	auto scratch_layout = get_scratch_layout();
+	auto scratch_layoutx = get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz);
+	auto scratch_layouty = get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz);
+	auto scratch_layoutz = get_scratch_layout(this->problem_.nz, this->problem_.nx * this->problem_.ny);
 
-	a_scratch_ = (real_t*)std::malloc((scratch_layout | noarr::get_size()));
-	c_scratch_ = (real_t*)std::malloc((scratch_layout | noarr::get_size()));
+	a_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+	c_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+
+	a_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
+	c_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
+
+	a_scratchz_ = (real_t*)std::malloc((scratch_layoutz | noarr::get_size()));
+	c_scratchz_ = (real_t*)std::malloc((scratch_layoutz | noarr::get_size()));
 }
 
 template <typename real_t, bool aligned_x>
@@ -157,10 +162,10 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 	for (index_t s = s_begin; s < s_end; s++)
 	{
+		epoch++;
+
 		for (index_t z = z_begin; z < z_end; z++)
 		{
-			epoch++;
-
 			for (index_t y = y_begin; y < y_end; y++)
 			{
 				// Normalize the first and the second equation
@@ -229,37 +234,40 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 					c[state] = r * (0 - c[state] * c[next_state]);
 				}
 			}
+		}
 
-			// Second part of modified thomas algorithm
-			// We solve the system of equations that are composed of the first and last row of each block
-			// We do it using Thomas Algorithm
+		// Second part of modified thomas algorithm
+		// We solve the system of equations that are composed of the first and last row of each block
+		// We do it using Thomas Algorithm
+		{
+			const index_t blocks_count = (n + block_size - 1) / block_size;
+			const index_t epoch_size = blocks_count + 1;
+			// std::cout << blocks_count << std::endl;
+
+			// increment the counter
+			auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			if (current_value == epoch * epoch_size - 1)
 			{
-				const index_t blocks_count = (n + block_size - 1) / block_size;
-				const index_t epoch_size = blocks_count + 1;
-				// std::cout << blocks_count << std::endl;
+				auto get_i = [block_size, n](index_t equation_idx) {
+					const index_t block_idx = equation_idx / 2;
+					const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
+					return std::min(i, n - 1);
+				};
 
-				// increment the counter
-				auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
-
-				if (current_value == epoch * epoch_size - 1)
+				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 				{
-					auto get_i = [block_size, n](index_t equation_idx) {
-						const index_t block_idx = equation_idx / 2;
-						const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
-						return std::min(i, n - 1);
-					};
+					const index_t i = get_i(equation_idx);
+					const index_t prev_i = get_i(equation_idx - 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
-					for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					for (index_t z = z_begin; z < z_end; z++)
 					{
-						const index_t i = get_i(equation_idx);
-						const index_t prev_i = get_i(equation_idx - 1);
-						const auto state = noarr::idx<'s', 'i'>(s, i);
-						const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
-
-						const auto r = 1 / (1 - a[state] * c[prev_state]);
-
-						c[state] *= r;
-
 						for (index_t y = y_begin; y < y_end; y++)
 						{
 							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
@@ -268,13 +276,16 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 								   - a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, prev_i));
 						}
 					}
+				}
 
-					for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t next_i = get_i(equation_idx + 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t z = z_begin; z < z_end; z++)
 					{
-						const index_t i = get_i(equation_idx);
-						const index_t next_i = get_i(equation_idx + 1);
-						const auto state = noarr::idx<'s', 'i'>(s, i);
-
 						for (index_t y = y_begin; y < y_end; y++)
 						{
 							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
@@ -282,22 +293,25 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 								- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, next_i);
 						}
 					}
-
-					// notify all threads that the last thread has finished
-					counter.fetch_add(1, std::memory_order_acq_rel);
-					// counter.notify_all();
 				}
-				else
+
+				// notify all threads that the last thread has finished
+				counter.fetch_add(1, std::memory_order_acq_rel);
+				// counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < epoch * epoch_size)
 				{
-					// wait for the last thread to finish
-					while (current_value < epoch * epoch_size)
-					{
-						// counter.wait(current_value, std::memory_order_acquire);
-						current_value = counter.load(std::memory_order_acquire);
-					}
+					// counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
 				}
 			}
+		}
 
+		for (index_t z = z_begin; z < z_end; z++)
+		{
 			for (index_t y = y_begin; y < y_end; y++)
 			{
 				// Final part of modified thomas algorithm
@@ -438,10 +452,10 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 	for (index_t s = s_begin; s < s_end; s++)
 	{
+		epoch++;
+
 		for (index_t z = z_begin; z < z_end; z++)
 		{
-			epoch++;
-
 			// Normalize the first and the second equation
 			index_t i;
 			for (i = y_begin; i < y_begin + 2; i++)
@@ -519,37 +533,40 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 				a[state] = r * a[state];
 				c[state] = r * (0 - c[state] * c[next_state]);
 			}
+		}
 
-			// Second part of modified thomas algorithm
-			// We solve the system of equations that are composed of the first and last row of each block
-			// We do it using Thomas Algorithm
+		// Second part of modified thomas algorithm
+		// We solve the system of equations that are composed of the first and last row of each block
+		// We do it using Thomas Algorithm
+		{
+			const index_t blocks_count = (n + block_size - 1) / block_size;
+			const index_t epoch_size = blocks_count + 1;
+			// std::cout << blocks_count << std::endl;
+
+			// increment the counter
+			auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			if (current_value == epoch * epoch_size - 1)
 			{
-				const index_t blocks_count = (n + block_size - 1) / block_size;
-				const index_t epoch_size = blocks_count + 1;
-				// std::cout << blocks_count << std::endl;
+				auto get_i = [block_size, n](index_t equation_idx) {
+					const index_t block_idx = equation_idx / 2;
+					const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
+					return std::min(i, n - 1);
+				};
 
-				// increment the counter
-				auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
-
-				if (current_value == epoch * epoch_size - 1)
+				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 				{
-					auto get_i = [block_size, n](index_t equation_idx) {
-						const index_t block_idx = equation_idx / 2;
-						const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
-						return std::min(i, n - 1);
-					};
+					const index_t i = get_i(equation_idx);
+					const index_t prev_i = get_i(equation_idx - 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
-					for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					for (index_t z = z_begin; z < z_end; z++)
 					{
-						const index_t i = get_i(equation_idx);
-						const index_t prev_i = get_i(equation_idx - 1);
-						const auto state = noarr::idx<'s', 'i'>(s, i);
-						const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
-
-						const auto r = 1 / (1 - a[state] * c[prev_state]);
-
-						c[state] *= r;
-
 						for (index_t x = x_begin; x < x_end; x++)
 						{
 							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
@@ -558,13 +575,16 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 								   - a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, prev_i));
 						}
 					}
+				}
 
-					for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t next_i = get_i(equation_idx + 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t z = z_begin; z < z_end; z++)
 					{
-						const index_t i = get_i(equation_idx);
-						const index_t next_i = get_i(equation_idx + 1);
-						const auto state = noarr::idx<'s', 'i'>(s, i);
-
 						for (index_t x = x_begin; x < x_end; x++)
 						{
 							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
@@ -572,22 +592,25 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 								- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, next_i);
 						}
 					}
-
-					// notify all threads that the last thread has finished
-					counter.fetch_add(1, std::memory_order_acq_rel);
-					// counter.notify_all();
 				}
-				else
+
+				// notify all threads that the last thread has finished
+				counter.fetch_add(1, std::memory_order_acq_rel);
+				// counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < epoch * epoch_size)
 				{
-					// wait for the last thread to finish
-					while (current_value < epoch * epoch_size)
-					{
-						// counter.wait(current_value, std::memory_order_acquire);
-						current_value = counter.load(std::memory_order_acquire);
-					}
+					// counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
 				}
 			}
+		}
 
+		for (index_t z = z_begin; z < z_end; z++)
+		{
 			// Final part of modified thomas algorithm
 			// Solve the rest of the unknowns
 			{
@@ -727,12 +750,12 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 	for (index_t s = s_begin; s < s_end; s++)
 	{
+		epoch++;
+
 		for (index_t y = y_begin; y < y_end; y++)
 		{
 			for (index_t X = 0; X < X_len; X++)
 			{
-				epoch++;
-
 				const index_t remainder = (x_end - x_begin) % x_tile_size;
 				const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
 				const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
@@ -814,36 +837,46 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 					a[state] = r * a[state];
 					c[state] = r * (0 - c[state] * c[next_state]);
 				}
+			}
+		}
 
-				// Second part of modified thomas algorithm
-				// We solve the system of equations that are composed of the first and last row of each block
-				// We do it using Thomas Algorithm
+		// Second part of modified thomas algorithm
+		// We solve the system of equations that are composed of the first and last row of each block
+		// We do it using Thomas Algorithm
+		{
+			const index_t blocks_count = (n + block_size - 1) / block_size;
+			const index_t epoch_size = blocks_count + 1;
+			// std::cout << blocks_count << std::endl;
+
+			// increment the counter
+			auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			if (current_value == epoch * epoch_size - 1)
+			{
+				auto get_i = [block_size, n](index_t equation_idx) {
+					const index_t block_idx = equation_idx / 2;
+					const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
+					return std::min(i, n - 1);
+				};
+
+				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
 				{
-					const index_t blocks_count = (n + block_size - 1) / block_size;
-					const index_t epoch_size = blocks_count + 1;
-					// std::cout << blocks_count << std::endl;
+					const index_t i = get_i(equation_idx);
+					const index_t prev_i = get_i(equation_idx - 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
-					// increment the counter
-					auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
 
-					if (current_value == epoch * epoch_size - 1)
+					c[state] *= r;
+
+					for (index_t y = y_begin; y < y_end; y++)
 					{
-						auto get_i = [block_size, n](index_t equation_idx) {
-							const index_t block_idx = equation_idx / 2;
-							const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
-							return std::min(i, n - 1);
-						};
-
-						for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+						for (index_t X = 0; X < X_len; X++)
 						{
-							const index_t i = get_i(equation_idx);
-							const index_t prev_i = get_i(equation_idx - 1);
-							const auto state = noarr::idx<'s', 'i'>(s, i);
-							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
-
-							const auto r = 1 / (1 - a[state] * c[prev_state]);
-
-							c[state] *= r;
+							const index_t remainder = (x_end - x_begin) % x_tile_size;
+							const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+							const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
 
 							for (index_t x = x_begin; x < x_begin + x_len; x++)
 							{
@@ -854,12 +887,22 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 											 * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, prev_i));
 							}
 						}
+					}
+				}
 
-						for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t next_i = get_i(equation_idx + 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t y = y_begin; y < y_end; y++)
+					{
+						for (index_t X = 0; X < X_len; X++)
 						{
-							const index_t i = get_i(equation_idx);
-							const index_t next_i = get_i(equation_idx + 1);
-							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const index_t remainder = (x_end - x_begin) % x_tile_size;
+							const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+							const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
 
 							for (index_t x = x_begin; x < x_begin + x_len; x++)
 							{
@@ -868,21 +911,31 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 									- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, next_i);
 							}
 						}
-
-						// notify all threads that the last thread has finished
-						counter.fetch_add(1, std::memory_order_acq_rel);
-						// counter.notify_all();
-					}
-					else
-					{
-						// wait for the last thread to finish
-						while (current_value < epoch * epoch_size)
-						{
-							// counter.wait(current_value, std::memory_order_acquire);
-							current_value = counter.load(std::memory_order_acquire);
-						}
 					}
 				}
+
+				// notify all threads that the last thread has finished
+				counter.fetch_add(1, std::memory_order_acq_rel);
+				// counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < epoch * epoch_size)
+				{
+					// counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
+				}
+			}
+		}
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t X = 0; X < X_len; X++)
+			{
+				const index_t remainder = (x_end - x_begin) % x_tile_size;
+				const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+				const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
 
 				// Final part of modified thomas algorithm
 				// Solve the rest of the unknowns
@@ -1008,11 +1061,13 @@ template <typename index_t, typename real_t, typename density_layout_t, typename
 static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout_t dens_l,
 							const real_t* __restrict__ acx, const real_t* __restrict__ b1x,
 							const real_t* __restrict__ acy, const real_t* __restrict__ b1y,
-							const real_t* __restrict__ acz, const real_t* __restrict__ b1z, real_t* __restrict__ a_data,
-							real_t* __restrict__ c_data, aligned_atomic<long>* __restrict__ countersx,
-							aligned_atomic<long>* __restrict__ countersy, aligned_atomic<long>* __restrict__ countersz,
-							const scratch_layout_t scratch_l, std::array<index_t, 3> cores_division,
-							std::size_t x_tile_size)
+							const real_t* __restrict__ acz, const real_t* __restrict__ b1z,
+							real_t* __restrict__ ax_data, real_t* __restrict__ cx_data, real_t* __restrict__ ay_data,
+							real_t* __restrict__ cy_data, real_t* __restrict__ az_data, real_t* __restrict__ cz_data,
+							aligned_atomic<long>* __restrict__ countersx, aligned_atomic<long>* __restrict__ countersy,
+							aligned_atomic<long>* __restrict__ countersz, const scratch_layout_t scratchx_l,
+							const scratch_layout_t scratchy_l, const scratch_layout_t scratchz_l,
+							std::array<index_t, 3> cores_division, std::size_t x_tile_size, index_t iterations)
 {
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
@@ -1046,47 +1101,42 @@ static void solve_2d_and_3d(real_t* __restrict__ densities, const density_layout
 
 		for (index_t s = 0; s < s_len; s += s_step)
 		{
-			// do x
+			for (index_t i = 0; i < iterations; i++)
 			{
-				const auto lane_id = tid_y * cores_division[2] + tid_z;
-				const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
-
-				solve_block_x_start<index_t>(densities, acx, b1x, a_data, c_data, epoch_x, countersx[lane_id].value,
-											 block_size_x, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
-											 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
-			}
-
-			if (do_sync)
-			{
-#pragma omp barrier
-			}
-
-			// do Y
-			{
-				const auto lane_id = tid_x * cores_division[2] + tid_z;
-				const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
-
-				solve_block_y_start<index_t>(densities, acy, b1y, a_data, c_data, epoch_y, countersy[lane_id].value,
-											 block_size_y, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
-											 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
-			}
-
-			if (z_len > 1)
-			{
-				if (do_sync)
+				// do x
 				{
-#pragma omp barrier
+					const auto lane_id = tid_y * cores_division[2] + tid_z;
+					const auto lane_scratch_l = scratchx_l ^ noarr::fix<'l'>(lane_id);
+
+					solve_block_x_start<index_t>(densities, acx, b1x, ax_data, cx_data, epoch_x,
+												 countersx[lane_id].value, block_size_x, dens_l, lane_scratch_l, s,
+												 s + s_step, block_x_begin, block_x_end, block_y_begin, block_y_end,
+												 block_z_begin, block_z_end);
 				}
 
-				// do Z
+				// do Y
 				{
-					const auto lane_id = tid_x * cores_division[1] + tid_y;
-					const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
+					const auto lane_id = tid_x * cores_division[2] + tid_z;
+					const auto lane_scratch_l = scratchy_l ^ noarr::fix<'l'>(lane_id);
 
-					solve_block_z_start<index_t>(densities, acz, b1z, a_data, c_data, epoch_z, countersz[lane_id].value,
-												 block_size_z, dens_l, lane_scratch_l, s, s + s_step, block_x_begin,
-												 block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end,
-												 x_tile_size);
+					solve_block_y_start<index_t>(densities, acy, b1y, ay_data, cy_data, epoch_y,
+												 countersy[lane_id].value, block_size_y, dens_l, lane_scratch_l, s,
+												 s + s_step, block_x_begin, block_x_end, block_y_begin, block_y_end,
+												 block_z_begin, block_z_end);
+				}
+
+				if (z_len > 1)
+				{
+					// do Z
+					{
+						const auto lane_id = tid_x * cores_division[1] + tid_y;
+						const auto lane_scratch_l = scratchz_l ^ noarr::fix<'l'>(lane_id);
+
+						solve_block_z_start<index_t>(densities, acz, b1z, az_data, cz_data, epoch_z,
+													 countersz[lane_id].value, block_size_z, dens_l, lane_scratch_l, s,
+													 s + s_step, block_x_begin, block_x_end, block_y_begin, block_y_end,
+													 block_z_begin, block_z_end, x_tile_size);
+					}
 				}
 			}
 		}
@@ -1247,23 +1297,26 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve_x()
 	}
 	else
 	{
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, get_substrates_layout<3>(), ax_, b1x_, a_scratch_,
-										 c_scratch_, countersx_.get(), get_scratch_layout(), cores_division_);
+		solve_slice_x_2d_and_3d<index_t>(
+			this->substrates_, get_substrates_layout<3>(), ax_, b1x_, a_scratchx_, c_scratchx_, countersx_.get(),
+			get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz), cores_division_);
 	}
 }
 
 template <typename real_t, bool aligned_x>
 void cubed_thomas_solver_t<real_t, aligned_x>::solve_y()
 {
-	solve_slice_y_2d_and_3d<index_t>(this->substrates_, get_substrates_layout<3>(), ay_, b1y_, a_scratch_, c_scratch_,
-									 countersx_.get(), get_scratch_layout(), cores_division_);
+	solve_slice_y_2d_and_3d<index_t>(
+		this->substrates_, get_substrates_layout<3>(), ay_, b1y_, a_scratchy_, c_scratchy_, countersx_.get(),
+		get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz), cores_division_);
 }
 
 template <typename real_t, bool aligned_x>
 void cubed_thomas_solver_t<real_t, aligned_x>::solve_z()
 {
-	solve_slice_z_2d_and_3d<index_t>(this->substrates_, get_substrates_layout<3>(), az_, b1z_, a_scratch_, c_scratch_,
-									 countersx_.get(), get_scratch_layout(), cores_division_, x_tile_size_);
+	solve_slice_z_2d_and_3d<index_t>(
+		this->substrates_, get_substrates_layout<3>(), az_, b1z_, a_scratchz_, c_scratchz_, countersx_.get(),
+		get_scratch_layout(this->problem_.nz, this->problem_.ny * this->problem_.nx), cores_division_, x_tile_size_);
 }
 
 template <typename real_t, bool aligned_x>
@@ -1275,10 +1328,13 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 	}
 	else
 	{
-		for (index_t i = 0; i < this->problem_.iterations; i++)
-			solve_2d_and_3d(this->substrates_, get_substrates_layout<3>(), ax_, b1x_, ay_, b1y_, az_, b1z_, a_scratch_,
-							c_scratch_, countersx_.get(), countersy_.get(), countersz_.get(), get_scratch_layout(),
-							cores_division_, x_tile_size_);
+		solve_2d_and_3d(this->substrates_, get_substrates_layout<3>(), ax_, b1x_, ay_, b1y_, az_, b1z_, a_scratchx_,
+						c_scratchx_, a_scratchy_, c_scratchy_, a_scratchz_, c_scratchz_, countersx_.get(),
+						countersy_.get(), countersz_.get(),
+						get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz),
+						get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz),
+						get_scratch_layout(this->problem_.nz, this->problem_.ny * this->problem_.nx), cores_division_,
+						x_tile_size_, this->problem_.iterations);
 	}
 }
 
@@ -1290,8 +1346,12 @@ cubed_thomas_solver_t<real_t, aligned_x>::cubed_thomas_solver_t()
 	  b1y_(nullptr),
 	  az_(nullptr),
 	  b1z_(nullptr),
-	  a_scratch_(nullptr),
-	  c_scratch_(nullptr)
+	  a_scratchx_(nullptr),
+	  c_scratchx_(nullptr),
+	  a_scratchy_(nullptr),
+	  c_scratchy_(nullptr),
+	  a_scratchz_(nullptr),
+	  c_scratchz_(nullptr)
 {}
 
 template <typename real_t, bool aligned_x>
@@ -1313,10 +1373,14 @@ cubed_thomas_solver_t<real_t, aligned_x>::~cubed_thomas_solver_t()
 		std::free(b1z_);
 	}
 
-	if (a_scratch_)
+	if (a_scratchx_)
 	{
-		std::free(a_scratch_);
-		std::free(c_scratch_);
+		std::free(a_scratchx_);
+		std::free(c_scratchx_);
+		std::free(a_scratchy_);
+		std::free(c_scratchy_);
+		std::free(a_scratchz_);
+		std::free(c_scratchz_);
 	}
 }
 

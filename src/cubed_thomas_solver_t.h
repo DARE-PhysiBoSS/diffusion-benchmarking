@@ -32,7 +32,9 @@ protected:
 
 	index_t max_threadsx_, max_threadsy_, max_threadsz_;
 
-	real_t *a_scratch_, *c_scratch_;
+	real_t *a_scratchx_, *c_scratchx_;
+	real_t *a_scratchy_, *c_scratchy_;
+	real_t *a_scratchz_, *c_scratchz_;
 
 	std::size_t alignment_size_;
 	std::size_t x_tile_size_;
@@ -62,12 +64,9 @@ public:
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
 
-	auto get_scratch_layout() const
+	auto get_scratch_layout(const index_t n, const index_t groups) const
 	{
-		auto max_n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
-
-		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'i', 'l', 's'>(max_n, max_cores_groups_, this->problem_.substrates_count);
+		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 'l', 's'>(n, groups, this->problem_.substrates_count);
 	}
 
 	std::function<void> get_synchronization_function();
