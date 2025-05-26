@@ -48,11 +48,14 @@ protected:
 	std::vector<index_t> group_block_offsetsy_;
 	std::vector<index_t> group_block_offsetsz_;
 
+	index_t aligned_block_size_;
+
 	using sync_func_t = std::function<void>;
 
 	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t counters_count,
 						   std::unique_ptr<aligned_atomic<long>[]>& counters, index_t group_size, index_t& block_size,
-						   std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets);
+						   std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets,
+						   bool aligned);
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
@@ -65,7 +68,10 @@ public:
 	auto get_substrates_layout() const
 	{
 		if constexpr (aligned_x)
-			return substrate_layouts::get_xyzs_aligned_layout<dims>(this->problem_, alignment_size_);
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'x', 'y', 'z', 's'>(aligned_block_size_ * (this->problem_.ny / cores_division_[0]),
+														this->problem_.ny, this->problem_.nz,
+														this->problem_.substrates_count);
 		else
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
@@ -88,6 +94,8 @@ public:
 	void solve_z() override;
 
 	void solve() override;
+
+	virtual double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 
 	~cubed_thomas_solver_t();
 };

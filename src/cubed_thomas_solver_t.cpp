@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "noarr/structures/base/structs_common.hpp"
+#include "noarr/structures/extra/funcs.hpp"
 #include "noarr/structures/extra/shortcuts.hpp"
 #include "omp_helper.h"
 #include "problem.h"
@@ -16,12 +17,10 @@
 using alg = cubed_thomas_solver_t<double, true>;
 
 template <typename real_t, bool aligned_x>
-void cubed_thomas_solver_t<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims,
-																 index_t n, index_t counters_count,
-																 std::unique_ptr<aligned_atomic<long>[]>& counters,
-																 index_t group_size, index_t& block_size,
-																 std::vector<index_t>& group_block_lengths,
-																 std::vector<index_t>& group_block_offsets)
+void cubed_thomas_solver_t<real_t, aligned_x>::precompute_values(
+	real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t counters_count,
+	std::unique_ptr<aligned_atomic<long>[]>& counters, index_t group_size, index_t& block_size,
+	std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets, bool aligned)
 {
 	// allocate memory for a and b1
 	a = (real_t*)std::malloc(this->problem_.substrates_count * sizeof(real_t));
@@ -54,12 +53,23 @@ void cubed_thomas_solver_t<real_t, aligned_x>::precompute_values(real_t*& a, rea
 	}
 
 	group_block_offsets.resize(group_size);
-	for (index_t i = 0; i < group_size; i++)
+
+	if (aligned)
 	{
-		if (i == 0)
-			group_block_offsets[i] = 0;
-		else
-			group_block_offsets[i] = group_block_offsets[i - 1] + group_block_lengths[i - 1];
+		for (index_t i = 0; i < group_size; i++)
+		{
+			group_block_offsets[i] = i * aligned_block_size_;
+		}
+	}
+	else
+	{
+		for (index_t i = 0; i < group_size; i++)
+		{
+			if (i == 0)
+				group_block_offsets[i] = 0;
+			else
+				group_block_offsets[i] = group_block_offsets[i - 1] + group_block_lengths[i - 1];
+		}
 	}
 }
 
@@ -67,6 +77,17 @@ template <typename real_t, bool aligned_x>
 void cubed_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& problem)
 {
 	this->problem_ = problems::cast<std::int32_t, real_t>(problem);
+
+	{
+		aligned_block_size_ = this->problem_.nx / cores_division_[0];
+
+		if (this->problem_.nx % cores_division_[0] != 0)
+			aligned_block_size_++;
+
+		const auto block_size_bytes = aligned_block_size_ * sizeof(real_t);
+		std::size_t block_size_padded = (block_size_bytes + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		aligned_block_size_ = block_size_padded / sizeof(real_t);
+	}
 
 	auto substrates_layout = get_substrates_layout<3>();
 
@@ -107,28 +128,44 @@ void cubed_thomas_solver_t<real_t, aligned_x>::initialize()
 	if (this->problem_.dims >= 1)
 		precompute_values(ax_, b1x_, this->problem_.dx, this->problem_.dims, this->problem_.nx, countersx_count_,
 						  countersx_, cores_division_[0], group_blocks_[0], group_block_lengthsx_,
-						  group_block_offsetsx_);
+						  group_block_offsetsx_, aligned_x);
 	if (this->problem_.dims >= 2)
 		precompute_values(ay_, b1y_, this->problem_.dy, this->problem_.dims, this->problem_.ny, countersy_count_,
 						  countersy_, cores_division_[1], group_blocks_[1], group_block_lengthsy_,
-						  group_block_offsetsy_);
+						  group_block_offsetsy_, false);
 	if (this->problem_.dims >= 3)
 		precompute_values(az_, b1z_, this->problem_.dz, this->problem_.dims, this->problem_.nz, countersz_count_,
 						  countersz_, cores_division_[2], group_blocks_[2], group_block_lengthsz_,
-						  group_block_offsetsz_);
+						  group_block_offsetsz_, false);
 
-	auto scratch_layoutx = get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz);
+	auto dens_l = get_substrates_layout<3>();
+
+	auto scratch_layoutx = get_scratch_layout(dens_l | noarr::get_length<'x'>(), this->problem_.ny * this->problem_.nz);
 	auto scratch_layouty = get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz);
 	auto scratch_layoutz = get_scratch_layout(this->problem_.nz, this->problem_.nx * this->problem_.ny);
 
-	a_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
-	c_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+	if (aligned_x)
+	{
+		a_scratchx_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layoutx | noarr::get_size()));
+		c_scratchx_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layoutx | noarr::get_size()));
 
-	a_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
-	c_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
+		a_scratchy_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layouty | noarr::get_size()));
+		c_scratchy_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layouty | noarr::get_size()));
 
-	a_scratchz_ = (real_t*)std::malloc((scratch_layoutz | noarr::get_size()));
-	c_scratchz_ = (real_t*)std::malloc((scratch_layoutz | noarr::get_size()));
+		a_scratchz_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layoutz | noarr::get_size()));
+		c_scratchz_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layoutz | noarr::get_size()));
+	}
+	else
+	{
+		a_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+		c_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+
+		a_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
+		c_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
+
+		a_scratchz_ = (real_t*)std::malloc((scratch_layoutz | noarr::get_size()));
+		c_scratchz_ = (real_t*)std::malloc((scratch_layoutz | noarr::get_size()));
+	}
 }
 
 template <typename real_t, bool aligned_x>
@@ -149,7 +186,7 @@ auto cubed_thomas_solver_t<real_t, aligned_x>::get_diagonal_layout(const problem
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+template <bool aligned, typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_x_start_2(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 								  const real_t* __restrict__ b1, real_t* __restrict__ a_data,
 								  real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
@@ -433,16 +470,16 @@ static void solve_block_x_start_2(real_t* __restrict__ densities, const real_t* 
 	delete[] rows;
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+template <bool aligned, typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 								const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-								index_t& epoch, std::atomic<long>& counter, const index_t block_size,
+								index_t& epoch, std::atomic<long>& counter, const index_t coop_size,
+								const index_t block_size, const index_t aligned_block_size, const index_t n,
 								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t s_begin,
 								const index_t s_end, const index_t x_begin, const index_t x_end, const index_t y_begin,
 								const index_t y_end, const index_t z_begin, const index_t z_end)
 {
 	constexpr char dim = 'x';
-	const index_t n = dens_l | noarr::get_length<dim>();
 
 	auto a = noarr::make_bag(scratch_l, a_data);
 	auto c = noarr::make_bag(scratch_l, c_data);
@@ -557,8 +594,7 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 		// We solve the system of equations that are composed of the first and last row of each block
 		// We do it using Thomas Algorithm
 		{
-			const index_t blocks_count = n / block_size;
-			const index_t epoch_size = blocks_count + 1;
+			const index_t epoch_size = coop_size + 1;
 			// std::cout << blocks_count << std::endl;
 
 			// increment the counter
@@ -566,25 +602,36 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 			if (current_value == epoch * epoch_size - 1)
 			{
-				auto get_i = [block_size, n](index_t equation_idx) {
+				auto get_i = [=](index_t equation_idx) {
 					const index_t block_idx = equation_idx / 2;
-					const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+
+					index_t block_start;
+					if constexpr (aligned)
+					{
+						block_start = block_idx * aligned_block_size;
+					}
+					else
+					{
+						block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+					}
+
 					const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
 					const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
 					return i;
 				};
 
-				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+				for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
 				{
 					const index_t i = get_i(equation_idx);
 					const index_t prev_i = get_i(equation_idx - 1);
 					const auto state = noarr::idx<'s', 'i'>(s, i);
 					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
-#pragma omp critical
-					{
-						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i << std::endl;
-					}
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i <<
+					// std::endl;
+					// 					}
 
 					const auto r = 1 / (1 - a[state] * c[prev_state]);
 
@@ -602,7 +649,7 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 					}
 				}
 
-				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
 				{
 					const index_t i = get_i(equation_idx);
 					const index_t next_i = get_i(equation_idx + 1);
@@ -1537,11 +1584,43 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve_x()
 	{
 		return;
 	}
-	else
+
+	auto dens_l = get_substrates_layout<3>();
+	auto scratch_l = get_scratch_layout(dens_l | noarr::get_length<'x'>(), this->problem_.ny * this->problem_.nz);
+
+	const index_t s_len = dens_l | noarr::get_length<'s'>();
+
+#pragma omp parallel num_threads(cores_division_[0] * cores_division_[1] * cores_division_[2])
 	{
-		solve_slice_x_2d_and_3d<index_t>(
-			this->substrates_, get_substrates_layout<3>(), ax_, b1x_, a_scratchx_, c_scratchx_, countersx_.get(),
-			get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz), cores_division_);
+		const auto tid = get_thread_num();
+
+		const auto tid_x = tid % cores_division_[0];
+		const auto tid_y = (tid / cores_division_[0]) % cores_division_[1];
+		const auto tid_z = tid / (cores_division_[0] * cores_division_[1]);
+
+		const auto block_x_begin = group_block_offsetsx_[tid_x];
+		const auto block_x_end = block_x_begin + group_block_lengthsx_[tid_x];
+
+		const auto block_y_begin = group_block_offsetsy_[tid_y];
+		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid_y];
+
+		const auto block_z_begin = group_block_offsetsz_[tid_z];
+		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid_z];
+
+		index_t epoch = 0;
+
+		// do x
+		for (index_t s = 0; s < s_len; s += s_step)
+		{
+			const auto lane_id = tid_y * cores_division_[2] + tid_z;
+			const auto lane_scratch_l = scratch_l ^ noarr::fix<'l'>(lane_id);
+
+			solve_block_x_start<aligned_x, index_t>(
+				this->substrates_, ax_, b1x_, a_scratchx_, c_scratchx_, epoch, countersx_[lane_id].value,
+				cores_division_[0], group_blocks_[0], aligned_block_size_,
+				group_block_offsetsx_.back() + group_block_lengthsx_.back(), dens_l, lane_scratch_l, s, s + s_step,
+				block_x_begin, block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
+		}
 	}
 }
 
@@ -1579,7 +1658,7 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 
 	auto dens_l = get_substrates_layout<3>();
 
-	auto scratchx_l = get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz);
+	auto scratchx_l = get_scratch_layout(dens_l | noarr::get_length<'x'>(), this->problem_.ny * this->problem_.nz);
 	auto scratchy_l = get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz);
 	auto scratchz_l = get_scratch_layout(this->problem_.nz, this->problem_.ny * this->problem_.nx);
 
@@ -1603,13 +1682,13 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 		const auto block_z_begin = group_block_offsetsz_[tid_z];
 		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid_z];
 
-#pragma omp critical
-		{
-			std::cout << "Thread " << tid << " is working on blocks: "
-					  << "[" << block_x_begin << ", " << block_x_end << ") x "
-					  << "[" << block_y_begin << ", " << block_y_end << ") x "
-					  << "[" << block_z_begin << ", " << block_z_end << ")" << std::endl;
-		}
+		// #pragma omp critical
+		// 		{
+		// 			std::cout << "Thread " << tid << " is working on blocks: "
+		// 					  << "[" << block_x_begin << ", " << block_x_end << ") x "
+		// 					  << "[" << block_y_begin << ", " << block_y_end << ") x "
+		// 					  << "[" << block_z_begin << ", " << block_z_end << ")" << std::endl;
+		// 		}
 
 		index_t epoch_x = 0;
 		index_t epoch_y = 0;
@@ -1624,10 +1703,11 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 					const auto lane_id = tid_y * cores_division_[2] + tid_z;
 					const auto lane_scratch_l = scratchx_l ^ noarr::fix<'l'>(lane_id);
 
-					solve_block_x_start<index_t>(this->substrates_, ax_, b1x_, a_scratchx_, c_scratchx_, epoch_x,
-												 countersx_[lane_id].value, group_blocks_[0], dens_l, lane_scratch_l, s,
-												 s + s_step, block_x_begin, block_x_end, block_y_begin, block_y_end,
-												 block_z_begin, block_z_end);
+					solve_block_x_start<aligned_x, index_t>(
+						this->substrates_, ax_, b1x_, a_scratchx_, c_scratchx_, epoch_x, countersx_[lane_id].value,
+						cores_division_[0], group_blocks_[0], aligned_block_size_,
+						group_block_offsetsx_.back() + group_block_lengthsx_.back(), dens_l, lane_scratch_l, s,
+						s + s_step, block_x_begin, block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
 				}
 
 				// do Y
@@ -1674,6 +1754,34 @@ cubed_thomas_solver_t<real_t, aligned_x>::cubed_thomas_solver_t()
 	  a_scratchz_(nullptr),
 	  c_scratchz_(nullptr)
 {}
+
+template <typename real_t, bool aligned_x>
+double cubed_thomas_solver_t<real_t, aligned_x>::access(std::size_t s, std::size_t x, std::size_t y,
+														std::size_t z) const
+{
+	if (!aligned_x)
+		return base_solver<real_t, cubed_thomas_solver_t<real_t, aligned_x>>::access(s, x, y, z);
+
+	index_t block_idx = x / group_blocks_[0];
+	index_t element_idx = x % group_blocks_[0];
+
+	element_idx -= std::min(block_idx, this->problem_.nx % group_blocks_[0]);
+
+	if (element_idx < 0)
+	{
+		block_idx--;
+		element_idx += group_blocks_[0] + (block_idx < this->problem_.nx % group_blocks_[0]);
+	}
+
+	auto dens_l = get_substrates_layout<3>();
+
+	// std::cout << "Accessing: s=" << s << ", block_idx=" << block_idx << ", element_idx=" << element_idx << ", y=" <<
+	// y
+	// 		  << ", z=" << z << ", x=" << x << ", x2=" << block_idx * aligned_block_size_ + element_idx << std::endl;
+
+	return noarr::make_bag(dens_l, this->substrates_)
+		.template at<'s', 'x', 'y', 'z'>(s, block_idx * aligned_block_size_ + element_idx, y, z);
+}
 
 template <typename real_t, bool aligned_x>
 cubed_thomas_solver_t<real_t, aligned_x>::~cubed_thomas_solver_t()
