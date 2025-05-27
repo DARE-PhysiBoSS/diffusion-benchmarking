@@ -37,6 +37,8 @@ protected:
 	std::size_t alignment_size_;
 	std::size_t x_tile_size_;
 
+	bool vectorized_x_;
+
 	std::array<index_t, 3> cores_division_;
 
 	std::array<index_t, 3> group_blocks_;
@@ -62,7 +64,7 @@ protected:
 public:
 	static constexpr index_t min_block_size = 2;
 
-	cubed_thomas_solver_t();
+	cubed_thomas_solver_t(bool vectorized_x);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
@@ -96,6 +98,9 @@ public:
 	void solve() override;
 
 	virtual double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
+
+	real_t& at(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const;
+
 
 	~cubed_thomas_solver_t();
 };
