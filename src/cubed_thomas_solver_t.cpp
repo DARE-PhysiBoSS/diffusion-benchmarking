@@ -260,12 +260,14 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 
 								prev = rows[v];
 
-// #pragma omp critical
-// 								{
-// 									for (index_t l = 0; l < simd_length; l++)
-// 										std::cout << "f0 " << s << " " << z << " " << y + l << " " << i << " " << b_tmp
-// 												  << " " << hn::ExtractLane(rows[v], l) << std::endl;
-// 								}
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "f0 " << s << " " << z << " " << y
+								// + l << " " << i << " " << b_tmp
+								// 												  << " " << hn::ExtractLane(rows[v], l)
+								// << std::endl;
+								// 								}
 							}
 							else if (i < x_end)
 							{
@@ -286,12 +288,14 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 
 								prev = rows[v];
 
-// #pragma omp critical
-// 								{
-// 									for (index_t l = 0; l < simd_length; l++)
-// 										std::cout << "f1 " << s << " " << z << " " << y + l << " " << i << " " << a_tmp
-// 												  << " " << r << " " << hn::ExtractLane(rows[v], l) << std::endl;
-// 								}
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "f1 " << s << " " << z << " " << y
+								// + l << " " << i << " " << a_tmp
+								// 												  << " " << r << " " <<
+								// hn::ExtractLane(rows[v], l) << std::endl;
+								// 								}
 							}
 						}
 
@@ -323,12 +327,14 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 
 								prev = rows[v];
 
-// #pragma omp critical
-// 								{
-// 									for (index_t l = 0; l < simd_length; l++)
-// 										std::cout << "b0 " << s << " " << z << " " << y + l << " " << i << " "
-// 												  << c[state] << " " << hn::ExtractLane(rows[v], l) << std::endl;
-// 								}
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "b0 " << s << " " << z << " " << y
+								// + l << " " << i << " "
+								// 												  << c[state] << " " <<
+								// hn::ExtractLane(rows[v], l) << std::endl;
+								// 								}
 
 								a[state] = a[state] - c[state] * a[next_state];
 								c[state] = 0 - c[state] * c[next_state];
@@ -343,13 +349,15 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 								rows[v] = hn::MulAdd(hn::Set(t, -c[state]), prev, rows[v]);
 								rows[v] = hn::Mul(rows[v], hn::Set(t, r));
 
-// #pragma omp critical
-// 								{
-// 									for (index_t l = 0; l < simd_length; l++)
-// 										std::cout << "b1 " << s << " " << z << " " << y + l << " " << i << " "
-// 												  << c[state] << " " << r << " " << hn::ExtractLane(rows[v], l)
-// 												  << std::endl;
-// 								}
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "b1 " << s << " " << z << " " << y
+								// + l << " " << i << " "
+								// 												  << c[state] << " " << r << " " <<
+								// hn::ExtractLane(rows[v], l)
+								// 												  << std::endl;
+								// 								}
 
 								a[state] = r * a[state];
 								c[state] = r * (0 - c[state] * c[next_state]);
@@ -383,11 +391,12 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 
 					d.template at<'s', 'y', 'z', dim>(s, y, z, i) /= b_tmp;
 
-// #pragma omp critical
-// 					{
-// 						std::cout << "f0 " << s << " " << z << " " << y << " " << i << " " << b_tmp << " "
-// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
-// 					}
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "f0 " << s << " " << z << " " << y << " " << i << " " << b_tmp
+					// << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
 				}
 
 				// Process the lower diagonal (forward)
@@ -494,27 +503,108 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 					return i;
 				};
 
-				for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+				const index_t y_step = d | noarr::get_length<'x'>();
+
+				hn::VFromD<hn::RebindToSigned<simd_tag>> indices;
+
+				for (index_t v = 0; v < simd_length; v++)
 				{
-					const index_t i = get_i(equation_idx);
-					const index_t prev_i = get_i(equation_idx - 1);
-					const auto state = noarr::idx<'s', 'i'>(s, i);
-					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+					indices = hn::InsertLane(indices, v, (hn::TFromV<decltype(indices)>)(v * y_step));
+				}
 
-					// #pragma omp critical
-					// 					{
-					// 						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i <<
-					// std::endl;
-					// 					}
+				for (index_t z = z_begin; z < z_end; z++)
+				{
+					const auto y_remainder = (y_end - y_begin) % simd_length;
 
-					const auto r = 1 / (1 - a[state] * c[prev_state]);
-
-					c[state] *= r;
-
-					for (index_t z = z_begin; z < z_end; z++)
+					for (index_t y = y_begin; y < y_end - y_remainder; y += simd_length)
 					{
-						for (index_t y = y_begin; y < y_end; y++)
+						const auto prev_offset = d.template offset<'s', 'y', 'z', dim>(s, y, z, 0) / sizeof(real_t);
+						auto prev_vec = hn::GatherIndex(t, densities + prev_offset, indices);
+
+						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
 						{
+							const index_t i = get_i(equation_idx);
+							const index_t prev_i = get_i(equation_idx - 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+							// #pragma omp critical
+							// 					{
+							// 						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i <<
+							// std::endl;
+							// 					}
+
+							const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+							if (z == z_begin && y == y_begin)
+								c[state] *= r;
+
+							const auto offset = d.template offset<'s', 'y', 'z', dim>(s, y, z, i) / sizeof(real_t);
+
+							auto vec = hn::GatherIndex(t, densities + offset, indices);
+
+							vec = hn::MulAdd(hn::Set(t, -a[state]), prev_vec, vec);
+							vec = hn::Mul(vec, hn::Set(t, r));
+
+							prev_vec = vec;
+
+							hn::ScatterIndex(vec, t, densities + offset, indices);
+
+							// d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+							// 	r
+							// 	* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+							// 	   - a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, prev_i));
+
+
+							// #pragma omp critical
+							// 							{
+							// 								std::cout << "mf " << s << " " << z << " " << y << " " << i
+							// << " " << a[state] << " "
+							// 										  << r << " " << d.template at<'s', 'y', 'z',
+							// dim>(s, y, z, i) << std::endl;
+							// 							}
+						}
+
+						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+						{
+							const index_t i = get_i(equation_idx);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto offset = d.template offset<'s', 'y', 'z', dim>(s, y, z, i) / sizeof(real_t);
+
+
+							auto vec = hn::GatherIndex(t, densities + offset, indices);
+
+							vec = hn::MulAdd(hn::Set(t, -c[state]), prev_vec, vec);
+							prev_vec = vec;
+							hn::ScatterIndex(vec, t, densities + offset, indices);
+
+
+							// d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+							// 	d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+							// 	- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, next_i);
+						}
+					}
+
+					for (index_t y = y_end - y_remainder; y < y_end; y++)
+					{
+						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+						{
+							const index_t i = get_i(equation_idx);
+							const index_t prev_i = get_i(equation_idx - 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+							// #pragma omp critical
+							// 					{
+							// 						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i <<
+							// std::endl;
+							// 					}
+
+							const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+							if (z == z_begin && y == y_begin)
+								c[state] *= r;
+
 							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
 								r
 								* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
@@ -529,19 +619,13 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 							// dim>(s, y, z, i) << std::endl;
 							// 							}
 						}
-					}
-				}
 
-				for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
-				{
-					const index_t i = get_i(equation_idx);
-					const index_t next_i = get_i(equation_idx + 1);
-					const auto state = noarr::idx<'s', 'i'>(s, i);
-
-					for (index_t z = z_begin; z < z_end; z++)
-					{
-						for (index_t y = y_begin; y < y_end; y++)
+						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
 						{
+							const index_t i = get_i(equation_idx);
+							const index_t next_i = get_i(equation_idx + 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+
 							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
 								d.template at<'s', 'y', 'z', dim>(s, y, z, i)
 								- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, next_i);
@@ -629,11 +713,12 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 
 					d.template at<'s', 'y', 'z', dim>(s, y, z, i) /= b_tmp;
 
-// #pragma omp critical
-// 					{
-// 						std::cout << "f0 " << s << " " << z << " " << y << " " << i << " " << b_tmp << " "
-// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
-// 					}
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "f0 " << s << " " << z << " " << y << " " << i << " " << b_tmp
+					// << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
 				}
 
 				// Process the lower diagonal (forward)
@@ -656,11 +741,12 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 						* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
 						   - a_tmp * d.template at<'s', 'y', 'z', dim>(s, y, z, i - 1));
 
-// #pragma omp critical
-// 					{
-// 						std::cout << "f1 " << s << " " << z << " " << y << " " << i << " " << a_tmp << " " << r << " "
-// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
-// 					}
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "f1 " << s << " " << z << " " << y << " " << i << " " << a_tmp
+					// << " " << r << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
 				}
 
 				// Process the upper diagonal (backward)
@@ -672,11 +758,12 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 					d.template at<'s', 'y', 'z', dim>(s, y, z, i) -=
 						c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, i + 1);
 
-// #pragma omp critical
-// 					{
-// 						std::cout << "b0 " << s << " " << z << " " << y << " " << i << " " << c[state] << " "
-// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
-// 					}
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "b0 " << s << " " << z << " " << y << " " << i << " " <<
+					// c[state] << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
 
 					a[state] = a[state] - c[state] * a[next_state];
 					c[state] = 0 - c[state] * c[next_state];
@@ -694,11 +781,13 @@ static void solve_block_x_start(real_t* __restrict__ densities, const real_t* __
 						* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
 						   - c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, i + 1));
 
-// #pragma omp critical
-// 					{
-// 						std::cout << "b1 " << s << " " << z << " " << y << " " << i << " " << c[state] << " " << r
-// 								  << " " << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
-// 					}
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "b1 " << s << " " << z << " " << y << " " << i << " " <<
+					// c[state] << " " << r
+					// 								  << " " << d.template at<'s', 'y', 'z', dim>(s, y, z, i) <<
+					// std::endl;
+					// 					}
 
 					a[state] = r * a[state];
 					c[state] = r * (0 - c[state] * c[next_state]);
@@ -1807,13 +1896,13 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 		const auto block_z_begin = group_block_offsetsz_[tid_z];
 		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid_z];
 
-// #pragma omp critical
-// 		{
-// 			std::cout << "Thread " << tid << " is working on blocks: "
-// 					  << "[" << block_x_begin << ", " << block_x_end << ") x "
-// 					  << "[" << block_y_begin << ", " << block_y_end << ") x "
-// 					  << "[" << block_z_begin << ", " << block_z_end << ")" << std::endl;
-// 		}
+		// #pragma omp critical
+		// 		{
+		// 			std::cout << "Thread " << tid << " is working on blocks: "
+		// 					  << "[" << block_x_begin << ", " << block_x_end << ") x "
+		// 					  << "[" << block_y_begin << ", " << block_y_end << ") x "
+		// 					  << "[" << block_z_begin << ", " << block_z_end << ")" << std::endl;
+		// 		}
 
 		index_t epoch_x = 0;
 		index_t epoch_y = 0;
