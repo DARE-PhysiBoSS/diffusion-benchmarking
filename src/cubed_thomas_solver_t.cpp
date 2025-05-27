@@ -1896,6 +1896,21 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 {
 	if (this->problem_.dims == 1)
 		return;
+	
+	for (index_t i = 0; i < countersx_count_; i++)
+	{
+		countersx_[i].value = 0;
+	}
+
+	for (index_t i = 0; i < countersy_count_; i++)
+	{
+		countersy_[i].value = 0;
+	}
+
+	for (index_t i = 0; i < countersz_count_; i++)
+	{
+		countersz_[i].value = 0;
+	}
 
 	{
 		// solve_2d_and_3d(this->substrates_, get_substrates_layout<3>(), ax_, b1x_, ay_, b1y_, az_, b1z_, a_scratchx_,
