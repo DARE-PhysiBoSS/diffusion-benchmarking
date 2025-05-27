@@ -364,7 +364,7 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 							}
 						}
 
-						transpose(rows);
+						// transpose(rows);
 
 						for (index_t v = 0; v < simd_length; v++)
 							hn::Store(rows[v], t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
@@ -503,23 +503,13 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 					return i;
 				};
 
-				const index_t y_step = d | noarr::get_length<'x'>();
-
-				hn::VFromD<hn::RebindToSigned<simd_tag>> indices;
-
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					indices = hn::InsertLane(indices, v, (hn::TFromV<decltype(indices)>)(v * y_step));
-				}
-
 				for (index_t z = z_begin; z < z_end; z++)
 				{
 					const auto y_remainder = (y_end - y_begin) % simd_length;
 
 					for (index_t y = y_begin; y < y_end - y_remainder; y += simd_length)
 					{
-						const auto prev_offset = d.template offset<'s', 'y', 'z', dim>(s, y, z, 0) / sizeof(real_t);
-						auto prev_vec = hn::GatherIndex(t, densities + prev_offset, indices);
+						simd_t prev_vec = hn::Load(t, &(d.template at<'s', 'y', 'z', dim>(s, y, z, 0)));
 
 						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
 						{
@@ -539,16 +529,20 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 							if (z == z_begin && y == y_begin)
 								c[state] *= r;
 
-							const auto offset = d.template offset<'s', 'y', 'z', dim>(s, y, z, i) / sizeof(real_t);
+							const auto transposed_y_offset = i % simd_length;
+							const auto transposed_x = i - transposed_y_offset;
 
-							auto vec = hn::GatherIndex(t, densities + offset, indices);
+							auto vec = hn::Load(
+								t, &(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
 
 							vec = hn::MulAdd(hn::Set(t, -a[state]), prev_vec, vec);
 							vec = hn::Mul(vec, hn::Set(t, r));
 
 							prev_vec = vec;
 
-							hn::ScatterIndex(vec, t, densities + offset, indices);
+							hn::Store(
+								vec, t,
+								&(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
 
 							// d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
 							// 	r
@@ -569,14 +563,20 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 						{
 							const index_t i = get_i(equation_idx);
 							const auto state = noarr::idx<'s', 'i'>(s, i);
-							const auto offset = d.template offset<'s', 'y', 'z', dim>(s, y, z, i) / sizeof(real_t);
 
 
-							auto vec = hn::GatherIndex(t, densities + offset, indices);
+							const auto transposed_y_offset = i % simd_length;
+							const auto transposed_x = i - transposed_y_offset;
+
+							auto vec = hn::Load(
+								t, &(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
 
 							vec = hn::MulAdd(hn::Set(t, -c[state]), prev_vec, vec);
 							prev_vec = vec;
-							hn::ScatterIndex(vec, t, densities + offset, indices);
+
+							hn::Store(
+								vec, t,
+								&(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
 
 
 							// d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
@@ -650,7 +650,44 @@ static void solve_block_x_start_transpose(real_t* __restrict__ densities, const 
 
 		for (index_t z = z_begin; z < z_end; z++)
 		{
-			for (index_t y = y_begin; y < y_end; y++)
+			auto y_remainder = (y_end - y_begin) % simd_length;
+
+			for (index_t y = y_begin; y < y_end - y_remainder; y += simd_length)
+			{
+				const simd_t begin_unknowns = hn::Load(t, &(d.template at<'s', 'y', 'z', dim>(s, y, z, x_begin)));
+
+				const auto transposed_y_offset = (x_end - 1) % simd_length;
+				const auto transposed_x = (x_end - 1) - transposed_y_offset;
+
+				const simd_t end_unknowns =
+					hn::Load(t, &(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
+
+				for (index_t x = x_begin; x < x_end; x += simd_length)
+				{
+					for (index_t v = 0; v < simd_length; v++)
+						rows[v] = hn::Load(t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+
+					for (index_t v = 0; v < simd_length; v++)
+					{
+						index_t i = x + v;
+
+						const auto state = noarr::idx<'s', 'i'>(s, i);
+
+						if (i > x_begin && i < x_end - 1)
+						{
+							rows[v] = hn::MulAdd(hn::Set(t, -a[state]), begin_unknowns, rows[v]);
+							rows[v] = hn::MulAdd(hn::Set(t, -c[state]), end_unknowns, rows[v]);
+						}
+					}
+
+					transpose(rows);
+
+					for (index_t v = 0; v < simd_length; v++)
+						hn::Store(rows[v], t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+				}
+			}
+
+			for (index_t y = y_end - y_remainder; y < y_end; y++)
 			{
 				// Final part of modified thomas algorithm
 				// Solve the rest of the unknowns
