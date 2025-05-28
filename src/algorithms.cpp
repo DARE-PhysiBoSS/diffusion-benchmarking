@@ -8,6 +8,7 @@
 #include "blocked_thomas_solver.h"
 #include "blocked_thomas_solver_t.h"
 #include "cubed_thomas_solver_t.h"
+#include "cubed_mix_thomas_solver_t.h"
 #include "cyclic_reduction_solver.h"
 #include "cyclic_reduction_solver_t.h"
 #include "full_lapack_solver.h"
@@ -76,8 +77,10 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
 	solvers.emplace("blockedt", []() { return std::make_unique<blocked_thomas_solver_t<real_t, false>>(); });
 	solvers.emplace("blockedta", []() { return std::make_unique<blocked_thomas_solver_t<real_t, true>>(); });
-	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, false>>(); });
-	solvers.emplace("cubeda", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(); });
+	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, false>>(false); });
+	solvers.emplace("cubeda", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(false); });
+	solvers.emplace("cubedai", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(true); });
+	solvers.emplace("cubedmai", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
 	return solvers;
 }
 
