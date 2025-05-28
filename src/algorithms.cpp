@@ -1,5 +1,6 @@
 #include "algorithms.h"
 
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <papi.h>
@@ -370,9 +371,9 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 		for (std::size_t i = 0; i < inner_iterations; i++)
 		{
-			auto start = std::chrono::high_resolution_clock::now();
+			auto start = std::chrono::steady_clock::now();
 			solver->solve();
-			auto end = std::chrono::high_resolution_clock::now();
+			auto end = std::chrono::steady_clock::now();
 
 			times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 		}

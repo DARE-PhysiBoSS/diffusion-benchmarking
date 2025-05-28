@@ -655,7 +655,7 @@ static void solve_slice_z_3d_intrinsics_dispatch(real_t* __restrict__ densities,
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __restrict__ ac,
 								const real_t* __restrict__ b1, real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-								index_t& epoch, std::atomic<long>& counter, const index_t block_size,
+								index_t& epoch, std::atomic<long>& counter, const index_t coop_size,
 								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t s_begin,
 								const index_t s_end, const index_t x_begin, const index_t x_end, const index_t y_begin,
 								const index_t y_end, const index_t z_begin, const index_t z_end)
@@ -756,8 +756,8 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 		// We solve the system of equations that are composed of the first and last row of each block
 		// We do it using Thomas Algorithm
 		{
-			const index_t blocks_count = n / block_size;
-			const index_t epoch_size = blocks_count + 1;
+			const index_t block_size = n / coop_size;
+			const index_t epoch_size = coop_size + 1;
 			// std::cout << blocks_count << std::endl;
 
 			// increment the counter
@@ -773,7 +773,7 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 					return i;
 				};
 
-				for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+				for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
 				{
 					const index_t i = get_i(equation_idx);
 					const index_t prev_i = get_i(equation_idx - 1);
@@ -796,7 +796,7 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 					}
 				}
 
-				for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+				for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
 				{
 					const index_t i = get_i(equation_idx);
 					const index_t next_i = get_i(equation_idx + 1);
@@ -866,97 +866,91 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 	auto c = noarr::make_bag(scratch_l, c_data);
 	auto d = noarr::make_bag(dens_l, densities);
 
-	const index_t X_len = (x_end - x_begin + x_tile_size - 1) / x_tile_size;
-
 	for (index_t s = s_begin; s < s_end; s++)
 	{
 		epoch++;
 
-		for (index_t y = y_begin; y < y_end; y++)
 		{
-			for (index_t X = 0; X < X_len; X++)
+			// Normalize the first and the second equation
+			index_t i;
+			for (i = z_begin; i < z_begin + 2; i++)
 			{
-				const index_t remainder = (x_end - x_begin) % x_tile_size;
-				const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
-				const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
+				const auto state = noarr::idx<'s', 'i'>(s, i);
 
-				// Normalize the first and the second equation
-				index_t i;
-				for (i = z_begin; i < z_begin + 2; i++)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
-					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
-					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
-					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+				a[state] = a_tmp / b_tmp;
+				c[state] = c_tmp / b_tmp;
 
-					a[state] = a_tmp / b_tmp;
-					c[state] = c_tmp / b_tmp;
-
-					for (index_t x = x_begin; x < x_begin + x_len; x++)
+				for (index_t y = y_begin; y < y_end; y++)
+					for (index_t x = x_begin; x < x_end; x++)
 					{
-						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) /= b_tmp;
+						d.template at<'s', 'x', 'y', dim>(s, x, y, i) /= b_tmp;
 					}
-				}
+			}
 
-				// Process the lower diagonal (forward)
-				for (; i < z_end; i++)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
-					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+			// Process the lower diagonal (forward)
+			for (; i < z_end; i++)
+			{
+				const auto state = noarr::idx<'s', 'i'>(s, i);
+				const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
 
-					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
-					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
-					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
-					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+				const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
 
-					a[state] = r * (0 - a_tmp * a[prev_state]);
-					c[state] = r * c_tmp;
+				a[state] = r * (0 - a_tmp * a[prev_state]);
+				c[state] = r * c_tmp;
 
-					for (index_t x = x_begin; x < x_begin + x_len; x++)
+				for (index_t y = y_begin; y < y_end; y++)
+					for (index_t x = x_begin; x < x_end; x++)
 					{
-						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+						d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
 							r
-							* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
-							   - a_tmp * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i - 1));
+							* (d.template at<'s', 'x', 'y', dim>(s, x, y, i)
+							   - a_tmp * d.template at<'s', 'x', 'y', dim>(s, x, y, i - 1));
 					}
-				}
+			}
 
-				// Process the upper diagonal (backward)
-				for (i = z_end - 3; i >= z_begin + 1; i--)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
-					const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+			// Process the upper diagonal (backward)
+			for (i = z_end - 3; i >= z_begin + 1; i--)
+			{
+				const auto state = noarr::idx<'s', 'i'>(s, i);
+				const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
 
-					for (index_t x = x_begin; x < x_begin + x_len; x++)
+				for (index_t y = y_begin; y < y_end; y++)
+					for (index_t x = x_begin; x < x_end; x++)
 					{
-						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) -=
-							c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i + 1);
+						d.template at<'s', 'x', 'y', dim>(s, x, y, i) -=
+							c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, i + 1);
 					}
 
-					a[state] = a[state] - c[state] * a[next_state];
-					c[state] = 0 - c[state] * c[next_state];
-				}
+				a[state] = a[state] - c[state] * a[next_state];
+				c[state] = 0 - c[state] * c[next_state];
+			}
 
-				// Process the first row (backward)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
-					const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+			// Process the first row (backward)
+			{
+				const auto state = noarr::idx<'s', 'i'>(s, i);
+				const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
 
-					const auto r = 1 / (1 - c[state] * a[next_state]);
+				const auto r = 1 / (1 - c[state] * a[next_state]);
 
-					for (index_t x = x_begin; x < x_begin + x_len; x++)
+				for (index_t y = y_begin; y < y_end; y++)
+					for (index_t x = x_begin; x < x_end; x++)
 					{
-						d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
+						d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
 							r
-							* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
-							   - c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i + 1));
+							* (d.template at<'s', 'x', 'y', dim>(s, x, y, i)
+							   - c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, i + 1));
 					}
 
-					a[state] = r * a[state];
-					c[state] = r * (0 - c[state] * c[next_state]);
-				}
+				a[state] = r * a[state];
+				c[state] = r * (0 - c[state] * c[next_state]);
 			}
 		}
 
@@ -994,20 +988,12 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 					for (index_t y = y_begin; y < y_end; y++)
 					{
-						for (index_t X = 0; X < X_len; X++)
+						for (index_t x = x_begin; x < x_end; x++)
 						{
-							const index_t remainder = (x_end - x_begin) % x_tile_size;
-							const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
-							const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
-
-							for (index_t x = x_begin; x < x_begin + x_len; x++)
-							{
-								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
-									r
-									* (d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
-									   - a[state]
-											 * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, prev_i));
-							}
+							d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
+								r
+								* (d.template at<'s', 'x', 'y', dim>(s, x, y, i)
+								   - a[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, prev_i));
 						}
 					}
 				}
@@ -1020,18 +1006,11 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 
 					for (index_t y = y_begin; y < y_end; y++)
 					{
-						for (index_t X = 0; X < X_len; X++)
+						for (index_t x = x_begin; x < x_end; x++)
 						{
-							const index_t remainder = (x_end - x_begin) % x_tile_size;
-							const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
-							const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
-
-							for (index_t x = x_begin; x < x_begin + x_len; x++)
-							{
-								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
-									d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
-									- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, next_i);
-							}
+							d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
+								d.template at<'s', 'x', 'y', dim>(s, x, y, i)
+								- c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, next_i);
 						}
 					}
 				}
@@ -1051,29 +1030,22 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 			}
 		}
 
-		for (index_t y = y_begin; y < y_end; y++)
 		{
-			for (index_t X = 0; X < X_len; X++)
+			// Final part of modified thomas algorithm
+			// Solve the rest of the unknowns
 			{
-				const index_t remainder = (x_end - x_begin) % x_tile_size;
-				const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
-				const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
-
-				// Final part of modified thomas algorithm
-				// Solve the rest of the unknowns
+				for (index_t i = z_begin + 1; i < z_end - 1; i++)
 				{
-					for (index_t i = z_begin + 1; i < z_end - 1; i++)
-					{
-						const auto state = noarr::idx<'s', 'i'>(s, i);
-
-						for (index_t x = x_begin; x < x_begin + x_len; x++)
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					
+					for (index_t y = y_begin; y < y_end; y++)
+						for (index_t x = x_begin; x < x_end; x++)
 						{
-							d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i) =
-								d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, i)
-								- a[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, z_begin)
-								- c[state] * d.template at<'s', 'x', 'y', dim>(s, X * x_tile_size + x, y, z_end - 1);
+							d.template at<'s', 'x', 'y', dim>(s, x, y, i) =
+								d.template at<'s', 'x', 'y', dim>(s, x, y, i)
+								- a[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, z_begin)
+								- c[state] * d.template at<'s', 'x', 'y', dim>(s, x, y, z_end - 1);
 						}
-					}
 				}
 			}
 		}
@@ -1183,7 +1155,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 						const auto lane_scratch_l = scratchy_l ^ noarr::fix<'l'>(lane_id);
 
 						solve_block_y_start<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_, epoch_y,
-													 countersy_[lane_id].value, group_blocks_[1], dens_l,
+													 countersy_[lane_id].value, cores_division_[1], dens_l,
 													 lane_scratch_l, s, s + s_step_length, 0, x_len, block_y_begin,
 													 block_y_end, block_z_begin, block_z_end);
 					}
@@ -1206,7 +1178,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 							const auto lane_scratch_l = scratchz_l ^ noarr::fix<'l'>(lane_id);
 
 							solve_block_z_start<index_t>(this->substrates_, az_, b1z_, a_scratchz_, c_scratchz_,
-														 epoch_z, countersz_[lane_id].value, group_blocks_[2], dens_l,
+														 epoch_z, countersz_[lane_id].value, cores_division_[2], dens_l,
 														 lane_scratch_l, s, s + s_step_length, 0, x_len, block_y_begin,
 														 block_y_end, block_z_begin, block_z_end, x_tile_size_);
 						}
