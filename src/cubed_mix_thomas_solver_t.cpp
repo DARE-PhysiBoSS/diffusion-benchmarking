@@ -122,6 +122,8 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& 
 	solver_utils::initialize_substrate(substrates_layout, this->substrates_, this->problem_);
 }
 
+bool skip = false;
+
 template <typename real_t, bool aligned_x>
 void cubed_mix_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
@@ -129,6 +131,10 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& pa
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
 														: std::array<index_t, 3> { 2, 2, 2 };
+
+
+	if (params.contains("skip"))
+		skip = (bool)params["skip"];
 
 	if (vectorized_x_)
 	{
@@ -171,7 +177,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::initialize()
 	{
 		if (cores_division_[2] == 1)
 		{
-			countersz_count_ = 1;
+			countersz_count_ = 0;
 
 			precompute_values(az_, b1z_, cz_, this->problem_.dz, this->problem_.dims, this->problem_.nz);
 		}
@@ -749,6 +755,10 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 
 				a[state] = r * a[state];
 				c[state] = r * (0 - c[state] * c[next_state]);
+
+				// #pragma omp critical
+				// 				std::cout << "1 y: " << i << " a0: " << a[state] << " c0: " << c[state]
+				// 						  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, i) << std::endl;
 			}
 		}
 
@@ -843,6 +853,721 @@ static void solve_block_y_start(real_t* __restrict__ densities, const real_t* __
 							d.template at<'s', 'x', 'z', dim>(s, x, z, i)
 							- a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin)
 							- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, y_end - 1);
+					}
+				}
+			}
+		}
+	}
+}
+
+
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+static void solve_block_y_start_skip(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+									 const real_t* __restrict__ b1, real_t* __restrict__ a_data,
+									 real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
+									 const index_t coop_size, const density_layout_t dens_l,
+									 const scratch_layout_t scratch_l, const index_t s_begin, const index_t s_end,
+									 const index_t x_begin, const index_t x_end, const index_t y_begin,
+									 const index_t y_end, const index_t z_begin, const index_t z_end)
+{
+	constexpr char dim = 'y';
+	const index_t n = dens_l | noarr::get_length<dim>();
+
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+	auto d = noarr::make_bag(dens_l, densities);
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		epoch++;
+
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			// Normalize the first and the second equation
+			index_t i;
+			for (i = y_begin; i < y_begin + 2; i++)
+			{
+				const auto state = noarr::idx<'s', 'i'>(s, i);
+
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+				a[state] = a_tmp / b_tmp;
+				c[state] = c_tmp / b_tmp;
+
+				if (i == y_begin)
+				{
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'z', dim>(s, x, z, i) /= b_tmp;
+					}
+				}
+				else
+				{
+					const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+					const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'z', dim>(s, x, z, i) /= b_tmp;
+
+						d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin) =
+							r0
+							* (d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin)
+							   - c[state0] * d.template at<'s', 'x', 'z', dim>(s, x, z, i));
+					}
+
+					a[state0] *= r0;
+					c[state0] = r0 * -c[state] * c[state0];
+
+					// #pragma omp critical
+					// 					std::cout << "0 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+					// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin) <<
+					// std::endl;
+				}
+			}
+
+			// Process the lower diagonal (forward)
+			for (; i < y_end; i++)
+			{
+				const auto state = noarr::idx<'s', 'i'>(s, i);
+				const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+
+				const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+				const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+				const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+				const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+				a[state] = r * (0 - a_tmp * a[prev_state]);
+				c[state] = r * c_tmp;
+
+				if (i == y_end - 1)
+				{
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+							r
+							* (d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+							   - a_tmp * d.template at<'s', 'x', 'z', dim>(s, x, z, i - 1));
+					}
+				}
+				else
+				{
+					const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+					const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+							r
+							* (d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+							   - a_tmp * d.template at<'s', 'x', 'z', dim>(s, x, z, i - 1));
+
+						d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin) =
+							r0
+							* (d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin)
+							   - c[state0] * d.template at<'s', 'x', 'z', dim>(s, x, z, i));
+					}
+
+					a[state0] *= r0;
+					c[state0] = r0 * -c[state] * c[state0];
+
+					// #pragma omp critical
+					// 					std::cout << "1 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+					// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin) <<
+					// std::endl;
+				}
+			}
+		}
+
+		// Second part of modified thomas algorithm
+		// We solve the system of equations that are composed of the first and last row of each block
+		// We do it using Thomas Algorithm
+		{
+			const index_t block_size = n / coop_size;
+			const index_t epoch_size = coop_size + 1;
+			// std::cout << blocks_count << std::endl;
+
+			// increment the counter
+			auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			if (current_value == epoch * epoch_size - 1)
+			{
+				auto get_i = [block_size, n](index_t equation_idx) {
+					const index_t block_idx = equation_idx / 2;
+					const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+					const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+					const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+					return i;
+				};
+
+				for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t prev_i = get_i(equation_idx - 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					for (index_t z = z_begin; z < z_end; z++)
+					{
+						for (index_t x = x_begin; x < x_end; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								r
+								* (d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+								   - a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, prev_i));
+						}
+					}
+				}
+
+				for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t next_i = get_i(equation_idx + 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t z = z_begin; z < z_end; z++)
+					{
+						for (index_t x = x_begin; x < x_end; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+								- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, next_i);
+						}
+					}
+				}
+
+				// notify all threads that the last thread has finished
+				counter.fetch_add(1, std::memory_order_acq_rel);
+				// counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < epoch * epoch_size)
+				{
+					// counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
+				}
+			}
+		}
+
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			// Final part of modified thomas algorithm
+			// Solve the rest of the unknowns
+			{
+				for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+							- a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin)
+							- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, i + 1);
+					}
+				}
+			}
+		}
+	}
+}
+
+
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+static void solve_block_y_start_skip_intrinsics(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+												const real_t* __restrict__ b1, real_t* __restrict__ a_data,
+												real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
+												const index_t coop_size, const density_layout_t dens_l,
+												const scratch_layout_t scratch_l, const index_t s_begin,
+												const index_t s_end, const index_t x_begin, const index_t x_end,
+												const index_t y_begin, const index_t y_end, const index_t z_begin,
+												const index_t z_end)
+{
+	constexpr char dim = 'y';
+	const index_t n = dens_l | noarr::get_length<dim>();
+
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+
+	constexpr index_t x_tile_size = 2;
+
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length * x_tile_size);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b'>(0), densities);
+
+	simd_t begins[x_tile_size];
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		epoch++;
+
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			for (index_t X = 0; X < X_len; X++)
+			{
+				for (index_t v = 0; v < x_tile_size; v++)
+				{
+					begins[v] = hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, y_begin));
+				}
+
+				// Normalize the first and the second equation
+				index_t i;
+				for (i = y_begin; i < y_begin + 2; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					a[state] = a_tmp / b_tmp;
+					c[state] = c_tmp / b_tmp;
+
+					if (i == y_begin)
+					{
+						for (index_t v = 0; v < x_tile_size; v++)
+						{
+							simd_t data =
+								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+
+							data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
+
+							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+						}
+					}
+					else
+					{
+						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+						const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+						for (index_t v = 0; v < x_tile_size; v++)
+						{
+							simd_t data =
+								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+
+							data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
+
+							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+
+							begins[v] = hn::MulAdd(hn::Set(t, -c[state0]), data, begins[v]);
+							begins[v] = hn::Mul(hn::Set(t, r0), begins[v]);
+						}
+
+						a[state0] *= r0;
+						c[state0] = r0 * -c[state] * c[state0];
+
+						// #pragma omp critical
+						// 					std::cout << "0 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
+						// << std::endl;
+					}
+				}
+
+				// Process the lower diagonal (forward)
+				for (; i < y_end; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+					a[state] = r * (0 - a_tmp * a[prev_state]);
+					c[state] = r * c_tmp;
+
+					if (i == y_end - 1)
+					{
+						for (index_t v = 0; v < x_tile_size; v++)
+						{
+							simd_t data =
+								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+
+							data = hn::MulAdd(
+								hn::Set(t, -a_tmp),
+								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i - 1)),
+								data);
+							data = hn::Mul(data, hn::Set(t, r));
+
+							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+						}
+					}
+					else
+					{
+						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+						const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+						for (index_t v = 0; v < x_tile_size; v++)
+						{
+							simd_t data =
+								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+
+							data = hn::MulAdd(
+								hn::Set(t, -a_tmp),
+								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i - 1)),
+								data);
+							data = hn::Mul(data, hn::Set(t, r));
+
+							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+
+							begins[v] = hn::MulAdd(hn::Set(t, -c[state0]), data, begins[v]);
+							begins[v] = hn::Mul(hn::Set(t, r0), begins[v]);
+						}
+
+						a[state0] *= r0;
+						c[state0] = r0 * -c[state] * c[state0];
+
+						// #pragma omp critical
+						// 					std::cout << "1 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
+						// << std::endl;
+					}
+				}
+			}
+		}
+
+		// Second part of modified thomas algorithm
+		// We solve the system of equations that are composed of the first and last row of each block
+		// We do it using Thomas Algorithm
+		{
+			auto d = noarr::make_bag(dens_l, densities);
+
+			const index_t block_size = n / coop_size;
+			const index_t epoch_size = coop_size + 1;
+			// std::cout << blocks_count << std::endl;
+
+			// increment the counter
+			auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			if (current_value == epoch * epoch_size - 1)
+			{
+				auto get_i = [block_size, n](index_t equation_idx) {
+					const index_t block_idx = equation_idx / 2;
+					const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+					const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+					const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+					return i;
+				};
+
+				for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t prev_i = get_i(equation_idx - 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+					const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+					c[state] *= r;
+
+					for (index_t z = z_begin; z < z_end; z++)
+					{
+						for (index_t x = x_begin; x < x_end; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								r
+								* (d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+								   - a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, prev_i));
+						}
+					}
+				}
+
+				for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+				{
+					const index_t i = get_i(equation_idx);
+					const index_t next_i = get_i(equation_idx + 1);
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t z = z_begin; z < z_end; z++)
+					{
+						for (index_t x = x_begin; x < x_end; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+								- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, next_i);
+						}
+					}
+				}
+
+				// notify all threads that the last thread has finished
+				counter.fetch_add(1, std::memory_order_acq_rel);
+				// counter.notify_all();
+			}
+			else
+			{
+				// wait for the last thread to finish
+				while (current_value < epoch * epoch_size)
+				{
+					// counter.wait(current_value, std::memory_order_acquire);
+					current_value = counter.load(std::memory_order_acquire);
+				}
+			}
+		}
+
+		auto d = noarr::make_bag(dens_l, densities);
+
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			// Final part of modified thomas algorithm
+			// Solve the rest of the unknowns
+			{
+				for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					for (index_t x = x_begin; x < x_end; x++)
+					{
+						d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i)
+							- a[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, y_begin)
+							- c[state] * d.template at<'s', 'x', 'z', dim>(s, x, z, i + 1);
+					}
+				}
+			}
+		}
+	}
+}
+
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+static void solve_block_y_start_skip_tiles(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+										   const real_t* __restrict__ b1, real_t* __restrict__ a_data,
+										   real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
+										   const index_t coop_size, const density_layout_t dens_l,
+										   const scratch_layout_t scratch_l, const index_t s_begin, const index_t s_end,
+										   const index_t x_begin, const index_t x_end, const index_t y_begin,
+										   const index_t y_end, const index_t z_begin, const index_t z_end,
+										   index_t x_tile_size)
+{
+	constexpr char dim = 'y';
+	const index_t n = dens_l | noarr::get_length<dim>();
+
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+	auto d = noarr::make_bag(dens_l, densities);
+
+	const index_t X_len = (x_end - x_begin + x_tile_size - 1) / x_tile_size;
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			// Normalize the first and the second equation
+			index_t i;
+			for (index_t X = 0; X < X_len; X++)
+			{
+				epoch++;
+
+				const index_t remainder = (x_end - x_begin) % x_tile_size;
+				const index_t x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+				const index_t x_len = X == X_len - 1 ? x_len_remainder : x_tile_size;
+
+				for (i = y_begin; i < y_begin + 2; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					a[state] = a_tmp / b_tmp;
+					c[state] = c_tmp / b_tmp;
+
+					if (i == y_begin)
+					{
+						for (index_t x = 0; x < x_len; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i) /= b_tmp;
+						}
+					}
+					else
+					{
+						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+						const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+						for (index_t x = 0; x < x_len; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i) /= b_tmp;
+
+							d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, y_begin) =
+								r0
+								* (d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, y_begin)
+								   - c[state0]
+										 * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i));
+						}
+
+						a[state0] *= r0;
+						c[state0] = r0 * -c[state] * c[state0];
+
+						// #pragma omp critical
+						// 					std::cout << "0 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
+						// << std::endl;
+					}
+				}
+
+				// Process the lower diagonal (forward)
+				for (; i < y_end; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+					a[state] = r * (0 - a_tmp * a[prev_state]);
+					c[state] = r * c_tmp;
+
+					if (i == y_end - 1)
+					{
+						for (index_t x = 0; x < x_len; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x, z, i) =
+								r
+								* (d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i)
+								   - a_tmp
+										 * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z,
+																			 i - 1));
+						}
+					}
+					else
+					{
+						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+						const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+						for (index_t x = 0; x < x_len; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i) =
+								r
+								* (d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i)
+								   - a_tmp
+										 * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z,
+																			 i - 1));
+
+							d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, y_begin) =
+								r0
+								* (d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, y_begin)
+								   - c[state0] * d.template at<'s', 'x', 'z', dim>(s, x, z, i));
+						}
+
+						a[state0] *= r0;
+						c[state0] = r0 * -c[state] * c[state0];
+
+						// #pragma omp critical
+						// 					std::cout << "1 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
+						// << std::endl;
+					}
+				}
+
+				// Second part of modified thomas algorithm
+				// We solve the system of equations that are composed of the first and last row of each block
+				// We do it using Thomas Algorithm
+				{
+					const index_t block_size = n / coop_size;
+					const index_t epoch_size = coop_size + 1;
+					// std::cout << blocks_count << std::endl;
+
+					// increment the counter
+					auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+					if (current_value == epoch * epoch_size - 1)
+					{
+						auto get_i = [block_size, n](index_t equation_idx) {
+							const index_t block_idx = equation_idx / 2;
+							const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+							const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+							const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+							return i;
+						};
+
+						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+						{
+							const index_t i = get_i(equation_idx);
+							const index_t prev_i = get_i(equation_idx - 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+							const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+							c[state] *= r;
+
+							for (index_t x = 0; x < x_len; x++)
+							{
+								d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i) =
+									r
+									* (d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i)
+									   - a[state]
+											 * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z,
+																				 prev_i));
+							}
+						}
+
+						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+						{
+							const index_t i = get_i(equation_idx);
+							const index_t next_i = get_i(equation_idx + 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+
+							for (index_t x = 0; x < x_len; x++)
+							{
+								d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i) =
+									d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i)
+									- c[state]
+										  * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z,
+																			  next_i);
+							}
+						}
+
+						// notify all threads that the last thread has finished
+						counter.fetch_add(1, std::memory_order_acq_rel);
+						// counter.notify_all();
+					}
+					else
+					{
+						// wait for the last thread to finish
+						// while (current_value < epoch * epoch_size)
+						// {
+						// 	// counter.wait(current_value, std::memory_order_acquire);
+						// 	current_value = counter.load(std::memory_order_acquire);
+						// }
+					}
+				}
+
+				// Final part of modified thomas algorithm
+				// Solve the rest of the unknowns
+				{
+					for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+					{
+						const auto state = noarr::idx<'s', 'i'>(s, i);
+
+						for (index_t x = 0; x < x_len; x++)
+						{
+							d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i) =
+								d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i)
+								- a[state]
+									  * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, y_begin)
+								- c[state]
+									  * d.template at<'s', 'x', 'z', dim>(s, x_begin + X * x_tile_size + x, z, i + 1);
+						}
 					}
 				}
 			}
@@ -1037,7 +1762,7 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 				for (index_t i = z_begin + 1; i < z_end - 1; i++)
 				{
 					const auto state = noarr::idx<'s', 'i'>(s, i);
-					
+
 					for (index_t y = y_begin; y < y_end; y++)
 						for (index_t x = x_begin; x < x_end; x++)
 						{
@@ -1154,10 +1879,16 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 						const auto lane_id = tid_x * cores_division_[2] + tid_z;
 						const auto lane_scratch_l = scratchy_l ^ noarr::fix<'l'>(lane_id);
 
-						solve_block_y_start<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_, epoch_y,
-													 countersy_[lane_id].value, cores_division_[1], dens_l,
-													 lane_scratch_l, s, s + s_step_length, 0, x_len, block_y_begin,
-													 block_y_end, block_z_begin, block_z_end);
+						if (!skip)
+							solve_block_y_start<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_,
+														 epoch_y, countersy_[lane_id].value, cores_division_[1], dens_l,
+														 lane_scratch_l, s, s + s_step_length, 0, x_len, block_y_begin,
+														 block_y_end, block_z_begin, block_z_end);
+						else
+							solve_block_y_start_skip<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_,
+															  epoch_y, countersy_[lane_id].value, cores_division_[1],
+															  dens_l, lane_scratch_l, s, s + s_step_length, 0, x_len,
+															  block_y_begin, block_y_end, block_z_begin, block_z_end);
 					}
 				}
 
@@ -1200,6 +1931,8 @@ cubed_mix_thomas_solver_t<real_t, aligned_x>::cubed_mix_thomas_solver_t(bool vec
 	  az_(nullptr),
 	  b1z_(nullptr),
 	  cz_(nullptr),
+	  countersy_count_(0),
+	  countersz_count_(0),
 	  a_scratchy_(nullptr),
 	  c_scratchy_(nullptr),
 	  a_scratchz_(nullptr),
