@@ -1,10 +1,9 @@
 #pragma once
 
 #include "base_solver.h"
+#include "blocked_thomas_solver.h"
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
-
-#include "blocked_thomas_solver.h"
 /*
 The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
 For dimension x:
@@ -49,10 +48,11 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	real_t *ay_, *b1y_, *cy_;
 	real_t *az_, *b1z_, *cz_;
 
-	real_t *a_scratch_, *c_scratch_;
-	
-	std::unique_ptr<aligned_atomic<long>[]> countersx_, countersy_, countersz_;
-	index_t countersx_count_, countersy_count_, countersz_count_;
+	std::unique_ptr<aligned_atomic<long>[]> countersy_, countersz_;
+	index_t countersy_count_, countersz_count_;
+
+	real_t *a_scratchy_, *c_scratchy_;
+	real_t *a_scratchz_, *c_scratchz_;
 
 	bool use_intrinsics_;
 	bool use_blocked_;
@@ -60,9 +60,23 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	std::size_t alignment_size_;
 	index_t substrate_step_;
 
-	std::size_t max_cores_groups_;
+	std::array<index_t, 3> cores_division_;
+
+	std::array<index_t, 3> group_blocks_;
+	std::vector<index_t> group_block_lengthsy_;
+	std::vector<index_t> group_block_lengthsz_;
+
+	std::vector<index_t> group_block_offsetsy_;
+	std::vector<index_t> group_block_offsetsz_;
+
+	index_t substrate_groups_;
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
+
+	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims,
+						   index_t n, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters,
+						   index_t group_size, index_t& block_size, std::vector<index_t>& group_block_lengths,
+						   std::vector<index_t>& group_block_offsets);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
@@ -78,10 +92,9 @@ public:
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
 
-	auto get_scratch_layout() const
+	auto get_scratch_layout(const index_t n, const index_t groups) const
 	{
-		return noarr::scalar<real_t>()
-			   ^ noarr::vectors<'i', 'l', 's'>(this->problem_.nz, max_cores_groups_, this->problem_.substrates_count);
+		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 'l', 's'>(n, groups, this->problem_.substrates_count);
 	}
 
 	void prepare(const max_problem_t& problem) override;
@@ -100,6 +113,7 @@ public:
 	void solve_2d();
 	void solve_3d();
 	void solve_blocked();
+	void solve_blocked_2d();
 
 	~least_memory_thomas_solver_d_f();
 };
