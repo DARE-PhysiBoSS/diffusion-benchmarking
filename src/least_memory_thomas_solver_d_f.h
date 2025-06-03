@@ -114,6 +114,7 @@ public:
 	void solve_3d();
 	void solve_blocked();
 	void solve_blocked_2d();
+	void solve_blocked_3d();
 
 	~least_memory_thomas_solver_d_f();
 };

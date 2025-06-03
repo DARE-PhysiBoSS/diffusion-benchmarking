@@ -395,12 +395,11 @@ static void z_forward_inside_y_blocked_next(const index_t s, const index_t z, co
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void z_backward_blocked(const density_bag_t d, const real_t z_begin, const real_t z_end, const scratch_bag_t a,
-							   const scratch_bag_t c, const index_t s)
+static void z_backward_blocked(const density_bag_t d, const real_t y_begin, const real_t y_end, const real_t z_begin,
+							   const real_t z_end, const scratch_bag_t a, const scratch_bag_t c, const index_t s)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
-	const index_t y_len = d | noarr::get_length<'y'>();
 
 	// Process the upper diagonal (backward)
 	index_t i;
@@ -409,16 +408,17 @@ static void z_backward_blocked(const density_bag_t d, const real_t z_begin, cons
 		const auto state = noarr::idx<'s', 'i'>(s, i);
 		const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
 
-		for (index_t y = 0; y < y_len; y++)
+		for (index_t y = y_begin; y < y_end; y++)
 			for (index_t x = 0; x < x_len; x++)
 			{
 				d.template at<'s', 'x', 'y', 'z'>(s, x, y, i) -=
 					c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y, i + 1);
 
 
-				// std::cout << "b0: " << i << " " << y << " " << x << " " << d.template at<'s', 'x', 'y', 'z'>(s, x, y,
-				// i)
-				// 		  << std::endl;
+				// #pragma omp critical
+				// 				std::cout << "b0: " << i << " " << y << " " << x << " " << d.template at<'s', 'x', 'y',
+				// 'z'>(s, x, y, i)
+				// 						  << std::endl;
 			}
 
 		a[state] = a[state] - c[state] * a[next_state];
@@ -432,7 +432,7 @@ static void z_backward_blocked(const density_bag_t d, const real_t z_begin, cons
 
 		const auto r = 1 / (1 - c[state] * a[next_state]);
 
-		for (index_t y = 0; y < y_len; y++)
+		for (index_t y = y_begin; y < y_end; y++)
 			for (index_t x = 0; x < x_len; x++)
 			{
 				d.template at<'s', 'x', 'y', 'z'>(s, x, y, i) =
@@ -440,9 +440,10 @@ static void z_backward_blocked(const density_bag_t d, const real_t z_begin, cons
 					* (d.template at<'s', 'x', 'y', 'z'>(s, x, y, i)
 					   - c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y, i + 1));
 
-				// std::cout << "b1: " << i << " " << y << " " << x << " " << d.template at<'s', 'x', 'y', 'z'>(s, x, y,
-				// i)
-				// 		  << std::endl;
+				// #pragma omp critical
+				// 				std::cout << "b1: " << i << " " << y << " " << x << " " << d.template at<'s', 'x', 'y',
+				// 'z'>(s, x, y, i)
+				// 						  << " " << a[next_state] << " " << c[state] << std::endl;
 			}
 
 		a[state] = r * a[state];
@@ -452,15 +453,15 @@ static void z_backward_blocked(const density_bag_t d, const real_t z_begin, cons
 
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
-static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t block_size,
-							 const index_t s)
+static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t coop_size,
+							 const index_t y_begin, const index_t y_end, const index_t s)
 {
 	constexpr char dim = 'z';
 	const index_t x_len = d | noarr::get_length<'x'>();
 	const index_t y_len = d | noarr::get_length<'y'>();
 	const index_t n = d | noarr::get_length<dim>();
 
-	const index_t blocks_count = (n + block_size - 1) / block_size;
+	const index_t block_size = n / coop_size;
 
 	// const index_t block_tid = get_thread_num() % blocks_count;
 
@@ -469,21 +470,19 @@ static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, 
 	// const index_t y_end = std::min(y_begin + y_block_size, y_len);
 
 
-	const index_t y_begin = 0;
-	const index_t y_end = y_len;
-
-
 	// #pragma omp critical
 	// std::cout << "Thread " << block_tid << " s_begin: " << s << " block_y_begin: " << y_begin
 	// 		  << " block_y_end: " << y_end << std::endl;
 
 	auto get_i = [block_size, n](index_t equation_idx) {
 		const index_t block_idx = equation_idx / 2;
-		const auto i = block_idx * block_size + (equation_idx % 2) * (block_size - 1);
-		return std::min(i, n - 1);
+		const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+		const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+		const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+		return i;
 	};
 
-	for (index_t equation_idx = 1; equation_idx < blocks_count * 2; equation_idx++)
+	for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
 	{
 		const index_t i = get_i(equation_idx);
 		const index_t prev_i = get_i(equation_idx - 1);
@@ -506,7 +505,7 @@ static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, 
 		}
 	}
 
-	for (index_t equation_idx = blocks_count * 2 - 2; equation_idx >= 0; equation_idx--)
+	for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
 	{
 		const index_t i = get_i(equation_idx);
 		const index_t next_i = get_i(equation_idx + 1);
@@ -525,18 +524,17 @@ static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, 
 }
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
-static void z_blocked_end(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t z_begin, const index_t z_end,
-						  const index_t s)
+static void z_blocked_end(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t y_begin, const index_t y_end,
+						  const index_t z_begin, const index_t z_end, const index_t s)
 {
 	constexpr char dim = 'z';
 	const index_t x_len = d | noarr::get_length<'x'>();
-	const index_t y_len = d | noarr::get_length<'y'>();
 
 	for (index_t i = z_begin + 1; i < z_end - 1; i++)
 	{
 		const auto state = noarr::idx<'s', 'i'>(s, i);
 
-		for (index_t y = 0; y < y_len; y++)
+		for (index_t y = y_begin; y < y_end; y++)
 		{
 			for (index_t x = 0; x < x_len; x++)
 			{
@@ -555,7 +553,6 @@ static void y_backward_blocked(const density_bag_t d, const index_t z, const rea
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
-	const index_t y_len = d | noarr::get_length<'y'>();
 
 	// Process the upper diagonal (backward)
 	index_t i;
@@ -610,7 +607,6 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 							 const index_t coop_size, const index_t s)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
-	const index_t y_len = d | noarr::get_length<'y'>();
 	const index_t n = d | noarr::get_length<'y'>();
 
 	const index_t block_size = n / coop_size;
@@ -622,8 +618,8 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 	// const index_t y_end = std::min(y_begin + y_block_size, y_len);
 
 
-	const index_t y_begin = 0;
-	const index_t y_end = y_len;
+	// const index_t y_begin = 0;
+	// const index_t y_end = y_len;
 
 
 	// #pragma omp critical
@@ -706,13 +702,16 @@ static void y_blocked_end_with_z(density_bag_t d, const index_t z, scratch_bag_t
 
 		for (index_t x = 0; x < x_len; x++)
 		{
-			d.template at<'s', 'x', 'y', 'z'>(s, x, i, z) =
-				d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
-				- a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z)
-				- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_end - 1, z);
+			real_t data = d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
+						  - a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z)
+						  - c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_end - 1, z);
 
-			z_forward_inside_y_blocked(d, s, z, i, x, d.template at<'s', 'x', 'y', 'z'>(s, x, i, z), az_s, b1z_s,
-									   z_data.begin, z_data.c);
+			// #pragma omp critical
+			// 			std::cout << "l: " << z << " " << i << " " << x << " " << data << " " << a[state] << " " <<
+			// c[state]
+			// 					  << std::endl;
+
+			z_forward_inside_y_blocked(d, s, z, i, x, data, az_s, b1z_s, z_data.begin, z_data.c);
 		}
 	}
 }
@@ -765,8 +764,8 @@ static void y_forward_inside_x_blocked(const density_bag_t d, const index_t s, c
 
 		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z) = data;
 
-// #pragma omp critical
-// 		std::cout << "f0: " << z << " " << y << " " << x << " " << data << " " << b_tmp << std::endl;
+		// #pragma omp critical
+		// 		std::cout << "f0: " << z << " " << y << " " << x << " " << data << " " << b_tmp << std::endl;
 	}
 	else
 	{
@@ -781,9 +780,9 @@ static void y_forward_inside_x_blocked(const density_bag_t d, const index_t s, c
 
 		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z) = data;
 
-// #pragma omp critical
-// 		std::cout << "f1: " << z << " " << y << " " << x << " " << data << " " << a_tmp << " " << b_tmp << " "
-// 				  << c[prev_state] << std::endl;
+		// #pragma omp critical
+		// 		std::cout << "f1: " << z << " " << y << " " << x << " " << data << " " << a_tmp << " " << b_tmp << " "
+		// 				  << c[prev_state] << std::endl;
 	}
 }
 
@@ -1012,7 +1011,7 @@ static void solve_slice_xyz_fused_blocked(
 		}
 	}
 
-	z_backward_blocked(d, z_begin, z_end, a, c, s);
+	z_backward_blocked(d, 0, y_len, z_begin, z_end, a, c, s);
 
 	index_t cooperating_threads = (z_len + z_block_size - 1) / z_block_size;
 
@@ -1028,7 +1027,7 @@ static void solve_slice_xyz_fused_blocked(
 	// #pragma omp barrier
 
 	if (z_begin == 0)
-		z_blocked_middle(d, a, c, z_block_size, s);
+		z_blocked_middle(d, a, c, z_block_size, 0, y_len, s);
 
 	// #pragma omp barrier
 
@@ -1043,7 +1042,7 @@ static void solve_slice_xyz_fused_blocked(
 		}
 	}
 
-	z_blocked_end(d, a, c, z_begin, z_end, s);
+	z_blocked_end(d, a, c, 0, y_len, z_begin, z_end, s);
 }
 
 template <bool is_end, typename index_t, typename real_t, typename vec_t, typename simd_tag>
@@ -1203,12 +1202,13 @@ static void y_forward_inside_x_vectorized_blocked(const density_bag_t d, vec_t* 
 
 			cy_tmp = ay_s / b_tmp;
 
-// #pragma omp critical
-// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
-// 			{
-// 				std::cout << "f0: " << z << " " << y << " " << x + l << " " << hn::ExtractLane(rows[v], l) << " "
-// 						  << b_tmp << std::endl;
-// 			}
+			// #pragma omp critical
+			// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
+			// 			{
+			// 				std::cout << "f0: " << z << " " << y << " " << x + l << " " << hn::ExtractLane(rows[v], l)
+			// << " "
+			// 						  << b_tmp << std::endl;
+			// 			}
 		}
 		else
 		{
@@ -1224,12 +1224,13 @@ static void y_forward_inside_x_vectorized_blocked(const density_bag_t d, vec_t* 
 
 			cy_tmp = r * c_tmp;
 
-// #pragma omp critical
-// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
-// 			{
-// 				std::cout << "f1: " << z << " " << y << " " << x + l << " " << hn::ExtractLane(rows[v], l) << " "
-// 						  << a_tmp << " " << b_tmp << " " << cy_tmp << std::endl;
-// 			}
+			// #pragma omp critical
+			// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
+			// 			{
+			// 				std::cout << "f1: " << z << " " << y << " " << x + l << " " << hn::ExtractLane(rows[v], l)
+			// << " "
+			// 						  << a_tmp << " " << b_tmp << " " << cy_tmp << std::endl;
+			// 			}
 		}
 	}
 }
@@ -1653,7 +1654,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 
 	const auto d = noarr::make_bag(dens_l, densities);
 
-	z_backward_blocked(d, z_begin, z_end, a_scratch, c_scratch, s);
+	z_backward_blocked(d, 0, y_len, z_begin, z_end, a_scratch, c_scratch, s);
 
 	index_t cooperating_threads = (z_len + z_block_size - 1) / z_block_size;
 
@@ -1669,7 +1670,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 	// #pragma omp barrier
 
 	if (z_begin == 0)
-		z_blocked_middle(d, a_scratch, c_scratch, z_block_size, s);
+		z_blocked_middle(d, a_scratch, c_scratch, z_block_size, 0, y_len, s);
 
 	// #pragma omp barrier
 
@@ -1684,7 +1685,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 		}
 	}
 
-	z_blocked_end(d, a_scratch, c_scratch, z_begin, z_end, s);
+	z_blocked_end(d, a_scratch, c_scratch, 0, y_len, z_begin, z_end, s);
 }
 
 
@@ -1797,12 +1798,12 @@ template <typename index_t, typename real_t, typename density_layout_t, typename
 static void solve_slice_xyz_fused_transpose_blocked2(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
-	real_t* __restrict__ ay_data, real_t* __restrict__ cy_data, real_t* __restrict__ az_data,
-	real_t* __restrict__ cz_data, const density_layout_t dens_l, const diagonal_layout_t diagx_l,
-	const diagonal_layout_t diagy_l, const scratch_layout_t scratch_l, const index_t s, const index_t y_begin,
-	const index_t y_end, const index_t y_block_size, const index_t z_begin, const index_t z_end,
-	const index_t z_block_size, index_t& epoch_y, std::atomic<long>& counter_y, index_t& epoch_z,
+	const real_t* __restrict__ az, const real_t* __restrict__ b1z, real_t* __restrict__ ay_data,
+	real_t* __restrict__ cy_data, real_t* __restrict__ az_data, real_t* __restrict__ cz_data,
+	const density_layout_t dens_l, const diagonal_layout_t diagx_l, const scratch_layout_t scratchy_l,
+	const scratch_layout_t scratchz_l, const index_t s_begin, const index_t s_end, const index_t y_begin,
+	const index_t y_end, const index_t z_begin, const index_t z_end, const index_t coop_size_y,
+	const index_t coop_size_z, index_t& epoch_y, std::atomic<long>& counter_y, index_t& epoch_z,
 	std::atomic<long>& counter_z)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
@@ -1816,144 +1817,146 @@ static void solve_slice_xyz_fused_transpose_blocked2(
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-	const real_t ax_s = ax[s];
-	const real_t b1x_s = b1x[s];
+	const auto ay_scratch = noarr::make_bag(scratchy_l, ay_data);
+	const auto cy_scratch = noarr::make_bag(scratchy_l, cy_data);
 
-	const real_t ay_s = ay[s];
-	const real_t b1y_s = b1y[s];
+	const auto az_scratch = noarr::make_bag(scratchz_l, az_data);
+	const auto cz_scratch = noarr::make_bag(scratchz_l, cz_data);
 
-	const real_t az_s = az[s];
-	const real_t b1z_s = b1z[s];
+	auto cx = noarr::make_bag(diagx_l, back_cx);
 
-	auto cx = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), back_cx);
-	auto cy = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), back_cy);
-
-	const auto ay_scratch = noarr::make_bag(scratch_l, ay_data);
-	const auto cy_scratch = noarr::make_bag(scratch_l, cy_data);
-
-	const auto az_scratch = noarr::make_bag(scratch_l, az_data);
-	const auto cz_scratch = noarr::make_bag(scratch_l, cz_data);
-
-	for (index_t z = z_begin; z < z_end; z++)
+	for (index_t s = s_begin; s < s_end; s++)
 	{
-		real_t cy_tmp = ay_s;
+		const real_t ax_s = ax[s];
+		const real_t b1x_s = b1x[s];
 
+		const real_t ay_s = ay[s];
+		const real_t b1y_s = b1y[s];
+
+		const real_t az_s = az[s];
+		const real_t b1z_s = b1z[s];
+
+		for (index_t z = z_begin; z < z_end; z++)
 		{
+			real_t cy_tmp = ay_s;
+
+			{
+				const auto d = noarr::make_bag(dens_l, densities);
+
+				auto y_remainder = (y_end - y_begin) % simd_length;
+
+				xy_fused_transpose_part<true, simd_t>(d, t, simd_length, y_begin, y_end - y_remainder, z, s, ax_s,
+													  b1x_s, ay_s, b1y_s, cx,
+													  inner_y_data_blocked { y_begin, cy_tmp, ay_scratch, cy_scratch });
+			}
+
+			// y remainder
+			{
+				const auto d = noarr::make_bag(dens_l, densities);
+
+				auto y_remainder = (y_end - y_begin) % simd_length;
+
+				for (index_t y = y_end - y_remainder; y < y_end; y++)
+				{
+					real_t a_tmp = 0;
+					real_t b_tmp = b1x_s + ax_s;
+					real_t c_tmp = ax_s;
+					real_t prev = 0;
+
+					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
+
+					x_backward<true>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data_blocked { y_begin, cy_scratch });
+
+					y_forward_inside_x_blocked(d, s, z, y, 0, prev, ay_s, b1y_s, y_begin, cy_scratch);
+
+					y_forward_inside_x_blocked_next(s, y, ay_s, b1y_s, y_len, y_begin, ay_scratch, cy_scratch);
+				}
+			}
+
 			const auto d = noarr::make_bag(dens_l, densities);
 
-			auto y_remainder = (y_end - y_begin) % simd_length;
+			y_backward_blocked(d, z, y_begin, y_end, ay_scratch, cy_scratch, s);
 
-			xy_fused_transpose_part<true, simd_t>(d, t, simd_length, y_begin, y_end - y_remainder, z, s, ax_s, b1x_s,
-												  ay_s, b1y_s, cx,
-												  inner_y_data_blocked { y_begin, cy_tmp, ay_scratch, cy_scratch });
-		}
 
-		// y remainder
-		{
-			const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s', 'z'>(s, z), densities);
-
-			auto y_remainder = (y_end - y_begin) % simd_length;
-
-			for (index_t y = y_len - y_remainder; y < y_len; y++)
 			{
-				real_t a_tmp = 0;
-				real_t b_tmp = b1x_s + ax_s;
-				real_t c_tmp = ax_s;
-				real_t prev = 0;
+				epoch_y++;
 
-				x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
+				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-				x_backward<true>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data_blocked { y_begin, cy });
-
-				y_forward_inside_x_blocked(d, s, z, y, 0, prev, ay_s, b1y_s, y_begin, cy);
-
-				y_forward_inside_x_blocked_next(s, z, ay_s, b1y_s, y_len, y_begin, ay_scratch, cy_scratch);
+				while (val < epoch_y * coop_size_y)
+				{
+					val = counter_y.load(std::memory_order_acquire);
+				}
 			}
-		}
 
-		y_backward_blocked(d, z, y_begin, y_end, ay_scratch, cy_scratch, s);
+			// #pragma omp barrier
 
-		index_t cooperating_threads = (y_len + y_block_size - 1) / y_block_size;
+			if (y_begin == 0)
+				y_blocked_middle(d, z, ay_scratch, cy_scratch, coop_size_y, s);
 
-		{
-			auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+			// #pragma omp barrier
 
-			while (val < epoch_y * cooperating_threads)
+
 			{
-				val = counter_y.load(std::memory_order_acquire);
+				epoch_y++;
+
+				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+				while (val < epoch_y * coop_size_y)
+				{
+					val = counter_y.load(std::memory_order_acquire);
+				}
 			}
-		}
 
-		// #pragma omp barrier
-
-		if (y_begin == 0)
-			y_blocked_middle(d, z, ay_scratch, cy_scratch, y_block_size, s);
-
-		// #pragma omp barrier
-
-		epoch_y++;
-
-		{
-			auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
-
-			while (val < epoch_y * cooperating_threads)
-			{
-				val = counter_y.load(std::memory_order_acquire);
-			}
-		}
-
-		y_blocked_end_with_z(d, z, ay_scratch, cy_scratch, y_begin, y_end, s, az_s, b1z_s,
-							 inside_data_blocked { z_begin, cz_scratch });
-
-		for (index_t i = y_begin + 1; i < y_end - 1; i++)
-		{
-			const auto state = noarr::idx<'s', 'i'>(s, i);
+			y_blocked_end_with_z(d, z, ay_scratch, cy_scratch, y_begin, y_end, s, az_s, b1z_s,
+								 inside_data_blocked { z_begin, cz_scratch });
 
 			for (index_t x = 0; x < x_len; x++)
 			{
-				z_forward_inside_y_blocked(d, s, z, i, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z), az_s,
-										   b1z_s, z_begin, cz_scratch);
+				z_forward_inside_y_blocked(d, s, z, y_begin, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z),
+										   az_s, b1z_s, z_begin, cz_scratch);
 
-				z_forward_inside_y_blocked(d, s, z, i, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_end - 1, z), az_s,
-										   b1z_s, z_begin, cz_scratch);
+				z_forward_inside_y_blocked(d, s, z, y_end - 1, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_end - 1, z),
+										   az_s, b1z_s, z_begin, cz_scratch);
+			}
+
+			z_forward_inside_y_blocked_next(s, z, az_s, b1z_s, z_len, z_begin, az_scratch, cz_scratch);
+		}
+
+		z_backward_blocked(d, y_begin, y_end, z_begin, z_end, az_scratch, cz_scratch, s);
+
+		{
+			epoch_z++;
+
+			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			while (val < epoch_z * coop_size_z)
+			{
+				val = counter_z.load(std::memory_order_acquire);
 			}
 		}
 
-		z_forward_inside_y_blocked_next(s, z, az_s, b1z_s, z_len, z_begin, az_scratch, cz_scratch);
-	}
+		// #pragma omp barrier
 
-	z_backward_blocked(d, z_begin, z_end, az_scratch, cz_scratch, s);
+		if (z_begin == 0)
+			z_blocked_middle(d, az_scratch, cz_scratch, coop_size_z, y_begin, y_end, s);
 
-	index_t cooperating_threads = (z_len + z_block_size - 1) / z_block_size;
+		// #pragma omp barrier
 
-	{
-		auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-		while (val < epoch_z * cooperating_threads)
 		{
-			val = counter_z.load(std::memory_order_acquire);
+			epoch_z++;
+
+			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			while (val < epoch_z * coop_size_z)
+			{
+				val = counter_z.load(std::memory_order_acquire);
+			}
 		}
+
+		z_blocked_end(d, az_scratch, cz_scratch, y_begin, y_end, z_begin, z_end, s);
 	}
-
-	// #pragma omp barrier
-
-	if (z_begin == 0)
-		z_blocked_middle(d, az_scratch, cz_scratch, z_block_size, s);
-
-	// #pragma omp barrier
-
-	epoch_z++;
-
-	{
-		auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
-
-		while (val < epoch_z * cooperating_threads)
-		{
-			val = counter_z.load(std::memory_order_acquire);
-		}
-	}
-
-	z_blocked_end(d, az_scratch, cz_scratch, z_begin, z_end, s);
 }
 
 template <typename real_t, bool aligned_x>
@@ -1980,6 +1983,13 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 2)
 	{
 		solve_blocked_2d();
+		return;
+	}
+
+
+	if (this->problem_.dims == 3)
+	{
+		solve_blocked_3d();
 		return;
 	}
 
@@ -2115,10 +2125,10 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
-// #pragma omp critical
-// 			std::cout << "Thread " << tid << " s_begin: " << s << " s_end: " << s + s_step_length
-// 					  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
-// 					  << " group: " << substrate_group << std::endl;
+			// #pragma omp critical
+			// 			std::cout << "Thread " << tid << " s_begin: " << s << " s_end: " << s + s_step_length
+			// 					  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
+			// 					  << " group: " << substrate_group << std::endl;
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
@@ -2130,6 +2140,74 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 					get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group), s,
 					s + s_step_length, block_y_begin, block_y_end, group_size, epoch,
 					countersy_[substrate_group].value);
+			}
+		}
+	}
+}
+
+template <typename real_t, bool aligned_x>
+void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
+{
+	for (index_t i = 0; i < countersy_count_; i++)
+	{
+		countersy_[i].value = 0;
+	}
+
+	for (index_t i = 0; i < countersz_count_; i++)
+	{
+		countersz_[i].value = 0;
+	}
+
+#pragma omp parallel
+	{
+		const index_t s_len = this->problem_.substrates_count;
+
+		index_t epoch_y = 0;
+		index_t epoch_z = 0;
+
+		const index_t tid = get_thread_num();
+		const index_t group_size = cores_division_[1] * cores_division_[2];
+
+		const index_t substrate_group_tid = tid % group_size;
+		const index_t substrate_group = tid / group_size;
+
+		const auto tid_y = (substrate_group_tid / cores_division_[0]) % cores_division_[1];
+		const auto tid_z = substrate_group_tid / (cores_division_[0] * cores_division_[1]);
+
+		const auto block_y_begin = group_block_offsetsy_[tid_y];
+		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid_y];
+
+		const auto block_z_begin = group_block_offsetsz_[tid_z];
+		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid_z];
+
+		const auto lane_id_y = tid_z + substrate_group * cores_division_[2];
+		const auto lane_scratchy_l =
+			get_scratch_layout(this->problem_.ny, substrate_groups_ * cores_division_[2]) ^ noarr::fix<'l'>(lane_id_y);
+
+		const auto lane_id_z = tid_y + substrate_group * cores_division_[1];
+		const auto lane_scratchz_l =
+			get_scratch_layout(this->problem_.nz, substrate_groups_ * cores_division_[1]) ^ noarr::fix<'l'>(lane_id_z);
+
+		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		{
+			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
+			// #pragma omp critical
+			// 			std::cout << "Thread " << tid << " s_begin: " << s << " s_end: " << s + s_step_length
+			// 					  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
+			// 					  << " block_z_begin: " << block_z_begin << " block_z_end: " << block_z_end
+			// 					  << " group: " << substrate_group << " lane_y: " << lane_id_y << " lane_z: " <<
+			// lane_id_z
+			// 					  << std::endl;
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				solve_slice_xyz_fused_transpose_blocked2<index_t>(
+					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_, a_scratchz_,
+					c_scratchz_, get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
+					lane_scratchy_l, lane_scratchz_l, s, s + s_step_length, block_y_begin, block_y_end, block_z_begin,
+					block_z_end, cores_division_[1], cores_division_[2], epoch_y, countersy_[lane_id_y].value, epoch_z,
+					countersz_[lane_id_z].value);
 			}
 		}
 	}
@@ -2178,12 +2256,16 @@ least_memory_thomas_solver_d_f<real_t, aligned_x>::~least_memory_thomas_solver_d
 
 	if (a_scratchy_)
 	{
+		std::free(ay_);
+		std::free(b1y_);
 		std::free(a_scratchy_);
 		std::free(c_scratchy_);
 	}
 
 	if (a_scratchz_)
 	{
+		std::free(az_);
+		std::free(b1z_);
 		std::free(a_scratchz_);
 		std::free(c_scratchz_);
 	}
