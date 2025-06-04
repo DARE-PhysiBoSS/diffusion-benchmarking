@@ -55,7 +55,7 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	real_t *a_scratchz_, *c_scratchz_;
 
 	bool use_intrinsics_;
-	bool use_blocked_;
+	bool use_alt_blocked_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 	index_t substrate_step_;

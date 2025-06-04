@@ -276,6 +276,15 @@ struct inside_data_blocked
 	scratch_bag_t c;
 };
 
+template <typename index_t, typename scratch_bag_t>
+struct inside_data_blocked_alt
+{
+	const index_t begin;
+	const index_t end;
+	scratch_bag_t a;
+	scratch_bag_t c;
+};
+
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
 static void z_forward_inside_y_blocked(const density_bag_t d, const index_t s, const index_t z, const index_t y,
 									   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
@@ -311,6 +320,41 @@ static void z_forward_inside_y_blocked(const density_bag_t d, const index_t s, c
 		// #pragma omp critical
 		// 		std::cout << "f1: " << z << " " << y << " " << x << " " << data << " " << a_tmp << " " << b_tmp << " "
 		// 				  << c[prev_state] << std::endl;
+	}
+}
+
+template <typename vec_t, typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t,
+		  typename simd_tag>
+static void z_forward_inside_y_blocked_vectorized(const density_bag_t d, simd_tag t, const index_t s, const index_t z,
+												  const index_t y, const index_t X, vec_t data, const real_t a_s,
+												  const real_t b1_s, const index_t z_begin, scratch_bag_t c)
+
+{
+	const index_t z_len = d | noarr::get_length<'z'>();
+
+	if (z < z_begin + 2)
+	{
+		const auto b_tmp = b1_s + ((z == 0) || (z == z_len - 1) ? a_s : 0);
+
+		data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
+
+		hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y));
+	}
+	else
+	{
+		const auto prev_state = noarr::idx<'s', 'i'>(s, z - 1);
+
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + (z == z_len - 1 ? a_s : 0);
+
+		const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+		vec_t prev = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z - 1, y));
+
+		data = hn::MulAdd(hn::Set(t, -a_tmp), prev, data);
+		data = hn::Mul(data, hn::Set(t, r));
+
+		hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y));
 	}
 }
 
@@ -548,6 +592,36 @@ static void z_blocked_end(density_bag_t d, scratch_bag_t a, scratch_bag_t c, con
 	}
 }
 
+template <typename index_t, typename density_bag_t, typename scratch_bag_t>
+static void z_blocked_end_alt(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+							  const index_t y_end, const index_t z_begin, const index_t z_end, const index_t s)
+{
+	const index_t x_len = d | noarr::get_length<'x'>();
+
+	for (index_t i = z_end - 2; i >= z_begin + 1; i--)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, i);
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t x = 0; x < x_len; x++)
+			{
+				d.template at<'s', 'x', 'y', 'z'>(s, x, y, i) =
+					d.template at<'s', 'x', 'y', 'z'>(s, x, y, i)
+					- a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y, z_begin)
+					- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y, i + 1);
+
+
+				// #pragma omp critical
+				// 			std::cout << "0b z: " << z << " y: " << i << " x: " << x << " a: " << a[state] << " c: " <<
+				// c[state]
+				// 					  << " d: " << d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
+				// 					  << " d0: " << d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) << std::endl;
+			}
+		}
+	}
+}
+
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
 static void y_backward_blocked(const density_bag_t d, const index_t z, const real_t y_begin, const real_t y_end,
 							   const scratch_bag_t a, const scratch_bag_t c, const index_t s)
@@ -602,6 +676,57 @@ static void y_backward_blocked(const density_bag_t d, const index_t z, const rea
 	}
 }
 
+template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
+		  typename simd_tag>
+static void y_backward_blocked_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
+										  const index_t simd_length, const index_t z, const real_t y_begin,
+										  const real_t y_end, const scratch_bag_t a, const scratch_bag_t c,
+										  const index_t s)
+
+{
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	const auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b', 'x'>(noarr::lit<0>, noarr::lit<0>), densities);
+
+	for (index_t X = 0; X < X_len; X++)
+	{
+		vec_t prev = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_end - 2));
+
+		// Process the upper diagonal (backward)
+		index_t i;
+		for (i = y_end - 3; i >= y_begin + 1; i--)
+		{
+			const auto state = noarr::idx<'s', 'i'>(s, i);
+			const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+			vec_t data = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+			data = hn::MulAdd(prev, hn::Set(t, -c[state]), data);
+			prev = data;
+
+			hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+
+			a[state] = a[state] - c[state] * a[next_state];
+			c[state] = 0 - c[state] * c[next_state];
+		}
+
+		// Process the first row (backward)
+		{
+			const auto state = noarr::idx<'s', 'i'>(s, i);
+			const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+			const auto r = 1 / (1 - c[state] * a[next_state]);
+
+			vec_t data = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+			data = hn::MulAdd(prev, hn::Set(t, -c[state]), data);
+			data = hn::Mul(data, hn::Set(t, r));
+
+			a[state] = r * a[state];
+			c[state] = r * (0 - c[state] * c[next_state]);
+		}
+	}
+}
+
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
 static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
@@ -652,6 +777,11 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 				r
 				* (d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
 				   - a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, prev_i, z));
+
+			// #pragma omp critical
+			// 			std::cout << "mf z: " << z << " y: " << i << " x: " << x << " a: " << a[state] << " cp: " <<
+			// c[prev_state]
+			// 					  << " d: " << d.template at<'s', 'x', 'z', 'y'>(s, x, z, i) << std::endl;
 		}
 	}
 
@@ -666,6 +796,10 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 			d.template at<'s', 'x', 'y', 'z'>(s, x, i, z) =
 				d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
 				- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, next_i, z);
+
+			// #pragma omp critical
+			// 			std::cout << "mb z: " << z << " y: " << i << " x: " << x << " c: " << c[state]
+			// 					  << " d: " << d.template at<'s', 'x', 'z', 'y'>(s, x, z, i) << std::endl;
 		}
 	}
 }
@@ -687,6 +821,166 @@ static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scr
 				- a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z)
 				- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_end - 1, z);
 		}
+	}
+}
+
+template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
+		  typename simd_tag>
+static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
+									 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
+									 const index_t y_begin, const index_t y_end, const index_t s)
+{
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	const auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b', 'x'>(noarr::lit<0>, noarr::lit<0>), densities);
+
+	for (index_t X = 0; X < X_len; X++)
+	{
+		vec_t begins = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_begin));
+		vec_t ends = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_end - 1));
+
+		for (index_t i = y_begin + 1; i < y_end - 1; i++)
+		{
+			const auto state = noarr::idx<'s', 'i'>(s, i);
+
+			vec_t data = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+			data = hn::MulAdd(begins, hn::Set(t, -a[state]), data);
+			data = hn::MulAdd(ends, hn::Set(t, -c[state]), data);
+
+			hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+		}
+	}
+}
+
+template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
+static void z_forward_inside_y_blocked_alt(const density_bag_t d, const index_t s, const index_t y, const index_t z,
+										   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
+										   const index_t z_begin, const index_t z_end, scratch_bag_t a, scratch_bag_t c)
+
+{
+	const index_t z_len = d | noarr::get_length<'z'>();
+
+	real_t a_state;
+
+	if (z < z_begin + 2)
+	{
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + ((z == 0) || (z == z_len - 1) ? a_s : 0);
+
+		data /= b_tmp;
+
+		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z) = data;
+
+		a_state = a_tmp / b_tmp;
+
+		// #pragma omp critical
+		// 		std::cout << "f0: " << z << " " << y << " " << x << " " << data << " " << b_tmp << std::endl;
+	}
+	else
+	{
+		const auto prev_state = noarr::idx<'s', 'i'>(s, z - 1);
+
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + (z == z_len - 1 ? a_s : 0);
+
+		const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+		data = r * (data - a_tmp * d.template at<'s', 'x', 'y', 'z'>(s, x, y, z - 1));
+
+		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z) = data;
+
+		a_state = r * (0 - a_tmp * a[prev_state]);
+
+		// #pragma omp critical
+		// 		std::cout << "f1: " << z << " " << y << " " << x << " " << data << " " << a_tmp << " " << b_tmp << " "
+		// 				  << c[prev_state] << std::endl;
+	}
+
+	if (z != z_begin && z != z_end - 1)
+	{
+		const auto state0 = noarr::idx<'s', 'i'>(s, z_begin);
+
+		const auto r0 = 1 / (1 - a_state * c[state0]);
+
+		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z_begin) =
+			r0 * (d.template at<'s', 'x', 'y', 'z'>(s, x, y, z_begin) - c[state0] * data);
+
+
+		// #pragma omp critical
+		// 		std::cout << "0 z: " << z << " y: " << y << " x: " << x << " a0: " << a[state0] << " c0: " << c[state0]
+		// 				  << " r0: " << r0 << " d: " << d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) <<
+		// std::endl;
+	}
+}
+
+template <typename vec_t, typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t,
+		  typename simd_tag>
+static void z_forward_inside_y_blocked_alt_vectorized(const density_bag_t d, simd_tag t, const index_t s,
+													  const index_t y, const index_t z, const index_t X, vec_t data,
+													  const real_t a_s, const real_t b1_s, const index_t z_begin,
+													  const index_t z_end, scratch_bag_t a, scratch_bag_t c)
+
+{
+	const index_t z_len = d | noarr::get_length<'z'>();
+
+	real_t a_state;
+
+	if (z < z_begin + 2)
+	{
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + ((z == 0) || (z == z_len - 1) ? a_s : 0);
+
+		data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
+
+		hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y));
+
+		a_state = a_tmp / b_tmp;
+
+		// #pragma omp critical
+		// 		std::cout << "f0: " << z << " " << y << " " << x << " " << data << " " << b_tmp << std::endl;
+	}
+	else
+	{
+		const auto prev_state = noarr::idx<'s', 'i'>(s, z - 1);
+
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + (z == z_len - 1 ? a_s : 0);
+
+		const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+		vec_t prev = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z - 1, y));
+
+		data = hn::MulAdd(hn::Set(t, -a_tmp), prev, data);
+		data = hn::Mul(data, hn::Set(t, r));
+
+		hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y));
+
+		a_state = r * (0 - a_tmp * a[prev_state]);
+
+		// #pragma omp critical
+		// 		std::cout << "f1: " << z << " " << y << " " << x << " " << data << " " << a_tmp << " " << b_tmp << " "
+		// 				  << c[prev_state] << std::endl;
+	}
+
+	if (z != z_begin && z != z_end - 1)
+	{
+		const auto state0 = noarr::idx<'s', 'i'>(s, z_begin);
+
+		const auto r0 = 1 / (1 - a_state * c[state0]);
+
+		vec_t z0 = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z_begin, y));
+
+		z0 = hn::MulAdd(hn::Set(t, -c[state0]), data, z0);
+		z0 = hn::Mul(z0, hn::Set(t, r0));
+
+		hn::Store(z0, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z_begin, y));
+
+
+		// #pragma omp critical
+		// 		std::cout << "0 z: " << z << " y: " << y << " x: " << x << " a0: " << a[state0] << " c0: " << c[state0]
+		// 				  << " r0: " << r0 << " d: " << d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) <<
+		// std::endl;
 	}
 }
 
@@ -713,6 +1007,166 @@ static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scr
 
 			z_forward_inside_y_blocked(d, s, z, i, x, data, az_s, b1z_s, z_data.begin, z_data.c);
 		}
+	}
+}
+
+template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
+		  typename z_data_t, typename simd_tag>
+static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
+									 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
+									 const index_t y_begin, const index_t y_end, const index_t s, const real_t az_s,
+									 const real_t b1z_s, z_data_t z_data)
+{
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	const auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b', 'x'>(noarr::lit<0>, noarr::lit<0>), densities);
+
+	for (index_t X = 0; X < X_len; X++)
+	{
+		vec_t begins = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_begin));
+		vec_t ends = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_end - 1));
+
+		for (index_t i = y_begin + 1; i < y_end - 1; i++)
+		{
+			const auto state = noarr::idx<'s', 'i'>(s, i);
+
+			vec_t data = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+			data = hn::MulAdd(begins, hn::Set(t, -a[state]), data);
+			data = hn::MulAdd(ends, hn::Set(t, -c[state]), data);
+
+			// hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+
+			z_forward_inside_y_blocked_vectorized(d, t, s, z, i, X, data, az_s, b1z_s, z_data.begin, z_data.c);
+		}
+	}
+}
+
+template <typename index_t, typename density_bag_t, typename scratch_bag_t>
+static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+							  const index_t y_end, const index_t s)
+{
+	const index_t x_len = d | noarr::get_length<'x'>();
+
+	for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, i);
+
+		for (index_t x = 0; x < x_len; x++)
+		{
+			d.template at<'s', 'x', 'y', 'z'>(s, x, i, z) =
+				d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
+				- a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z)
+				- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, i + 1, z);
+
+
+			// #pragma omp critical
+			// 			std::cout << "0b z: " << z << " y: " << i << " x: " << x << " a: " << a[state] << " c: " <<
+			// c[state]
+			// 					  << " d: " << d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
+			// 					  << " d0: " << d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) << std::endl;
+		}
+	}
+}
+
+template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
+		  typename simd_tag>
+static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
+										 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
+										 const index_t y_begin, const index_t y_end, const index_t s)
+{
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	const auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b', 'x'>(noarr::lit<0>, noarr::lit<0>), densities);
+
+	for (index_t X = 0; X < X_len; X++)
+	{
+		vec_t begins = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_begin));
+		vec_t prev = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_end - 1));
+
+		for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+		{
+			const auto state = noarr::idx<'s', 'i'>(s, i);
+
+			vec_t data = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+			data = hn::MulAdd(begins, hn::Set(t, -a[state]), data);
+			data = hn::MulAdd(prev, hn::Set(t, -c[state]), data);
+			prev = data;
+
+			hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+		}
+	}
+}
+
+template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t, typename z_data_t>
+static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+							  const index_t y_end, const index_t s, const real_t az_s, const real_t b1z_s,
+							  z_data_t z_data)
+{
+	const index_t x_len = d | noarr::get_length<'x'>();
+
+	for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, i);
+
+		for (index_t x = 0; x < x_len; x++)
+		{
+			d.template at<'s', 'x', 'y', 'z'>(s, x, i, z) =
+				d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
+				- a[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z)
+				- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, i + 1, z);
+
+
+			// #pragma omp critical
+			// 			std::cout << "0b z: " << z << " y: " << i << " x: " << x << " a: " << a[state] << " c: " <<
+			// c[state]
+			// 					  << " d: " << d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
+			// 					  << " d0: " << d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) << std::endl;
+
+			z_forward_inside_y_blocked_alt(d, s, i + 1, z, x, d.template at<'s', 'x', 'y', 'z'>(s, x, i + 1, z), az_s,
+										   b1z_s, z_data.begin, z_data.end, z_data.a, z_data.c);
+		}
+	}
+}
+
+template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
+		  typename z_data_t, typename simd_tag>
+static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
+										 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
+										 const index_t y_begin, const index_t y_end, const index_t s, const real_t az_s,
+										 const real_t b1z_s, z_data_t z_data)
+{
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	const auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b', 'x'>(noarr::lit<0>, noarr::lit<0>), densities);
+
+	for (index_t X = 0; X < X_len; X++)
+	{
+		vec_t begins = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_begin));
+		vec_t prev = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, y_end - 1));
+
+		for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+		{
+			const auto state = noarr::idx<'s', 'i'>(s, i);
+
+			vec_t data = hn::Load(t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+			data = hn::MulAdd(begins, hn::Set(t, -a[state]), data);
+			data = hn::MulAdd(prev, hn::Set(t, -c[state]), data);
+
+			hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+
+			z_forward_inside_y_blocked_alt_vectorized(d, t, s, i + 1, z, X, prev, az_s, b1z_s, z_data.begin, z_data.end,
+													  z_data.a, z_data.c);
+			prev = data;
+		}
+
+		z_forward_inside_y_blocked_alt_vectorized(d, t, s, y_begin + 1, z, X, prev, az_s, b1z_s, z_data.begin,
+												  z_data.end, z_data.a, z_data.c);
+
+		z_forward_inside_y_blocked_alt_vectorized(d, t, s, y_begin, z, X, begins, az_s, b1z_s, z_data.begin, z_data.end,
+												  z_data.a, z_data.c);
 	}
 }
 
@@ -786,6 +1240,67 @@ static void y_forward_inside_x_blocked(const density_bag_t d, const index_t s, c
 	}
 }
 
+template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
+static void y_forward_inside_x_blocked_alt(const density_bag_t d, const index_t s, const index_t z, const index_t y,
+										   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
+										   const index_t y_begin, const index_t y_end, scratch_bag_t a, scratch_bag_t c)
+
+{
+	const index_t y_len = d | noarr::get_length<'y'>();
+
+	real_t a_state;
+
+	if (y < y_begin + 2)
+	{
+		const auto a_tmp = a_s * (y == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + ((y == 0) || (y == y_len - 1) ? a_s : 0);
+
+		data /= b_tmp;
+
+		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z) = data;
+
+		a_state = a_tmp / b_tmp;
+
+		// #pragma omp critical
+		// 		std::cout << "f0: " << z << " " << y << " " << x << " " << data << " " << b_tmp << std::endl;
+	}
+	else
+	{
+		const auto prev_state = noarr::idx<'s', 'i'>(s, y - 1);
+
+		const auto a_tmp = a_s * (y == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + (y == y_len - 1 ? a_s : 0);
+
+		const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+		data = r * (data - a_tmp * d.template at<'s', 'x', 'y', 'z'>(s, x, y - 1, z));
+
+		d.template at<'s', 'x', 'y', 'z'>(s, x, y, z) = data;
+
+		a_state = r * (0 - a_tmp * a[prev_state]);
+
+		// #pragma omp critical
+		// 		std::cout << "f1: " << z << " " << y << " " << x << " " << data << " " << a_tmp << " " << b_tmp << " "
+		// 				  << c[prev_state] << std::endl;
+	}
+
+	if (y != y_begin && y != y_end - 1)
+	{
+		const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+
+		const auto r0 = 1 / (1 - a_state * c[state0]);
+
+		d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) =
+			r0 * (d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) - c[state0] * data);
+
+
+		// #pragma omp critical
+		// 		std::cout << "0 z: " << z << " y: " << y << " x: " << x << " a0: " << a[state0] << " c0: " << c[state0]
+		// 				  << " r0: " << r0 << " d: " << d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z) <<
+		// std::endl;
+	}
+}
+
 template <bool z_blocked, typename index_t, typename real_t, typename density_bag_t, typename diag_bag_t,
 		  typename z_data_t>
 static void y_backward(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z, const real_t az_s,
@@ -856,8 +1371,8 @@ static void x_forward(const density_bag_t d, const index_t s, const index_t z, c
 	}
 }
 
-template <bool y_blocked, typename index_t, typename real_t, typename density_bag_t, typename diag_bag_t,
-		  typename y_data_t>
+template <bool y_blocked, bool blocked_alt, typename index_t, typename real_t, typename density_bag_t,
+		  typename diag_bag_t, typename y_data_t>
 static void x_backward(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z, const index_t y,
 					   real_t& prev, const real_t ay_s, const real_t b1y_s, y_data_t y_data)
 
@@ -872,8 +1387,11 @@ static void x_backward(const density_bag_t d, const diag_bag_t c, const index_t 
 
 		if constexpr (!y_blocked)
 			y_forward_inside_x<false>(d, s, z, y, i + 1, prev, ay_s, b1y_s, y_data.c_tmp);
-		else
+		else if constexpr (!blocked_alt)
 			y_forward_inside_x_blocked(d, s, z, y, i + 1, prev, ay_s, b1y_s, y_data.begin, y_data.c);
+		else
+			y_forward_inside_x_blocked_alt(d, s, z, y, i + 1, prev, ay_s, b1y_s, y_data.begin, y_data.end, y_data.a,
+										   y_data.c);
 
 		prev = curr;
 	}
@@ -925,7 +1443,7 @@ static void solve_slice_xyz_fused(real_t* __restrict__ densities, const real_t* 
 
 				x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-				x_backward<false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data { c_tmp_y });
+				x_backward<false, false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data { c_tmp_y });
 
 				y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, c_tmp_y);
 			}
@@ -950,100 +1468,100 @@ static void solve_slice_xyz_fused(real_t* __restrict__ densities, const real_t* 
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
-		  typename scratch_layout_t>
-static void solve_slice_xyz_fused_blocked(
-	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
-	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
-	real_t* __restrict__ a_data, real_t* __restrict__ c_data, const density_layout_t dens_l,
-	const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l, const scratch_layout_t scratch_l, const index_t s,
-	const index_t z_begin, const index_t z_end, const index_t z_block_size, index_t& epoch, std::atomic<long>& counter)
-{
-	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
-	const index_t z_len = dens_l | noarr::get_length<'z'>();
+// template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+// 		  typename scratch_layout_t>
+// static void solve_slice_xyz_fused_blocked(
+// 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
+// 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+// 	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
+// 	real_t* __restrict__ a_data, real_t* __restrict__ c_data, const density_layout_t dens_l,
+// 	const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l, const scratch_layout_t scratch_l, const index_t s,
+// 	const index_t z_begin, const index_t z_end, const index_t z_block_size, index_t& epoch, std::atomic<long>& counter)
+// {
+// 	const index_t x_len = dens_l | noarr::get_length<'x'>();
+// 	const index_t y_len = dens_l | noarr::get_length<'y'>();
+// 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 
-	const auto d = noarr::make_bag(dens_l, densities);
-	const auto cx = noarr::make_bag(diagx_l, back_cx);
-	const auto cy = noarr::make_bag(diagy_l, back_cy);
+// 	const auto d = noarr::make_bag(dens_l, densities);
+// 	const auto cx = noarr::make_bag(diagx_l, back_cx);
+// 	const auto cy = noarr::make_bag(diagy_l, back_cy);
 
-	const auto a = noarr::make_bag(scratch_l, a_data);
-	const auto c = noarr::make_bag(scratch_l, c_data);
+// 	const auto a = noarr::make_bag(scratch_l, a_data);
+// 	const auto c = noarr::make_bag(scratch_l, c_data);
 
-	const real_t ax_s = ax[s];
-	const real_t b1x_s = b1x[s];
+// 	const real_t ax_s = ax[s];
+// 	const real_t b1x_s = b1x[s];
 
-	const real_t ay_s = ay[s];
-	const real_t b1y_s = b1y[s];
+// 	const real_t ay_s = ay[s];
+// 	const real_t b1y_s = b1y[s];
 
-	const real_t az_s = az[s];
-	const real_t b1z_s = b1z[s];
+// 	const real_t az_s = az[s];
+// 	const real_t b1z_s = b1z[s];
 
-	for (index_t z = z_begin; z < z_end; z++)
-	{
-		real_t c_tmp_y = ay_s;
+// 	for (index_t z = z_begin; z < z_end; z++)
+// 	{
+// 		real_t c_tmp_y = ay_s;
 
-		for (index_t y = 0; y < y_len; y++)
-		{
-			real_t a_tmp = 0;
-			real_t b_tmp = b1x_s + ax_s;
-			real_t c_tmp = ax_s;
-			real_t prev = 0;
+// 		for (index_t y = 0; y < y_len; y++)
+// 		{
+// 			real_t a_tmp = 0;
+// 			real_t b_tmp = b1x_s + ax_s;
+// 			real_t c_tmp = ax_s;
+// 			real_t prev = 0;
 
-			x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
+// 			x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-			x_backward<false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data<real_t> { c_tmp_y });
+// 			x_backward<false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data<real_t> { c_tmp_y });
 
-			y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, c_tmp_y);
-		}
+// 			y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, c_tmp_y);
+// 		}
 
-		y_backward<true>(d, cy, s, z, az_s, b1z_s, inside_data_blocked { z_begin, c });
+// 		y_backward<true>(d, cy, s, z, az_s, b1z_s, inside_data_blocked { z_begin, c });
 
-		{
-			for (index_t x = 0; x < x_len; x++)
-			{
-				z_forward_inside_y_blocked(d, s, z, 0, x, d.template at<'s', 'z', 'y', 'x'>(s, z, 0, x), az_s, b1z_s,
-										   z_begin, c);
-			}
+// 		{
+// 			for (index_t x = 0; x < x_len; x++)
+// 			{
+// 				z_forward_inside_y_blocked(d, s, z, 0, x, d.template at<'s', 'z', 'y', 'x'>(s, z, 0, x), az_s, b1z_s,
+// 										   z_begin, c);
+// 			}
 
-			z_forward_inside_y_blocked_next(s, z, az_s, b1z_s, z_len, z_begin, a, c);
-		}
-	}
+// 			z_forward_inside_y_blocked_next(s, z, az_s, b1z_s, z_len, z_begin, a, c);
+// 		}
+// 	}
 
-	z_backward_blocked(d, 0, y_len, z_begin, z_end, a, c, s);
+// 	z_backward_blocked(d, 0, y_len, z_begin, z_end, a, c, s);
 
-	index_t cooperating_threads = (z_len + z_block_size - 1) / z_block_size;
+// 	index_t cooperating_threads = (z_len + z_block_size - 1) / z_block_size;
 
-	{
-		auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+// 	{
+// 		auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-		while (val < epoch * cooperating_threads)
-		{
-			val = counter.load(std::memory_order_acquire);
-		}
-	}
+// 		while (val < epoch * cooperating_threads)
+// 		{
+// 			val = counter.load(std::memory_order_acquire);
+// 		}
+// 	}
 
-	// #pragma omp barrier
+// 	// #pragma omp barrier
 
-	if (z_begin == 0)
-		z_blocked_middle(d, a, c, z_block_size, 0, y_len, s);
+// 	if (z_begin == 0)
+// 		z_blocked_middle(d, a, c, z_block_size, 0, y_len, s);
 
-	// #pragma omp barrier
+// 	// #pragma omp barrier
 
-	epoch++;
+// 	epoch++;
 
-	{
-		auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+// 	{
+// 		auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-		while (val < epoch * cooperating_threads)
-		{
-			val = counter.load(std::memory_order_acquire);
-		}
-	}
+// 		while (val < epoch * cooperating_threads)
+// 		{
+// 			val = counter.load(std::memory_order_acquire);
+// 		}
+// 	}
 
-	z_blocked_end(d, a, c, 0, y_len, z_begin, z_end, s);
-}
+// 	z_blocked_end(d, a, c, 0, y_len, z_begin, z_end, s);
+// }
 
 template <bool is_end, typename index_t, typename real_t, typename vec_t, typename simd_tag>
 constexpr static void x_forward_vectorized(vec_t* rows, simd_tag t, const index_t length, const real_t a_s,
@@ -1235,6 +1753,102 @@ static void y_forward_inside_x_vectorized_blocked(const density_bag_t d, vec_t* 
 	}
 }
 
+template <typename index_t, typename real_t, typename vec_t, typename simd_tag, typename density_bag_t>
+static void y_forward_inside_x_vectorized_blocked_alt(const density_bag_t d, vec_t* rows, simd_tag t, const index_t z,
+													  const index_t y_offset, const index_t x, const index_t s,
+													  const index_t length, const index_t y_len, const real_t ay_s,
+													  const real_t b1y_s, const index_t y_begin, const index_t y_end,
+													  real_t ay_tmp, real_t cy_tmp, real_t ay0_tmp, real_t cy0_tmp)
+{
+	vec_t prev;
+	vec_t y0;
+
+	if (y_offset == y_begin)
+		prev = hn::Zero(t);
+	else
+	{
+		prev = hn::Load(t, &(d.template at<'z', 'y', 'x', 's'>(z, y_offset - 1, x, s)));
+		y0 = hn::Load(t, &(d.template at<'z', 'y', 'x', 's'>(z, y_begin, x, s)));
+	}
+
+	for (index_t v = 0; v < length; v++)
+	{
+		const index_t y = y_offset + v;
+
+		if (y < y_begin + 2)
+		{
+			const auto a_tmp = ay_s * (y == 0 ? 0 : 1);
+			const auto b_tmp = b1y_s + ((y == 0) || (y == y_len - 1) ? ay_s : 0);
+			const auto c_tmp = ay_s * (y == y_len - 1 ? 0 : 1);
+
+			rows[v] = hn::Mul(rows[v], hn::Set(t, 1 / b_tmp));
+			prev = rows[v];
+
+			ay_tmp = a_tmp / b_tmp;
+			cy_tmp = c_tmp / b_tmp;
+
+			// #pragma omp critical
+			// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
+			// 			{
+			// 				std::cout << "f0: " << z << " " << y << " " << x + l << " " << hn::ExtractLane(rows[v], l)
+			// << " "
+			// 						  << b_tmp << std::endl;
+			// 			}
+		}
+		else
+		{
+			const auto a_tmp = ay_s * (y == 0 ? 0 : 1);
+			const auto b_tmp = b1y_s + (y == y_len - 1 ? ay_s : 0);
+			const auto c_tmp = ay_s * (y == y_len - 1 ? 0 : 1);
+
+			const auto r = 1 / (b_tmp - a_tmp * cy_tmp);
+
+			ay_tmp = r * (0 - a_tmp * ay_tmp);
+			cy_tmp = r * c_tmp;
+
+			rows[v] = hn::MulAdd(hn::Set(t, -a_tmp), prev, rows[v]);
+			rows[v] = hn::Mul(rows[v], hn::Set(t, r));
+			prev = rows[v];
+
+			// #pragma omp critical
+			// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
+			// 			{
+			// 				std::cout << "f1: " << z << " " << y << " " << x + l << " " << hn::ExtractLane(rows[v], l)
+			// << " "
+			// 						  << a_tmp << " " << b_tmp << " " << cy_tmp << std::endl;
+			// 			}
+		}
+
+		if (y != y_begin && y != y_end - 1)
+		{
+			// const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+			const auto r0 = 1 / (1 - ay_tmp * cy0_tmp);
+
+			if (y == y_begin + 1)
+				y0 = rows[0];
+
+			y0 = hn::MulAdd(hn::Set(t, -cy0_tmp), rows[v], y0);
+			y0 = hn::Mul(y0, hn::Set(t, r0));
+
+			// #pragma omp critical
+			// 			for (std::size_t l = 0; l < hn::Lanes(t); l++)
+			// 			{
+			// 				std::cout << "0 z: " << z << " y: " << y << " x: " << x + l << " a0: " << ay0_tmp << " c0: "
+			// << cy0_tmp
+			// 						  << " r0: " << r0 << " d: " << hn::ExtractLane(y0, l) << std::endl;
+			// 			}
+
+			ay0_tmp *= r0;
+			cy0_tmp = r0 * -cy_tmp * cy0_tmp;
+		}
+	}
+
+	if (y_offset == y_begin)
+		rows[0] = y0;
+	else
+		hn::Store(y0, t, &(d.template at<'z', 'y', 'x', 's'>(z, y_begin, x, s)));
+}
+
 template <typename index_t, typename real_t, typename scratch_bag_t>
 static void y_forward_inside_x_blocked_next(const index_t s, const index_t y, const real_t a_s, const real_t b1_s,
 											const index_t y_len, const index_t y_begin, scratch_bag_t a,
@@ -1268,6 +1882,92 @@ static void y_forward_inside_x_blocked_next(const index_t s, const index_t y, co
 	}
 }
 
+template <typename index_t, typename real_t, typename scratch_bag_t>
+static void y_forward_inside_x_blocked_next_alt(const index_t s, const index_t y, const real_t a_s, const real_t b1_s,
+												const index_t y_len, const index_t y_begin, const index_t y_end,
+												scratch_bag_t a, scratch_bag_t c)
+
+{
+	if (y < y_begin + 2)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, y);
+
+		const auto a_tmp = a_s * (y == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + ((y == 0) || (y == y_len - 1) ? a_s : 0);
+		const auto c_tmp = a_s * (y == y_len - 1 ? 0 : 1);
+
+		a[state] = a_tmp / b_tmp;
+		c[state] = c_tmp / b_tmp;
+	}
+	else
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, y);
+		const auto prev_state = noarr::idx<'s', 'i'>(s, y - 1);
+
+		const auto a_tmp = a_s * (y == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + (y == y_len - 1 ? a_s : 0);
+		const auto c_tmp = a_s * (y == y_len - 1 ? 0 : 1);
+
+		const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+		a[state] = r * (0 - a_tmp * a[prev_state]);
+		c[state] = r * c_tmp;
+	}
+
+	if (y != y_begin && y != y_end - 1)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, y);
+		const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+		const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+		a[state0] *= r0;
+		c[state0] = r0 * -c[state] * c[state0];
+	}
+}
+
+template <typename index_t, typename real_t, typename scratch_bag_t>
+static void z_forward_inside_y_blocked_next_alt(const index_t s, const index_t z, const real_t a_s, const real_t b1_s,
+												const index_t z_len, const index_t z_begin, const index_t z_end,
+												scratch_bag_t a, scratch_bag_t c)
+
+{
+	if (z < z_begin + 2)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, z);
+
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + ((z == 0) || (z == z_len - 1) ? a_s : 0);
+		const auto c_tmp = a_s * (z == z_len - 1 ? 0 : 1);
+
+		a[state] = a_tmp / b_tmp;
+		c[state] = c_tmp / b_tmp;
+	}
+	else
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, z);
+		const auto prev_state = noarr::idx<'s', 'i'>(s, z - 1);
+
+		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
+		const auto b_tmp = b1_s + (z == z_len - 1 ? a_s : 0);
+		const auto c_tmp = a_s * (z == z_len - 1 ? 0 : 1);
+
+		const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+		a[state] = r * (0 - a_tmp * a[prev_state]);
+		c[state] = r * c_tmp;
+	}
+
+	if (z != z_begin && z != z_end - 1)
+	{
+		const auto state = noarr::idx<'s', 'i'>(s, z);
+		const auto state0 = noarr::idx<'s', 'i'>(s, z_begin);
+		const auto r0 = 1 / (1 - a[state] * c[state0]);
+
+		a[state0] *= r0;
+		c[state0] = r0 * -c[state] * c[state0];
+	}
+}
+
 template <typename index_t>
 struct inner_z_data
 {
@@ -1293,6 +1993,19 @@ struct inner_y_data_blocked
 {
 	index_t y_begin;
 	real_t& cy_tmp;
+	scratch_bag_t ay_scratch;
+	scratch_bag_t cy_scratch;
+};
+
+template <typename index_t, typename real_t, typename scratch_bag_t>
+struct inner_y_data_blocked_alt
+{
+	index_t y_begin;
+	index_t y_end;
+	real_t& ay_tmp;
+	real_t& cy_tmp;
+	real_t& ay0_tmp;
+	real_t& cy0_tmp;
 	scratch_bag_t ay_scratch;
 	scratch_bag_t cy_scratch;
 };
@@ -1371,8 +2084,8 @@ constexpr static void y_backward_vectorized(const density_layout_t dens_l, real_
 	}
 }
 
-template <bool y_blocked, typename simd_t, typename simd_tag, typename index_t, typename real_t, typename density_bag_t,
-		  typename diag_bag_t, typename y_data_t>
+template <bool y_blocked, bool blocked_alt, typename simd_t, typename simd_tag, typename index_t, typename real_t,
+		  typename density_bag_t, typename diag_bag_t, typename y_data_t>
 static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t, const index_t simd_length,
 											  const index_t y_begin, const index_t y_end, const index_t z,
 											  const index_t s, const real_t ax_s, const real_t b1x_s, const real_t ay_s,
@@ -1456,9 +2169,13 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 			if constexpr (!y_blocked)
 				y_forward_inside_x_vectorized(d, rows + 1, t, z, y, full_n - simd_length, s, simd_length, y_len, ay_s,
 											  b1y_s, ay_tmp, by_tmp, y_data.c_tmp);
-			else
+			else if constexpr (!blocked_alt)
 				y_forward_inside_x_vectorized_blocked(d, rows + 1, t, z, y, full_n - simd_length, s, simd_length, y_len,
 													  ay_s, b1y_s, y_data.y_begin, y_data.cy_tmp);
+			else
+				y_forward_inside_x_vectorized_blocked_alt(d, rows + 1, t, z, y, full_n - simd_length, s, simd_length,
+														  y_len, ay_s, b1y_s, y_data.y_begin, y_data.y_end,
+														  y_data.ay_tmp, y_data.cy_tmp, y_data.ay0_tmp, y_data.cy0_tmp);
 
 			// aligned stores
 			for (index_t v = 0; v < simd_length; v++)
@@ -1490,9 +2207,13 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 			if constexpr (!y_blocked)
 				y_forward_inside_x_vectorized(d, rows, t, z, y, i, s, simd_length, y_len, ay_s, b1y_s, ay_tmp, by_tmp,
 											  y_data.c_tmp);
-			else
+			else if constexpr (!blocked_alt)
 				y_forward_inside_x_vectorized_blocked(d, rows, t, z, y, i, s, simd_length, y_len, ay_s, b1y_s,
 													  y_data.y_begin, y_data.cy_tmp);
+			else
+				y_forward_inside_x_vectorized_blocked_alt(d, rows, t, z, y, i, s, simd_length, y_len, ay_s, b1y_s,
+														  y_data.y_begin, y_data.y_end, y_data.ay_tmp, y_data.cy_tmp,
+														  y_data.ay0_tmp, y_data.cy0_tmp);
 
 			// aligned stores
 			for (index_t v = 0; v < simd_length; v++)
@@ -1509,7 +2230,7 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 				by_tmp = b1y_s + (y + v == y_len - 2 ? ay_s : 0);
 				y_data.c_tmp = ay_s * r;
 			}
-		else
+		else if constexpr (!blocked_alt)
 		{
 			for (index_t v = 0; v < simd_length; v++)
 			{
@@ -1517,6 +2238,20 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 												y_data.cy_scratch);
 			}
 			y_data.cy_tmp = y_data.cy_scratch.template at<'s', 'i'>(s, y + simd_length - 1);
+		}
+		else
+		{
+			for (index_t v = 0; v < simd_length; v++)
+			{
+				y_forward_inside_x_blocked_next_alt(s, y + v, ay_s, b1y_s, y_len, y_data.y_begin, y_data.y_end,
+													y_data.ay_scratch, y_data.cy_scratch);
+			}
+
+			y_data.ay_tmp = y_data.ay_scratch.template at<'s', 'i'>(s, y + simd_length - 1);
+			y_data.cy_tmp = y_data.cy_scratch.template at<'s', 'i'>(s, y + simd_length - 1);
+
+			y_data.ay0_tmp = y_data.ay_scratch.template at<'s', 'i'>(s, y_begin);
+			y_data.cy0_tmp = y_data.cy_scratch.template at<'s', 'i'>(s, y_begin);
 		}
 	}
 
@@ -1569,8 +2304,8 @@ static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densities, cons
 				const index_t y_len_body = (body_dens_l | noarr::get_length<'y'>()) * simd_length;
 				const auto d = noarr::make_bag(dens_l, densities);
 
-				xy_fused_transpose_part<false, simd_t>(d, t, simd_length, 0, y_len_body, z, s, ax_s, b1x_s, ay_s, b1y_s,
-													   cx, inside_data { cy_tmp });
+				xy_fused_transpose_part<false, false, simd_t>(d, t, simd_length, 0, y_len_body, z, s, ax_s, b1x_s, ay_s,
+															  b1y_s, cx, inside_data { cy_tmp });
 			}
 
 			// y remainder
@@ -1589,7 +2324,7 @@ static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densities, cons
 
 					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-					x_backward<false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
+					x_backward<false, false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
 
 					y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, cy_tmp);
 				}
@@ -1640,8 +2375,8 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 			auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
 			const index_t y_len_body = (body_dens_l | noarr::get_length<'y'>()) * simd_length;
 
-			xy_fused_transpose_part<false, simd_t>(d, t, simd_length, 0, y_len_body, 0, s, ax_s, b1x_s, ay_s, b1y_s, cx,
-												   inside_data { cy_tmp });
+			xy_fused_transpose_part<false, false, simd_t>(d, t, simd_length, 0, y_len_body, 0, s, ax_s, b1x_s, ay_s,
+														  b1y_s, cx, inside_data { cy_tmp });
 		}
 
 		// y remainder
@@ -1658,7 +2393,7 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 
 				x_forward(d, s, 0, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-				x_backward<false>(d, cy, s, 0, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
+				x_backward<false, false>(d, cy, s, 0, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
 
 				y_forward_inside_x<true>(d, s, 0, y, 0, prev, ay_s, b1y_s, cy_tmp);
 			}
@@ -1719,8 +2454,8 @@ static void solve_slice_xyz_fused_transpose_blocked(real_t* __restrict__ densiti
 				const index_t y_len_body = (body_dens_l | noarr::get_length<'y'>()) * simd_length;
 				const auto d = noarr::make_bag(dens_l, densities);
 
-				xy_fused_transpose_part<false, simd_t>(d, t, simd_length, 0, y_len_body, z, s, ax_s, b1x_s, ay_s, b1y_s,
-													   cx, inside_data { cy_tmp });
+				xy_fused_transpose_part<false, false, simd_t>(d, t, simd_length, 0, y_len_body, z, s, ax_s, b1x_s, ay_s,
+															  b1y_s, cx, inside_data { cy_tmp });
 			}
 
 			// y remainder
@@ -1737,7 +2472,7 @@ static void solve_slice_xyz_fused_transpose_blocked(real_t* __restrict__ densiti
 
 					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-					x_backward<false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data { cy_tmp });
+					x_backward<false, false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data { cy_tmp });
 
 					y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, cy_tmp);
 				}
@@ -1826,9 +2561,9 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 
 			auto y_remainder = (y_end - y_begin) % simd_length;
 
-			xy_fused_transpose_part<true, simd_t>(d, t, simd_length, y_begin, y_end - y_remainder, 0, s, ax_s, b1x_s,
-												  ay_s, b1y_s, cx,
-												  inner_y_data_blocked { y_begin, cy_tmp, a_scratch, c_scratch });
+			xy_fused_transpose_part<true, false, simd_t>(
+				d, t, simd_length, y_begin, y_end - y_remainder, 0, s, ax_s, b1x_s, ay_s, b1y_s, cx,
+				inner_y_data_blocked { y_begin, cy_tmp, a_scratch, c_scratch });
 		}
 
 		// y remainder
@@ -1846,7 +2581,7 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 
 				x_forward(d, s, 0, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-				x_backward<true>(d, cx, s, 0, y, prev, ay_s, b1y_s, inside_data_blocked { y_begin, c_scratch });
+				x_backward<true, false>(d, cx, s, 0, y, prev, ay_s, b1y_s, inside_data_blocked { y_begin, c_scratch });
 
 				y_forward_inside_x_blocked(d, s, 0, y, 0, prev, ay_s, b1y_s, y_begin, c_scratch);
 
@@ -1859,6 +2594,8 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 		y_backward_blocked(d, 0, y_begin, y_end, a_scratch, c_scratch, s);
 
 		{
+			epoch++;
+
 			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
 			while (val < epoch * coop_size)
@@ -1874,9 +2611,9 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 
 		// #pragma omp barrier
 
-		epoch++;
-
 		{
+			epoch++;
+
 			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
 			while (val < epoch * coop_size)
@@ -1886,6 +2623,112 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 		}
 
 		y_blocked_end(d, 0, a_scratch, c_scratch, y_begin, y_end, s);
+	}
+}
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename scratch_layout_t>
+static void solve_slice_xy_fused_transpose_blocked_alt(
+	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
+	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+	real_t* __restrict__ a_data, real_t* __restrict__ c_data, const density_layout_t dens_l,
+	const diagonal_layout_t diagx_l, const scratch_layout_t scratch_l, const index_t s_begin, const index_t s_end,
+	const index_t y_begin, const index_t y_end, const index_t coop_size, index_t& epoch, std::atomic<long>& counter)
+{
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+	const auto d = noarr::make_bag(dens_l, densities);
+
+	const index_t y_len = dens_l | noarr::get_length<'y'>();
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		const real_t ax_s = ax[s];
+		const real_t b1x_s = b1x[s];
+
+		const real_t ay_s = ay[s];
+		const real_t b1y_s = b1y[s];
+
+		auto cx = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), back_cx);
+
+		const auto a_scratch = noarr::make_bag(scratch_l, a_data);
+		const auto c_scratch = noarr::make_bag(scratch_l, c_data);
+
+		{
+			real_t ay_tmp = ay_s;
+			real_t cy_tmp = ay_s;
+
+			const auto a_tmp = ay_s * (y_begin == 0 ? 0 : 1);
+			const auto b_tmp = b1y_s + ((y_begin == 0) || (y_begin == y_len - 1) ? ay_s : 0);
+			const auto c_tmp = ay_s * (y_begin == y_len - 1 ? 0 : 1);
+
+			real_t ay0_tmp = a_tmp / b_tmp;
+			real_t cy0_tmp = c_tmp / b_tmp;
+
+			auto y_remainder = (y_end - y_begin) % simd_length;
+
+			xy_fused_transpose_part<true, true, simd_t>(
+				d, t, simd_length, y_begin, y_end - y_remainder, 0, s, ax_s, b1x_s, ay_s, b1y_s, cx,
+				inner_y_data_blocked_alt { y_begin, y_end, ay_tmp, cy_tmp, ay0_tmp, cy0_tmp, a_scratch, c_scratch });
+		}
+
+		// y remainder
+		{
+			const auto d = noarr::make_bag(dens_l, densities);
+
+			auto y_remainder = (y_end - y_begin) % simd_length;
+
+			for (index_t y = y_end - y_remainder; y < y_end; y++)
+			{
+				real_t a_tmp = 0;
+				real_t b_tmp = b1x_s + ax_s;
+				real_t c_tmp = ax_s;
+				real_t prev = 0;
+
+				x_forward(d, s, 0, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
+
+				x_backward<true, true>(d, cx, s, 0, y, prev, ay_s, b1y_s,
+									   inside_data_blocked_alt { y_begin, y_end, a_scratch, c_scratch });
+
+				y_forward_inside_x_blocked_alt(d, s, 0, y, 0, prev, ay_s, b1y_s, y_begin, y_end, a_scratch, c_scratch);
+
+				y_forward_inside_x_blocked_next_alt(s, y, ay_s, b1y_s, y_len, y_begin, y_end, a_scratch, c_scratch);
+			}
+		}
+
+		{
+			epoch++;
+
+			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			while (val < epoch * coop_size)
+			{
+				val = counter.load(std::memory_order_acquire);
+			}
+		}
+
+		// #pragma omp barrier
+
+		if (y_begin == 0)
+			y_blocked_middle(d, 0, a_scratch, c_scratch, coop_size, s);
+
+		// #pragma omp barrier
+
+		{
+			epoch++;
+
+			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			while (val < epoch * coop_size)
+			{
+				val = counter.load(std::memory_order_acquire);
+			}
+		}
+
+		y_blocked_end_alt(d, 0, a_scratch, c_scratch, y_begin, y_end, s);
 	}
 }
 
@@ -1941,9 +2784,9 @@ static void solve_slice_xyz_fused_transpose_blocked(
 
 				auto y_remainder = (y_end - y_begin) % simd_length;
 
-				xy_fused_transpose_part<true, simd_t>(d, t, simd_length, y_begin, y_end - y_remainder, z, s, ax_s,
-													  b1x_s, ay_s, b1y_s, cx,
-													  inner_y_data_blocked { y_begin, cy_tmp, ay_scratch, cy_scratch });
+				xy_fused_transpose_part<true, false, simd_t>(
+					d, t, simd_length, y_begin, y_end - y_remainder, z, s, ax_s, b1x_s, ay_s, b1y_s, cx,
+					inner_y_data_blocked { y_begin, cy_tmp, ay_scratch, cy_scratch });
 			}
 
 			// y remainder
@@ -1961,7 +2804,8 @@ static void solve_slice_xyz_fused_transpose_blocked(
 
 					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-					x_backward<true>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data_blocked { y_begin, cy_scratch });
+					x_backward<true, false>(d, cx, s, z, y, prev, ay_s, b1y_s,
+											inside_data_blocked { y_begin, cy_scratch });
 
 					y_forward_inside_x_blocked(d, s, z, y, 0, prev, ay_s, b1y_s, y_begin, cy_scratch);
 
@@ -2004,14 +2848,17 @@ static void solve_slice_xyz_fused_transpose_blocked(
 				}
 			}
 
+			for (index_t x = 0; x < x_len; x++)
+			{
+				z_forward_inside_y_blocked(d, s, z, y_begin, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z),
+										   az_s, b1z_s, z_begin, cz_scratch);
+			}
+
 			y_blocked_end(d, z, ay_scratch, cy_scratch, y_begin, y_end, s, az_s, b1z_s,
 						  inside_data_blocked { z_begin, cz_scratch });
 
 			for (index_t x = 0; x < x_len; x++)
 			{
-				z_forward_inside_y_blocked(d, s, z, y_begin, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_begin, z),
-										   az_s, b1z_s, z_begin, cz_scratch);
-
 				z_forward_inside_y_blocked(d, s, z, y_end - 1, x, d.template at<'s', 'x', 'y', 'z'>(s, x, y_end - 1, z),
 										   az_s, b1z_s, z_begin, cz_scratch);
 			}
@@ -2052,6 +2899,166 @@ static void solve_slice_xyz_fused_transpose_blocked(
 		}
 
 		z_blocked_end(d, az_scratch, cz_scratch, y_begin, y_end, z_begin, z_end, s);
+	}
+}
+
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename scratch_layout_t>
+static void solve_slice_xyz_fused_transpose_blocked_alt(
+	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
+	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+	const real_t* __restrict__ az, const real_t* __restrict__ b1z, real_t* __restrict__ ay_data,
+	real_t* __restrict__ cy_data, real_t* __restrict__ az_data, real_t* __restrict__ cz_data,
+	const density_layout_t dens_l, const diagonal_layout_t diagx_l, const scratch_layout_t scratchy_l,
+	const scratch_layout_t scratchz_l, const index_t s_begin, const index_t s_end, const index_t y_begin,
+	const index_t y_end, const index_t z_begin, const index_t z_end, const index_t coop_size_y,
+	const index_t coop_size_z, index_t& epoch_y, std::atomic<long>& counter_y, index_t& epoch_z,
+	std::atomic<long>& counter_z)
+{
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+	const auto d = noarr::make_bag(dens_l, densities);
+
+	const index_t z_len = dens_l | noarr::get_length<'z'>();
+	const index_t y_len = dens_l | noarr::get_length<'y'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
+
+	const auto ay_scratch = noarr::make_bag(scratchy_l, ay_data);
+	const auto cy_scratch = noarr::make_bag(scratchy_l, cy_data);
+
+	const auto az_scratch = noarr::make_bag(scratchz_l, az_data);
+	const auto cz_scratch = noarr::make_bag(scratchz_l, cz_data);
+
+	auto cx = noarr::make_bag(diagx_l, back_cx);
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		const real_t ax_s = ax[s];
+		const real_t b1x_s = b1x[s];
+
+		const real_t ay_s = ay[s];
+		const real_t b1y_s = b1y[s];
+
+		const real_t az_s = az[s];
+		const real_t b1z_s = b1z[s];
+
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			{
+				real_t ay_tmp = ay_s;
+				real_t cy_tmp = ay_s;
+
+				const auto a_tmp = ay_s * (y_begin == 0 ? 0 : 1);
+				const auto b_tmp = b1y_s + ((y_begin == 0) || (y_begin == y_len - 1) ? ay_s : 0);
+				const auto c_tmp = ay_s * (y_begin == y_len - 1 ? 0 : 1);
+
+				real_t ay0_tmp = a_tmp / b_tmp;
+				real_t cy0_tmp = c_tmp / b_tmp;
+
+				auto y_remainder = (y_end - y_begin) % simd_length;
+
+				xy_fused_transpose_part<true, true, simd_t>(
+					d, t, simd_length, y_begin, y_end - y_remainder, z, s, ax_s, b1x_s, ay_s, b1y_s, cx,
+					inner_y_data_blocked_alt { y_begin, y_end, ay_tmp, cy_tmp, ay0_tmp, cy0_tmp, ay_scratch,
+											   cy_scratch });
+			}
+
+			// y remainder
+			{
+				const auto d = noarr::make_bag(dens_l, densities);
+
+				auto y_remainder = (y_end - y_begin) % simd_length;
+
+				for (index_t y = y_end - y_remainder; y < y_end; y++)
+				{
+					real_t a_tmp = 0;
+					real_t b_tmp = b1x_s + ax_s;
+					real_t c_tmp = ax_s;
+					real_t prev = 0;
+
+					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
+
+					x_backward<true, true>(d, cx, s, z, y, prev, ay_s, b1y_s,
+										   inside_data_blocked_alt { y_begin, y_end, ay_scratch, cy_scratch });
+
+					y_forward_inside_x_blocked_alt(d, s, z, y, 0, prev, ay_s, b1y_s, y_begin, y_end, ay_scratch,
+												   cy_scratch);
+
+					y_forward_inside_x_blocked_next_alt(s, y, ay_s, b1y_s, y_len, y_begin, y_end, ay_scratch,
+														cy_scratch);
+				}
+			}
+
+			{
+				epoch_y++;
+
+				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+				while (val < epoch_y * coop_size_y)
+				{
+					val = counter_y.load(std::memory_order_acquire);
+				}
+			}
+
+			// #pragma omp barrier
+
+			if (y_begin == 0)
+				y_blocked_middle(d, z, ay_scratch, cy_scratch, coop_size_y, s);
+
+			// #pragma omp barrier
+
+			{
+				epoch_y++;
+
+				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+				while (val < epoch_y * coop_size_y)
+				{
+					val = counter_y.load(std::memory_order_acquire);
+				}
+			}
+
+			y_blocked_end_alt_vectorized<simd_t>(dens_l, densities, t, simd_length, z, ay_scratch, cy_scratch, y_begin,
+												 y_end, s, az_s, b1z_s,
+												 inside_data_blocked_alt { z_begin, z_end, az_scratch, cz_scratch });
+
+			z_forward_inside_y_blocked_next_alt(s, z, az_s, b1z_s, z_len, z_begin, z_end, az_scratch, cz_scratch);
+		}
+
+		{
+			epoch_z++;
+
+			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			while (val < epoch_z * coop_size_z)
+			{
+				val = counter_z.load(std::memory_order_acquire);
+			}
+		}
+
+		// #pragma omp barrier
+
+		if (z_begin == 0)
+			z_blocked_middle(d, az_scratch, cz_scratch, coop_size_z, y_begin, y_end, s);
+
+		// #pragma omp barrier
+
+		{
+			epoch_z++;
+
+			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+			while (val < epoch_z * coop_size_z)
+			{
+				val = counter_z.load(std::memory_order_acquire);
+			}
+		}
+
+		z_blocked_end_alt(d, az_scratch, cz_scratch, y_begin, y_end, z_begin, z_end, s);
 	}
 }
 
@@ -2142,14 +3149,20 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				epoch++;
-
-				solve_slice_xy_fused_transpose_blocked<index_t>(
-					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_, get_substrates_layout<3>(),
-					get_diagonal_layout(this->problem_, this->problem_.nx),
-					get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group), s,
-					s + s_step_length, block_y_begin, block_y_end, group_size, epoch,
-					countersy_[substrate_group].value);
+				if (!use_alt_blocked_)
+					solve_slice_xy_fused_transpose_blocked<index_t>(
+						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_,
+						get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
+						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group), s,
+						s + s_step_length, block_y_begin, block_y_end, group_size, epoch,
+						countersy_[substrate_group].value);
+				else
+					solve_slice_xy_fused_transpose_blocked_alt<index_t>(
+						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_,
+						get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
+						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group), s,
+						s + s_step_length, block_y_begin, block_y_end, group_size, epoch,
+						countersy_[substrate_group].value);
 			}
 		}
 	}
@@ -2219,12 +3232,24 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 						get_diagonal_layout(this->problem_, this->problem_.ny), lane_scratchz_l, s, s + s_step_length,
 						block_z_begin, block_z_end, cores_division_[2], epoch_z, countersz_[lane_id_z].value);
 				else
-					solve_slice_xyz_fused_transpose_blocked<index_t>(
-						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_, a_scratchz_,
-						c_scratchz_, get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
-						lane_scratchy_l, lane_scratchz_l, s, s + s_step_length, block_y_begin, block_y_end,
-						block_z_begin, block_z_end, cores_division_[1], cores_division_[2], epoch_y,
-						countersy_[lane_id_y].value, epoch_z, countersz_[lane_id_z].value);
+				{
+					if (!use_alt_blocked_)
+						solve_slice_xyz_fused_transpose_blocked<index_t>(
+							this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
+							a_scratchz_, c_scratchz_, get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l, lane_scratchz_l, s,
+							s + s_step_length, block_y_begin, block_y_end, block_z_begin, block_z_end,
+							cores_division_[1], cores_division_[2], epoch_y, countersy_[lane_id_y].value, epoch_z,
+							countersz_[lane_id_z].value);
+					else
+						solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
+							this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
+							a_scratchz_, c_scratchz_, get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l, lane_scratchz_l, s,
+							s + s_step_length, block_y_begin, block_y_end, block_z_begin, block_z_end,
+							cores_division_[1], cores_division_[2], epoch_y, countersy_[lane_id_y].value, epoch_z,
+							countersz_[lane_id_z].value);
+				}
 			}
 		}
 	}
@@ -2246,7 +3271,7 @@ least_memory_thomas_solver_d_f<real_t, aligned_x>::least_memory_thomas_solver_d_
 	  a_scratchz_(nullptr),
 	  c_scratchz_(nullptr),
 	  use_intrinsics_(use_intrinsics),
-	  use_blocked_(use_fused)
+	  use_alt_blocked_(use_fused)
 {}
 
 template <typename real_t, bool aligned_x>
