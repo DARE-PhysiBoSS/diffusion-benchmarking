@@ -49,6 +49,8 @@ protected:
 	std::vector<index_t> group_block_offsetsz_;
 
 	index_t aligned_block_size_;
+	
+	index_t substrate_groups_;
 
 	using sync_func_t = std::function<void>;
 
