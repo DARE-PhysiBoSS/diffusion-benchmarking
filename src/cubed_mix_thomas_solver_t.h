@@ -27,9 +27,10 @@ protected:
 	real_t *ay_, *b1y_, *cy_;
 	real_t *az_, *b1z_, *cz_;
 
-	std::unique_ptr<aligned_atomic<long>[]> countersy_, countersz_;
-	index_t countersy_count_, countersz_count_;
+	std::unique_ptr<aligned_atomic<long>[]> countersx_, countersy_, countersz_;
+	index_t countersx_count_, countersy_count_, countersz_count_;
 
+	real_t *a_scratchx_, *c_scratchx_;
 	real_t *a_scratchy_, *c_scratchy_;
 	real_t *a_scratchz_, *c_scratchz_;
 
@@ -42,21 +43,24 @@ protected:
 	std::array<index_t, 3> cores_division_;
 
 	std::array<index_t, 3> group_blocks_;
+	std::vector<index_t> group_block_lengthsx_;
 	std::vector<index_t> group_block_lengthsy_;
 	std::vector<index_t> group_block_lengthsz_;
 
+	std::vector<index_t> group_block_offsetsx_;
 	std::vector<index_t> group_block_offsetsy_;
 	std::vector<index_t> group_block_offsetsz_;
 
 	index_t aligned_block_size_;
-	
+
 	index_t substrate_groups_;
 
 	using sync_func_t = std::function<void>;
 
 	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t counters_count,
 						   std::unique_ptr<aligned_atomic<long>[]>& counters, index_t group_size, index_t& block_size,
-						   std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets);
+						   std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets,
+						   bool aligned);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 

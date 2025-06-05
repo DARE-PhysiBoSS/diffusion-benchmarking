@@ -17,12 +17,10 @@
 using alg = cubed_mix_thomas_solver_t<double, true>;
 
 template <typename real_t, bool aligned_x>
-void cubed_mix_thomas_solver_t<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b1, index_t shape,
-																	 index_t dims, index_t n, index_t counters_count,
-																	 std::unique_ptr<aligned_atomic<long>[]>& counters,
-																	 index_t group_size, index_t& block_size,
-																	 std::vector<index_t>& group_block_lengths,
-																	 std::vector<index_t>& group_block_offsets)
+void cubed_mix_thomas_solver_t<real_t, aligned_x>::precompute_values(
+	real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t counters_count,
+	std::unique_ptr<aligned_atomic<long>[]>& counters, index_t group_size, index_t& block_size,
+	std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets, bool aligned)
 {
 	// allocate memory for a and b1
 	a = (real_t*)std::malloc(this->problem_.substrates_count * sizeof(real_t));
@@ -39,27 +37,52 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::precompute_values(real_t*& a,
 
 	counters = std::make_unique<aligned_atomic<long>[]>(counters_count);
 
-	block_size = n / group_size;
-
-	group_block_lengths.clear();
-	group_block_offsets.clear();
-
-	for (index_t i = 0; i < group_size; i++)
+	if (aligned)
 	{
-		if (i < n % group_size)
-			group_block_lengths.push_back(block_size + 1);
-		else
-			group_block_lengths.push_back(block_size);
+		auto alignment_size = alignment_size_ / sizeof(real_t);
+		block_size = n / group_size;
+		auto remainder = block_size % alignment_size;
+		if (remainder != 0)
+		{
+			block_size += alignment_size - remainder;
+		}
+
+		group_block_lengths.clear();
+		group_block_offsets.clear();
+
+		for (index_t i = 0; i < group_size; i++)
+		{
+			auto begin = i * block_size;
+			auto end = std::min(begin + block_size, n);
+
+			group_block_lengths.push_back(end - begin);
+			group_block_offsets.push_back(begin);
+		}
 	}
-
-	group_block_offsets.resize(group_size);
-
-	for (index_t i = 0; i < group_size; i++)
+	else
 	{
-		if (i == 0)
-			group_block_offsets[i] = 0;
-		else
-			group_block_offsets[i] = group_block_offsets[i - 1] + group_block_lengths[i - 1];
+		block_size = n / group_size;
+
+		group_block_lengths.clear();
+		group_block_offsets.clear();
+
+		for (index_t i = 0; i < group_size; i++)
+		{
+			if (i < n % group_size)
+				group_block_lengths.push_back(block_size + 1);
+			else
+				group_block_lengths.push_back(block_size);
+		}
+
+		group_block_offsets.resize(group_size);
+
+		for (index_t i = 0; i < group_size; i++)
+		{
+			if (i == 0)
+				group_block_offsets[i] = 0;
+			else
+				group_block_offsets[i] = group_block_offsets[i - 1] + group_block_lengths[i - 1];
+		}
 	}
 }
 
@@ -144,9 +167,8 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& pa
 	{
 		using simd_tag = hn::ScalableTag<real_t>;
 		simd_tag d;
-		x_tile_size_ = (x_tile_size_ + hn::Lanes(d) - 1) / hn::Lanes(d) * hn::Lanes(d);
 		std::size_t vector_length = hn::Lanes(d) * sizeof(real_t);
-		alignment_size_ = std::max(alignment_size_, vector_length * x_tile_size_ / hn::Lanes(d));
+		alignment_size_ = std::max(alignment_size_, vector_length);
 	}
 
 	substrate_step_ = params.contains("substrate_step") ? (index_t)params["substrate_step"] : 1;
@@ -163,7 +185,24 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::initialize()
 	substrate_groups_ = (get_max_threads() + substrate_group_size - 1) / substrate_group_size;
 
 	if (this->problem_.dims >= 1)
-		precompute_values(ax_, b1x_, cx_, this->problem_.dx, this->problem_.dims, this->problem_.nx);
+	{
+		if (cores_division_[0] == 1)
+		{
+			countersx_count_ = 0;
+			group_block_offsetsx_ = { 0 };
+			group_block_lengthsx_ = { this->problem_.nx };
+
+			precompute_values(ax_, b1x_, cx_, this->problem_.dx, this->problem_.dims, this->problem_.nx);
+		}
+		else
+		{
+			countersx_count_ = cores_division_[1] * cores_division_[2] * substrate_groups_;
+
+			precompute_values(ax_, b1x_, this->problem_.dx, this->problem_.dims, this->problem_.nx, countersx_count_,
+							  countersx_, cores_division_[0], group_blocks_[0], group_block_lengthsx_,
+							  group_block_offsetsx_, true);
+		}
+	}
 	if (this->problem_.dims >= 2)
 	{
 		if (cores_division_[1] == 1)
@@ -180,7 +219,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::initialize()
 
 			precompute_values(ay_, b1y_, this->problem_.dy, this->problem_.dims, this->problem_.ny, countersy_count_,
 							  countersy_, cores_division_[1], group_blocks_[1], group_block_lengthsy_,
-							  group_block_offsetsy_);
+							  group_block_offsetsy_, false);
 		}
 	}
 	if (this->problem_.dims >= 3)
@@ -199,15 +238,19 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::initialize()
 
 			precompute_values(az_, b1z_, this->problem_.dz, this->problem_.dims, this->problem_.nz, countersz_count_,
 							  countersz_, cores_division_[2], group_blocks_[2], group_block_lengthsz_,
-							  group_block_offsetsz_);
+							  group_block_offsetsz_, false);
 		}
 	}
 
+	auto scratch_layoutx = get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz);
 	auto scratch_layouty = get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz);
 	auto scratch_layoutz = get_scratch_layout(this->problem_.nz, this->problem_.nx * this->problem_.ny);
 
 	if (aligned_x)
 	{
+		a_scratchx_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layoutx | noarr::get_size()));
+		c_scratchx_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layoutx | noarr::get_size()));
+
 		a_scratchy_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layouty | noarr::get_size()));
 		c_scratchy_ = (real_t*)std::aligned_alloc(alignment_size_, (scratch_layouty | noarr::get_size()));
 
@@ -216,6 +259,9 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::initialize()
 	}
 	else
 	{
+		a_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+		c_scratchx_ = (real_t*)std::malloc((scratch_layoutx | noarr::get_size()));
+
 		a_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
 		c_scratchy_ = (real_t*)std::malloc((scratch_layouty | noarr::get_size()));
 
@@ -243,6 +289,503 @@ auto cubed_mix_thomas_solver_t<real_t, aligned_x>::get_diagonal_layout(const pro
 	}
 }
 
+
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+static void solve_block_x_start_transpose(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+										  const real_t* __restrict__ b1, real_t* __restrict__ a_data,
+										  real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
+										  const index_t coop_size, const index_t block_size,
+										  const density_layout_t dens_l, const scratch_layout_t scratch_l,
+										  const index_t s_begin, const index_t s_end, const index_t x_begin,
+										  const index_t x_end, const index_t y_begin, const index_t y_end,
+										  const index_t z_begin, const index_t z_end)
+{
+	constexpr char dim = 'x';
+
+	const index_t n = dens_l | noarr::get_length<dim>();
+
+	auto a = noarr::make_bag(scratch_l, a_data);
+	auto c = noarr::make_bag(scratch_l, c_data);
+	auto d = noarr::make_bag(dens_l, densities);
+
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+	simd_t* rows = new simd_t[simd_length];
+	simd_t prev;
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		for (index_t z = z_begin; z < z_end; z++)
+		{
+			epoch++;
+
+			{
+				auto y_remainder = (y_end - y_begin) % simd_length;
+
+				for (index_t y = y_begin; y < y_end - y_remainder; y += simd_length)
+				{
+					index_t x = x_begin;
+					for (; x < x_end; x += simd_length)
+					{
+						for (index_t v = 0; v < simd_length; v++)
+							rows[v] = hn::Load(t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+
+						transpose(rows);
+
+						for (index_t v = 0; v < simd_length; v++)
+						{
+							index_t i = x + v;
+
+							if (i < x_begin + 2)
+							{
+								const auto state = noarr::idx<'s', 'i'>(s, i);
+
+								const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+								const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+								const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+								a[state] = a_tmp / b_tmp;
+								c[state] = c_tmp / b_tmp;
+
+								rows[v] = hn::Mul(rows[v], hn::Set(t, 1 / b_tmp));
+
+								prev = rows[v];
+
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "f0 " << s << " " << z << " " << y
+								// + l << " " << i << " " << b_tmp
+								// 												  << " " << hn::ExtractLane(rows[v], l)
+								// << std::endl;
+								// 								}
+							}
+							else if (i < x_end)
+							{
+								const auto state = noarr::idx<'s', 'i'>(s, i);
+								const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+
+								const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+								const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+								const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+								const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+								a[state] = r * (0 - a_tmp * a[prev_state]);
+								c[state] = r * c_tmp;
+
+								rows[v] = hn::MulAdd(hn::Set(t, -a_tmp), prev, rows[v]);
+								rows[v] = hn::Mul(rows[v], hn::Set(t, r));
+
+								prev = rows[v];
+
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "f1 " << s << " " << z << " " << y
+								// + l << " " << i << " " << a_tmp
+								// 												  << " " << r << " " <<
+								// hn::ExtractLane(rows[v], l) << std::endl;
+								// 								}
+							}
+						}
+
+						for (index_t v = 0; v < simd_length; v++)
+							hn::Store(rows[v], t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+					}
+
+					x -= simd_length;
+
+					for (; x >= x_begin; x -= simd_length)
+					{
+						for (index_t v = 0; v < simd_length; v++)
+							rows[v] = hn::Load(t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+
+						for (index_t v = simd_length - 1; v >= 0; v--)
+						{
+							index_t i = x + v;
+
+							if (i == x_end - 2)
+							{
+								prev = rows[v];
+							}
+							if (i <= x_end - 3 && i >= x_begin + 1)
+							{
+								const auto state = noarr::idx<'s', 'i'>(s, i);
+								const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+								rows[v] = hn::MulAdd(hn::Set(t, -c[state]), prev, rows[v]);
+
+								prev = rows[v];
+
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "b0 " << s << " " << z << " " << y
+								// + l << " " << i << " "
+								// 												  << c[state] << " " <<
+								// hn::ExtractLane(rows[v], l) << std::endl;
+								// 								}
+
+								a[state] = a[state] - c[state] * a[next_state];
+								c[state] = 0 - c[state] * c[next_state];
+							}
+							else if (i == x_begin)
+							{
+								const auto state = noarr::idx<'s', 'i'>(s, i);
+								const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+								const auto r = 1 / (1 - c[state] * a[next_state]);
+
+								rows[v] = hn::MulAdd(hn::Set(t, -c[state]), prev, rows[v]);
+								rows[v] = hn::Mul(rows[v], hn::Set(t, r));
+
+								// #pragma omp critical
+								// 								{
+								// 									for (index_t l = 0; l < simd_length; l++)
+								// 										std::cout << "b1 " << s << " " << z << " " << y
+								// + l << " " << i << " "
+								// 												  << c[state] << " " << r << " " <<
+								// hn::ExtractLane(rows[v], l)
+								// 												  << std::endl;
+								// 								}
+
+								a[state] = r * a[state];
+								c[state] = r * (0 - c[state] * c[next_state]);
+							}
+						}
+
+						// transpose(rows);
+
+						for (index_t v = 0; v < simd_length; v++)
+							hn::Store(rows[v], t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+					}
+				}
+			}
+
+			auto y_remainder = (y_end - y_begin) % simd_length;
+
+			for (index_t y = y_end - y_remainder; y < y_end; y++)
+			{
+				// Normalize the first and the second equation
+				index_t i;
+				for (i = x_begin; i < x_begin + 2; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					a[state] = a_tmp / b_tmp;
+					c[state] = c_tmp / b_tmp;
+
+					d.template at<'s', 'y', 'z', dim>(s, y, z, i) /= b_tmp;
+
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "f0 " << s << " " << z << " " << y << " " << i << " " << b_tmp
+					// << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
+				}
+
+				// Process the lower diagonal (forward)
+				for (; i < x_end; i++)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+
+					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+
+					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+
+					a[state] = r * (0 - a_tmp * a[prev_state]);
+					c[state] = r * c_tmp;
+
+					d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+						r
+						* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+						   - a_tmp * d.template at<'s', 'y', 'z', dim>(s, y, z, i - 1));
+
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "f1 " << s << " " << z << " " << y << " " << i << " " << a_tmp
+					// << " " << r << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
+				}
+
+				// Process the upper diagonal (backward)
+				for (i = x_end - 3; i >= x_begin + 1; i--)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+					d.template at<'s', 'y', 'z', dim>(s, y, z, i) -=
+						c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, i + 1);
+
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "b0 " << s << " " << z << " " << y << " " << i << " " <<
+					// c[state] << " "
+					// 								  << d.template at<'s', 'y', 'z', dim>(s, y, z, i) << std::endl;
+					// 					}
+
+					a[state] = a[state] - c[state] * a[next_state];
+					c[state] = 0 - c[state] * c[next_state];
+				}
+
+				// Process the first row (backward)
+				{
+					const auto state = noarr::idx<'s', 'i'>(s, i);
+					const auto next_state = noarr::idx<'s', 'i'>(s, i + 1);
+
+					const auto r = 1 / (1 - c[state] * a[next_state]);
+
+					d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+						r
+						* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+						   - c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, i + 1));
+
+					// #pragma omp critical
+					// 					{
+					// 						std::cout << "b1 " << s << " " << z << " " << y << " " << i << " " <<
+					// c[state] << " " << r
+					// 								  << " " << d.template at<'s', 'y', 'z', dim>(s, y, z, i) <<
+					// std::endl;
+					// 					}
+
+					a[state] = r * a[state];
+					c[state] = r * (0 - c[state] * c[next_state]);
+				}
+			}
+
+			// Second part of modified thomas algorithm
+			// We solve the system of equations that are composed of the first and last row of each block
+			// We do it using Thomas Algorithm
+			{
+				const index_t epoch_size = coop_size + 1;
+				// std::cout << blocks_count << std::endl;
+
+				// increment the counter
+				auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+				if (current_value == epoch * epoch_size - 1)
+				{
+					auto get_i = [block_size, n](index_t equation_idx) {
+						const index_t block_idx = equation_idx / 2;
+						const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+						const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+						const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+						return i;
+					};
+
+					for (index_t y = y_begin; y < y_end - y_remainder; y += simd_length)
+					{
+						simd_t prev_vec = hn::Load(t, &(d.template at<'s', 'y', 'z', dim>(s, y, z, 0)));
+
+						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+						{
+							const index_t i = get_i(equation_idx);
+							const index_t prev_i = get_i(equation_idx - 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+							// #pragma omp critical
+							// 					{
+							// 						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i
+							// << std::endl;
+							// 					}
+
+							const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+							if (y == y_begin)
+								c[state] *= r;
+
+							const auto transposed_y_offset = i % simd_length;
+							const auto transposed_x = i - transposed_y_offset;
+
+							auto vec = hn::Load(
+								t, &(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
+
+							vec = hn::MulAdd(hn::Set(t, -a[state]), prev_vec, vec);
+							vec = hn::Mul(vec, hn::Set(t, r));
+
+							prev_vec = vec;
+
+							hn::Store(
+								vec, t,
+								&(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
+
+							// d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+							// 	r
+							// 	* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+							// 	   - a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, prev_i));
+
+
+							// #pragma omp critical
+							// 							{
+							// 								std::cout << "mf " << s << " " << z << " " << y << " "
+							// << i
+							// << " " << a[state] << " "
+							// 										  << r << " " << d.template at<'s', 'y', 'z',
+							// dim>(s, y, z, i) << std::endl;
+							// 							}
+						}
+
+						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+						{
+							const index_t i = get_i(equation_idx);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+
+
+							const auto transposed_y_offset = i % simd_length;
+							const auto transposed_x = i - transposed_y_offset;
+
+							auto vec = hn::Load(
+								t, &(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
+
+							vec = hn::MulAdd(hn::Set(t, -c[state]), prev_vec, vec);
+							prev_vec = vec;
+
+							hn::Store(
+								vec, t,
+								&(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
+
+
+							// d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+							// 	d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+							// 	- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, next_i);
+						}
+					}
+
+					for (index_t y = y_end - y_remainder; y < y_end; y++)
+					{
+						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+						{
+							const index_t i = get_i(equation_idx);
+							const index_t prev_i = get_i(equation_idx - 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+
+							// #pragma omp critical
+							// 					{
+							// 						std::cout << "i: " << i << " s: " << s << " prev_i: " << prev_i
+							// << std::endl;
+							// 					}
+
+							const auto r = 1 / (1 - a[state] * c[prev_state]);
+
+							if (z == z_begin && y == y_begin)
+								c[state] *= r;
+
+							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+								r
+								* (d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+								   - a[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, prev_i));
+
+
+							// #pragma omp critical
+							// 							{
+							// 								std::cout << "mf " << s << " " << z << " " << y << " "
+							// << i
+							// << " " << a[state] << " "
+							// 										  << r << " " << d.template at<'s', 'y', 'z',
+							// dim>(s, y, z, i) << std::endl;
+							// 							}
+						}
+
+						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+						{
+							const index_t i = get_i(equation_idx);
+							const index_t next_i = get_i(equation_idx + 1);
+							const auto state = noarr::idx<'s', 'i'>(s, i);
+
+							d.template at<'s', 'y', 'z', dim>(s, y, z, i) =
+								d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+								- c[state] * d.template at<'s', 'y', 'z', dim>(s, y, z, next_i);
+						}
+					}
+
+					// notify all threads that the last thread has finished
+					counter.fetch_add(1, std::memory_order_acq_rel);
+					// counter.notify_all();
+				}
+				else
+				{
+					// wait for the last thread to finish
+					while (current_value < epoch * epoch_size)
+					{
+						// counter.wait(current_value, std::memory_order_acquire);
+						current_value = counter.load(std::memory_order_acquire);
+					}
+				}
+			}
+
+			for (index_t y = y_begin; y < y_end - y_remainder; y += simd_length)
+			{
+				const simd_t begin_unknowns = hn::Load(t, &(d.template at<'s', 'y', 'z', dim>(s, y, z, x_begin)));
+
+				const auto transposed_y_offset = (x_end - 1) % simd_length;
+				const auto transposed_x = (x_end - 1) - transposed_y_offset;
+
+				const simd_t end_unknowns =
+					hn::Load(t, &(d.template at<'s', 'y', 'z', dim>(s, y + transposed_y_offset, z, transposed_x)));
+
+				for (index_t x = x_begin; x < x_end; x += simd_length)
+				{
+					for (index_t v = 0; v < simd_length; v++)
+						rows[v] = hn::Load(t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+
+					for (index_t v = 0; v < simd_length; v++)
+					{
+						index_t i = x + v;
+
+						const auto state = noarr::idx<'s', 'i'>(s, i);
+
+						if (i > x_begin && i < x_end - 1)
+						{
+							rows[v] = hn::MulAdd(hn::Set(t, -a[state]), begin_unknowns, rows[v]);
+							rows[v] = hn::MulAdd(hn::Set(t, -c[state]), end_unknowns, rows[v]);
+						}
+					}
+
+					transpose(rows);
+
+					for (index_t v = 0; v < simd_length; v++)
+						hn::Store(rows[v], t, &(d.template at<'z', 'y', 'x', 's'>(z, y + v, x, s)));
+				}
+			}
+
+			for (index_t y = y_end - y_remainder; y < y_end; y++)
+			{
+				// Final part of modified thomas algorithm
+				// Solve the rest of the unknowns
+				{
+					const real_t begin_unknown = d.template at<'s', 'y', 'z', dim>(s, y, z, x_begin);
+					const real_t end_unknown = d.template at<'s', 'y', 'z', dim>(s, y, z, x_end - 1);
+
+					for (index_t i = x_begin + 1; i < x_end - 1; i++)
+					{
+						const auto state = noarr::idx<'s', 'i'>(s, i);
+
+						d.template at<'s', 'y', 'z', dim>(s, y, z, i) = d.template at<'s', 'y', 'z', dim>(s, y, z, i)
+																		- a[state] * begin_unknown
+																		- c[state] * end_unknown;
+					}
+				}
+			}
+		}
+	}
+
+	delete[] rows;
+}
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, const real_t* __restrict__ a,
@@ -1133,274 +1676,274 @@ static void solve_block_y_start_skip(real_t* __restrict__ densities, const real_
 }
 
 
-template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
-static void solve_block_y_start_skip_intrinsics(real_t* __restrict__ densities, const real_t* __restrict__ ac,
-												const real_t* __restrict__ b1, real_t* __restrict__ a_data,
-												real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
-												const index_t coop_size, const density_layout_t dens_l,
-												const scratch_layout_t scratch_l, const index_t s_begin,
-												const index_t s_end, const index_t x_begin, const index_t x_end,
-												const index_t y_begin, const index_t y_end, const index_t z_begin,
-												const index_t z_end)
-{
-	constexpr char dim = 'y';
-	const index_t n = dens_l | noarr::get_length<dim>();
+// template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
+// static void solve_block_y_start_skip_intrinsics(real_t* __restrict__ densities, const real_t* __restrict__ ac,
+// 												const real_t* __restrict__ b1, real_t* __restrict__ a_data,
+// 												real_t* __restrict__ c_data, index_t& epoch, std::atomic<long>& counter,
+// 												const index_t coop_size, const density_layout_t dens_l,
+// 												const scratch_layout_t scratch_l, const index_t s_begin,
+// 												const index_t s_end, const index_t x_begin, const index_t x_end,
+// 												const index_t y_begin, const index_t y_end, const index_t z_begin,
+// 												const index_t z_end)
+// {
+// 	constexpr char dim = 'y';
+// 	const index_t n = dens_l | noarr::get_length<dim>();
 
-	auto a = noarr::make_bag(scratch_l, a_data);
-	auto c = noarr::make_bag(scratch_l, c_data);
+// 	auto a = noarr::make_bag(scratch_l, a_data);
+// 	auto c = noarr::make_bag(scratch_l, c_data);
 
-	constexpr index_t x_tile_size = 1;
+// 	constexpr index_t x_tile_size = 1;
 
-	using simd_tag = hn::ScalableTag<real_t>;
-	simd_tag t;
-	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
-	using simd_t = hn::Vec<simd_tag>;
+// 	using simd_tag = hn::ScalableTag<real_t>;
+// 	simd_tag t;
+// 	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+// 	using simd_t = hn::Vec<simd_tag>;
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length * x_tile_size);
-	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+// 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length * x_tile_size);
+// 	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
 
-	auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b'>(0), densities);
+// 	auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b'>(0), densities);
 
-	simd_t begins[x_tile_size];
+// 	simd_t begins[x_tile_size];
 
-	for (index_t s = s_begin; s < s_end; s++)
-	{
-		for (index_t z = z_begin; z < z_end; z++)
-		{
-			for (index_t X = 0; X < X_len; X++)
-			{
-				epoch++;
+// 	for (index_t s = s_begin; s < s_end; s++)
+// 	{
+// 		for (index_t z = z_begin; z < z_end; z++)
+// 		{
+// 			for (index_t X = 0; X < X_len; X++)
+// 			{
+// 				epoch++;
 
-				for (index_t v = 0; v < x_tile_size; v++)
-				{
-					begins[v] = hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, y_begin));
-				}
+// 				for (index_t v = 0; v < x_tile_size; v++)
+// 				{
+// 					begins[v] = hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, y_begin));
+// 				}
 
-				// Normalize the first and the second equation
-				index_t i;
-				for (i = y_begin; i < y_begin + 2; i++)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
+// 				// Normalize the first and the second equation
+// 				index_t i;
+// 				for (i = y_begin; i < y_begin + 2; i++)
+// 				{
+// 					const auto state = noarr::idx<'s', 'i'>(s, i);
 
-					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
-					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
-					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+// 					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+// 					const auto b_tmp = b1[s] + ((i == 0) || (i == n - 1) ? ac[s] : 0);
+// 					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
-					a[state] = a_tmp / b_tmp;
-					c[state] = c_tmp / b_tmp;
+// 					a[state] = a_tmp / b_tmp;
+// 					c[state] = c_tmp / b_tmp;
 
-					if (i == y_begin)
-					{
-						for (index_t v = 0; v < x_tile_size; v++)
-						{
-							simd_t data =
-								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 					if (i == y_begin)
+// 					{
+// 						for (index_t v = 0; v < x_tile_size; v++)
+// 						{
+// 							simd_t data =
+// 								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-							data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
+// 							data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
 
-							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
-						}
-					}
-					else
-					{
-						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
-						const auto r0 = 1 / (1 - a[state] * c[state0]);
+// 							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 						}
+// 					}
+// 					else
+// 					{
+// 						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+// 						const auto r0 = 1 / (1 - a[state] * c[state0]);
 
-						for (index_t v = 0; v < x_tile_size; v++)
-						{
-							simd_t data =
-								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 						for (index_t v = 0; v < x_tile_size; v++)
+// 						{
+// 							simd_t data =
+// 								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-							data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
+// 							data = hn::Mul(data, hn::Set(t, 1 / b_tmp));
 
-							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-							begins[v] = hn::MulAdd(hn::Set(t, -c[state0]), data, begins[v]);
-							begins[v] = hn::Mul(hn::Set(t, r0), begins[v]);
-						}
+// 							begins[v] = hn::MulAdd(hn::Set(t, -c[state0]), data, begins[v]);
+// 							begins[v] = hn::Mul(hn::Set(t, r0), begins[v]);
+// 						}
 
-						a[state0] *= r0;
-						c[state0] = r0 * -c[state] * c[state0];
+// 						a[state0] *= r0;
+// 						c[state0] = r0 * -c[state] * c[state0];
 
-						// #pragma omp critical
-						// 					std::cout << "0 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
-						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
-						// << std::endl;
-					}
-				}
+// 						// #pragma omp critical
+// 						// 					std::cout << "0 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+// 						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
+// 						// << std::endl;
+// 					}
+// 				}
 
-				// Process the lower diagonal (forward)
-				for (; i < y_end; i++)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
-					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
+// 				// Process the lower diagonal (forward)
+// 				for (; i < y_end; i++)
+// 				{
+// 					const auto state = noarr::idx<'s', 'i'>(s, i);
+// 					const auto prev_state = noarr::idx<'s', 'i'>(s, i - 1);
 
-					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
-					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
-					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
+// 					const auto a_tmp = ac[s] * (i == 0 ? 0 : 1);
+// 					const auto b_tmp = b1[s] + (i == n - 1 ? ac[s] : 0);
+// 					const auto c_tmp = ac[s] * (i == n - 1 ? 0 : 1);
 
-					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
+// 					const auto r = 1 / (b_tmp - a_tmp * c[prev_state]);
 
-					a[state] = r * (0 - a_tmp * a[prev_state]);
-					c[state] = r * c_tmp;
+// 					a[state] = r * (0 - a_tmp * a[prev_state]);
+// 					c[state] = r * c_tmp;
 
-					if (i == y_end - 1)
-					{
-						for (index_t v = 0; v < x_tile_size; v++)
-						{
-							simd_t data =
-								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 					if (i == y_end - 1)
+// 					{
+// 						for (index_t v = 0; v < x_tile_size; v++)
+// 						{
+// 							simd_t data =
+// 								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-							data = hn::MulAdd(
-								hn::Set(t, -a_tmp),
-								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i - 1)),
-								data);
-							data = hn::Mul(data, hn::Set(t, r));
+// 							data = hn::MulAdd(
+// 								hn::Set(t, -a_tmp),
+// 								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i - 1)),
+// 								data);
+// 							data = hn::Mul(data, hn::Set(t, r));
 
-							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
-						}
-					}
-					else
-					{
-						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
-						const auto r0 = 1 / (1 - a[state] * c[state0]);
+// 							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 						}
+// 					}
+// 					else
+// 					{
+// 						const auto state0 = noarr::idx<'s', 'i'>(s, y_begin);
+// 						const auto r0 = 1 / (1 - a[state] * c[state0]);
 
-						for (index_t v = 0; v < x_tile_size; v++)
-						{
-							simd_t data =
-								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 						for (index_t v = 0; v < x_tile_size; v++)
+// 						{
+// 							simd_t data =
+// 								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-							data = hn::MulAdd(
-								hn::Set(t, -a_tmp),
-								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i - 1)),
-								data);
-							data = hn::Mul(data, hn::Set(t, r));
+// 							data = hn::MulAdd(
+// 								hn::Set(t, -a_tmp),
+// 								hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i - 1)),
+// 								data);
+// 							data = hn::Mul(data, hn::Set(t, r));
 
-							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 							hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-							begins[v] = hn::MulAdd(hn::Set(t, -c[state0]), data, begins[v]);
-							begins[v] = hn::Mul(hn::Set(t, r0), begins[v]);
-						}
+// 							begins[v] = hn::MulAdd(hn::Set(t, -c[state0]), data, begins[v]);
+// 							begins[v] = hn::Mul(hn::Set(t, r0), begins[v]);
+// 						}
 
-						a[state0] *= r0;
-						c[state0] = r0 * -c[state] * c[state0];
+// 						a[state0] *= r0;
+// 						c[state0] = r0 * -c[state] * c[state0];
 
-						// #pragma omp critical
-						// 					std::cout << "1 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
-						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
-						// << std::endl;
-					}
-				}
+// 						// #pragma omp critical
+// 						// 					std::cout << "1 y: " << i << " a0: " << a[state0] << " c0: " << c[state0]
+// 						// 							  << " d: " << d.template at<'s', 'x', 'z', dim>(s, 0, z, y_begin)
+// 						// << std::endl;
+// 					}
+// 				}
 
-				// Second part of modified thomas algorithm
-				// We solve the system of equations that are composed of the first and last row of each block
-				// We do it using Thomas Algorithm
-				{
-					const index_t block_size = n / coop_size;
-					const index_t epoch_size = coop_size + 1;
-					// std::cout << blocks_count << std::endl;
+// 				// Second part of modified thomas algorithm
+// 				// We solve the system of equations that are composed of the first and last row of each block
+// 				// We do it using Thomas Algorithm
+// 				{
+// 					const index_t block_size = n / coop_size;
+// 					const index_t epoch_size = coop_size + 1;
+// 					// std::cout << blocks_count << std::endl;
 
-					// increment the counter
-					auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+// 					// increment the counter
+// 					auto current_value = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-					if (current_value == epoch * epoch_size - 1)
-					{
-						auto get_i = [block_size, n](index_t equation_idx) {
-							const index_t block_idx = equation_idx / 2;
-							const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
-							const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
-							const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
-							return i;
-						};
+// 					if (current_value == epoch * epoch_size - 1)
+// 					{
+// 						auto get_i = [block_size, n](index_t equation_idx) {
+// 							const index_t block_idx = equation_idx / 2;
+// 							const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
+// 							const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+// 							const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+// 							return i;
+// 						};
 
-						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
-						{
-							const index_t i = get_i(equation_idx);
-							const index_t prev_i = get_i(equation_idx - 1);
-							const auto state = noarr::idx<'s', 'i'>(s, i);
-							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
+// 						for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+// 						{
+// 							const index_t i = get_i(equation_idx);
+// 							const index_t prev_i = get_i(equation_idx - 1);
+// 							const auto state = noarr::idx<'s', 'i'>(s, i);
+// 							const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
-							const auto r = 1 / (1 - a[state] * c[prev_state]);
+// 							const auto r = 1 / (1 - a[state] * c[prev_state]);
 
-							c[state] *= r;
+// 							c[state] *= r;
 
-							for (index_t v = 0; v < x_tile_size; v++)
-							{
-								simd_t data =
-									hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 							for (index_t v = 0; v < x_tile_size; v++)
+// 							{
+// 								simd_t data =
+// 									hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-								simd_t prev = hn::Load(
-									t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, prev_i));
+// 								simd_t prev = hn::Load(
+// 									t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, prev_i));
 
-								data = hn::MulAdd(hn::Set(t, -a[state]), prev, data);
-								data = hn::Mul(hn::Set(t, r), data);
+// 								data = hn::MulAdd(hn::Set(t, -a[state]), prev, data);
+// 								data = hn::Mul(hn::Set(t, r), data);
 
-								hn::Store(data, t,
-										  &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
-							}
-						}
+// 								hn::Store(data, t,
+// 										  &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 							}
+// 						}
 
-						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
-						{
-							const index_t i = get_i(equation_idx);
-							const index_t next_i = get_i(equation_idx + 1);
-							const auto state = noarr::idx<'s', 'i'>(s, i);
+// 						for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+// 						{
+// 							const index_t i = get_i(equation_idx);
+// 							const index_t next_i = get_i(equation_idx + 1);
+// 							const auto state = noarr::idx<'s', 'i'>(s, i);
 
-							for (index_t v = 0; v < x_tile_size; v++)
-							{
-								simd_t data =
-									hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 							for (index_t v = 0; v < x_tile_size; v++)
+// 							{
+// 								simd_t data =
+// 									hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-								simd_t prev = hn::Load(
-									t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, next_i));
+// 								simd_t prev = hn::Load(
+// 									t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, next_i));
 
-								data = hn::MulAdd(hn::Set(t, -c[state]), prev, data);
+// 								data = hn::MulAdd(hn::Set(t, -c[state]), prev, data);
 
-								hn::Store(data, t,
-										  &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
-							}
-						}
+// 								hn::Store(data, t,
+// 										  &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 							}
+// 						}
 
-						// notify all threads that the last thread has finished
-						counter.fetch_add(1, std::memory_order_acq_rel);
-						// counter.notify_all();
-					}
-					else
-					{
-						// wait for the last thread to finish
-						while (current_value < epoch * epoch_size)
-						{
-							// counter.wait(current_value, std::memory_order_acquire);
-							current_value = counter.load(std::memory_order_acquire);
-						}
-					}
-				}
+// 						// notify all threads that the last thread has finished
+// 						counter.fetch_add(1, std::memory_order_acq_rel);
+// 						// counter.notify_all();
+// 					}
+// 					else
+// 					{
+// 						// wait for the last thread to finish
+// 						while (current_value < epoch * epoch_size)
+// 						{
+// 							// counter.wait(current_value, std::memory_order_acquire);
+// 							current_value = counter.load(std::memory_order_acquire);
+// 						}
+// 					}
+// 				}
 
-				auto d = noarr::make_bag(dens_l, densities);
+// 				auto d = noarr::make_bag(dens_l, densities);
 
-				// Final part of modified thomas algorithm
-				// Solve the rest of the unknowns
-				for (index_t i = y_end - 2; i >= y_begin + 1; i--)
-				{
-					const auto state = noarr::idx<'s', 'i'>(s, i);
+// 				// Final part of modified thomas algorithm
+// 				// Solve the rest of the unknowns
+// 				for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+// 				{
+// 					const auto state = noarr::idx<'s', 'i'>(s, i);
 
-					for (index_t v = 0; v < x_tile_size; v++)
-					{
-						simd_t data = hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 					for (index_t v = 0; v < x_tile_size; v++)
+// 					{
+// 						simd_t data = hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
 
-						simd_t prev =
-							hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i + 1));
+// 						simd_t prev =
+// 							hn::Load(t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i + 1));
 
-						data = hn::MulAdd(hn::Set(t, -a[state]), begins[v], data);
-						data = hn::MulAdd(hn::Set(t, -c[state]), prev, data);
+// 						data = hn::MulAdd(hn::Set(t, -a[state]), begins[v], data);
+// 						data = hn::MulAdd(hn::Set(t, -c[state]), prev, data);
 
-						hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
-					}
-				}
-			}
-		}
-	}
-}
+// 						hn::Store(data, t, &d.template at<'s', 'X', 'x', 'z', dim>(s, X, v * simd_length, z, i));
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+// }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_block_y_start_skip_tiles(real_t* __restrict__ densities, const real_t* __restrict__ ac,
@@ -1639,8 +2182,7 @@ static void solve_block_z_start(real_t* __restrict__ densities, const real_t* __
 								index_t& epoch, std::atomic<long>& counter, const index_t coop_size,
 								const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t s_begin,
 								const index_t s_end, const index_t x_begin, const index_t x_end, const index_t y_begin,
-								const index_t y_end, const index_t z_begin, const index_t z_end,
-								const index_t x_tile_size)
+								const index_t y_end, const index_t z_begin, const index_t z_end, const index_t)
 {
 	constexpr char dim = 'z';
 	const index_t n = dens_l | noarr::get_length<dim>();
@@ -2112,6 +2654,11 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 1)
 		return;
 
+	for (index_t i = 0; i < countersx_count_; i++)
+	{
+		countersx_[i].value = 0;
+	}
+
 	for (index_t i = 0; i < countersy_count_; i++)
 	{
 		countersy_[i].value = 0;
@@ -2124,11 +2671,11 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 
 	auto dens_l = get_substrates_layout<3>();
 
+	auto scratchx_l = get_scratch_layout(this->problem_.nx, this->problem_.ny * this->problem_.nz);
 	auto scratchy_l = get_scratch_layout(this->problem_.ny, this->problem_.nx * this->problem_.nz);
 	auto scratchz_l = get_scratch_layout(this->problem_.nz, this->problem_.ny * this->problem_.nx);
 
 	const index_t s_len = dens_l | noarr::get_length<'s'>();
-	const index_t x_len = dens_l | noarr::get_length<'x'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
 
 #pragma omp parallel
@@ -2143,12 +2690,16 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 		const auto tid_y = (substrate_group_tid / cores_division_[0]) % cores_division_[1];
 		const auto tid_z = substrate_group_tid / (cores_division_[0] * cores_division_[1]);
 
+		const auto block_x_begin = group_block_offsetsx_[tid_x];
+		const auto block_x_end = block_x_begin + group_block_lengthsx_[tid_x];
+
 		const auto block_y_begin = group_block_offsetsy_[tid_y];
 		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid_y];
 
 		const auto block_z_begin = group_block_offsetsz_[tid_z];
 		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid_z];
 
+		index_t epoch_x = 0;
 		index_t epoch_y = 0;
 		index_t epoch_z = 0;
 
@@ -2159,21 +2710,35 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 
 			// #pragma omp critical
 			// 			std::cout << "Thread " << tid << " s_begin: " << s << " s_end: " << s + s_step_length
+			// 					  << " block_x_begin: " << block_x_begin << " block_y_end: " << block_x_end
 			// 					  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
 			// 					  << " block_z_begin: " << block_z_begin << " block_z_end: " << block_z_end
 			// 					  << " group: " << substrate_group
+			// 					  << " lane_x: " << (tid_y + substrate_group) * cores_division_[2] + tid_z
 			// 					  << " lane_y: " << (tid_x + substrate_group) * cores_division_[2] + tid_z
-			// 					  << " lane_z: " << (tid_x + substrate_group) * cores_division_[1] + tid_y <<
-			// std::endl;
+			// 					  << " lane_z: " << (tid_x + substrate_group) * cores_division_[1] + tid_y << std::endl;
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
 				// do x
 				{
-					solve_slice_x_2d_and_3d_transpose<index_t>(
-						this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>(),
-						get_diagonal_layout(this->problem_, this->problem_.nx), block_y_begin, block_y_end,
-						block_z_begin, block_z_end, s, s + s_step_length);
+					if (cores_division_[0] == 1)
+					{
+						solve_slice_x_2d_and_3d_transpose<index_t>(
+							this->substrates_, ax_, b1x_, cx_, get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), block_y_begin, block_y_end,
+							block_z_begin, block_z_end, s, s + s_step_length);
+					}
+					else
+					{
+						const auto lane_id = (tid_y + substrate_group) * cores_division_[2] + tid_z;
+						const auto lane_scratch_l = scratchx_l ^ noarr::fix<'l'>(lane_id);
+
+						solve_block_x_start_transpose(
+							this->substrates_, ax_, b1x_, a_scratchx_, c_scratchx_, epoch_x, countersx_[lane_id].value,
+							cores_division_[0], group_blocks_[0], dens_l, lane_scratch_l, s, s + s_step_length,
+							block_x_begin, block_x_end, block_y_begin, block_y_end, block_z_begin, block_z_end);
+					}
 				}
 
 				// do Y
@@ -2193,13 +2758,15 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 						if (!skip)
 							solve_block_y_start<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_,
 														 epoch_y, countersy_[lane_id].value, cores_division_[1], dens_l,
-														 lane_scratch_l, s, s + s_step_length, 0, x_len, block_y_begin,
-														 block_y_end, block_z_begin, block_z_end);
+														 lane_scratch_l, s, s + s_step_length, block_x_begin,
+														 block_x_end, block_y_begin, block_y_end, block_z_begin,
+														 block_z_end);
 						else
 							solve_block_y_start_skip<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_,
 															  epoch_y, countersy_[lane_id].value, cores_division_[1],
-															  dens_l, lane_scratch_l, s, s + s_step_length, 0, x_len,
-															  block_y_begin, block_y_end, block_z_begin, block_z_end);
+															  dens_l, lane_scratch_l, s, s + s_step_length,
+															  block_x_begin, block_x_end, block_y_begin, block_y_end,
+															  block_z_begin, block_z_end);
 					}
 				}
 
@@ -2222,15 +2789,15 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 							if (!skip)
 								solve_block_z_start<index_t>(this->substrates_, az_, b1z_, a_scratchz_, c_scratchz_,
 															 epoch_z, countersz_[lane_id].value, cores_division_[2],
-															 dens_l, lane_scratch_l, s, s + s_step_length, 0, x_len,
-															 block_y_begin, block_y_end, block_z_begin, block_z_end,
-															 x_tile_size_);
+															 dens_l, lane_scratch_l, s, s + s_step_length,
+															 block_x_begin, block_x_end, block_y_begin, block_y_end,
+															 block_z_begin, block_z_end, x_tile_size_);
 							else
 								solve_block_z_start_skip<index_t>(
 									this->substrates_, az_, b1z_, a_scratchz_, c_scratchz_, epoch_z,
 									countersz_[lane_id].value, cores_division_[2], dens_l, lane_scratch_l, s,
-									s + s_step_length, 0, x_len, block_y_begin, block_y_end, block_z_begin, block_z_end,
-									x_tile_size_);
+									s + s_step_length, block_x_begin, block_x_end, block_y_begin, block_y_end,
+									block_z_begin, block_z_end, x_tile_size_);
 						}
 					}
 				}
@@ -2252,6 +2819,8 @@ cubed_mix_thomas_solver_t<real_t, aligned_x>::cubed_mix_thomas_solver_t(bool vec
 	  cz_(nullptr),
 	  countersy_count_(0),
 	  countersz_count_(0),
+	  a_scratchx_(nullptr),
+	  c_scratchx_(nullptr),
 	  a_scratchy_(nullptr),
 	  c_scratchy_(nullptr),
 	  a_scratchz_(nullptr),
@@ -2285,6 +2854,11 @@ cubed_mix_thomas_solver_t<real_t, aligned_x>::~cubed_mix_thomas_solver_t()
 		std::free(cz_);
 	}
 
+	if (a_scratchx_)
+	{
+		std::free(a_scratchx_);
+		std::free(c_scratchx_);
+	}
 	if (a_scratchy_)
 	{
 		std::free(a_scratchy_);
