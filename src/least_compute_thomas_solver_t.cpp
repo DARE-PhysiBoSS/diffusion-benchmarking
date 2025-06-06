@@ -1,7 +1,5 @@
 #include "least_compute_thomas_solver_t.h"
 
-#include <cstddef>
-
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t[]>& b,
 																		 std::unique_ptr<real_t[]>& c,

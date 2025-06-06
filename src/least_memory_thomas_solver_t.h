@@ -1,6 +1,7 @@
 #pragma once
 
 #include "base_solver.h"
+#include "least_memory_thomas_solver_data.h"
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
 
@@ -28,6 +29,7 @@ d_n'' == d_n'/b_n'
 d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
 
 Optimizations:
+- Substrates are the outermost dimension
 - Precomputed a_i, b_1, b_i'
 - Minimized memory accesses by computing e_i on the fly
 - Aligned memory for x dimension (tunable by 'alignment_size')
@@ -35,6 +37,7 @@ Optimizations:
 y/z dimensions are solved alongside tiled x dimension
 - X dimension is vectorized manually - squares of x*yz plane are loaded into vector registers, then the data is
 transposed so the vectorization can be utilized
+- The main loop performs all desired solve iterations for a substrate before moving to another for better data locality
 */
 
 template <typename real_t, bool aligned_x>
@@ -43,10 +46,9 @@ class least_memory_thomas_solver_t : public locally_onedimensional_solver,
 
 {
 	using index_t = std::int32_t;
+	using data_t = least_memory_thomas_solver_data<real_t>;
 
-	real_t *ax_, *b1x_, *bx_;
-	real_t *ay_, *b1y_, *by_;
-	real_t *az_, *b1z_, *bz_;
+	data_t x_data_, y_data_, z_data_;
 
 	bool vectorized_x_;
 	std::size_t x_tile_size_;
@@ -54,8 +56,6 @@ class least_memory_thomas_solver_t : public locally_onedimensional_solver,
 	index_t substrate_step_;
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
-
-	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
 public:
 	least_memory_thomas_solver_t(bool vectorized_x);
@@ -80,6 +80,4 @@ public:
 	void solve_z() override;
 
 	void solve() override;
-
-	~least_memory_thomas_solver_t();
 };
