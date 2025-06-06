@@ -127,7 +127,6 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::prepare(const max_proble
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
-	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 	substrate_step_ =
 		params.contains("substrate_step") ? (index_t)params["substrate_step"] : this->problem_.substrates_count;
@@ -139,9 +138,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::tune(const nlohmann::jso
 	{
 		using simd_tag = hn::ScalableTag<real_t>;
 		simd_tag d;
-		x_tile_size_ = (x_tile_size_ + hn::Lanes(d) - 1) / hn::Lanes(d) * hn::Lanes(d);
 		std::size_t vector_length = hn::Lanes(d) * sizeof(real_t);
-		alignment_size_ = std::max(alignment_size_, vector_length * x_tile_size_ / hn::Lanes(d));
+		alignment_size_ = std::max(alignment_size_, vector_length);
 	}
 }
 

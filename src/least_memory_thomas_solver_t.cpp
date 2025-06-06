@@ -217,9 +217,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					{
 						auto b_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(b, full_n - simd_length, s)));
 
-						rows[simd_length - 1] =
-							hn::Mul(rows[simd_length - 1], hn::Set(d, hn::ExtractLane(b_tmp, simd_length - 1)));
-						for (index_t v = simd_length - 2; v >= 0; v--)
+						rows[remainder_work - 1] =
+							hn::Mul(rows[remainder_work - 1], hn::Set(d, hn::ExtractLane(b_tmp, remainder_work - 1)));
+						for (index_t v = remainder_work - 2; v >= 0; v--)
 						{
 							rows[v] = hn::Mul(hn::MulAdd(rows[v + 1], hn::Set(d, -a_s), rows[v]),
 											  hn::Set(d, hn::ExtractLane(b_tmp, v)));

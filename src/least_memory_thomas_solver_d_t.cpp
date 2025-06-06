@@ -68,6 +68,7 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::tune(const nlohmann::jso
 {
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
+	alignment_multiple_ = alignment_size_;
 	substrate_step_ =
 		params.contains("substrate_step") ? (index_t)params["substrate_step"] : this->problem_.substrates_count;
 
@@ -75,9 +76,11 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::tune(const nlohmann::jso
 	{
 		using simd_tag = hn::ScalableTag<real_t>;
 		simd_tag d;
-		x_tile_size_ = (x_tile_size_ + hn::Lanes(d) - 1) / hn::Lanes(d) * hn::Lanes(d);
 		std::size_t vector_length = hn::Lanes(d) * sizeof(real_t);
-		alignment_size_ = std::max(alignment_size_, vector_length * x_tile_size_ / hn::Lanes(d));
+		alignment_size_ = std::max(alignment_size_, vector_length);
+		x_tile_size_ = (x_tile_size_ + hn::Lanes(d) - 1) / hn::Lanes(d) * hn::Lanes(d);
+		x_tile_size_ = std::min(x_tile_size_, 4 * hn::Lanes(d));
+		alignment_multiple_ = std::max(alignment_size_, vector_length * x_tile_size_ / hn::Lanes(d));
 	}
 }
 
@@ -274,7 +277,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					{
 						auto c = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(back_c, full_n - simd_length, s)));
 
-						for (index_t v = simd_length - 2; v >= 0; v--)
+						for (index_t v = remainder_work - 2; v >= 0; v--)
 						{
 							rows[v + 1] = hn::NegMulAdd(rows[v + 2], hn::Set(d, hn::ExtractLane(c, v)), rows[v + 1]);
 						}
