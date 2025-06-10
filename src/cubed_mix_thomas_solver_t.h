@@ -35,6 +35,7 @@ protected:
 	real_t *a_scratchz_, *c_scratchz_;
 
 	std::size_t alignment_size_;
+	std::size_t alignment_multiple_;
 	std::size_t x_tile_size_;
 	index_t substrate_step_;
 
@@ -75,14 +76,24 @@ public:
 	auto get_substrates_layout() const
 	{
 		if constexpr (aligned_x)
-			return substrate_layouts::get_xyzs_aligned_layout<dims>(this->problem_, alignment_size_);
+			return substrate_layouts::get_xyzs_aligned_layout<dims>(this->problem_, alignment_multiple_);
 		else
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
 
 	auto get_scratch_layout(const index_t n, const index_t groups) const
 	{
-		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 'l', 's'>(n, groups, this->problem_.substrates_count);
+		if constexpr (aligned_x)
+		{
+			std::size_t size = n * sizeof(real_t);
+			std::size_t size_padded = (size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+			size_padded /= sizeof(real_t);
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'i', 'l', 's'>(size_padded, groups, this->problem_.substrates_count)
+				   ^ noarr::slice<'i'>(n);
+		}
+		else
+			return noarr::scalar<real_t>() ^ noarr::vectors<'i', 'l', 's'>(n, groups, this->problem_.substrates_count);
 	}
 
 	std::function<void> get_synchronization_function();

@@ -149,6 +149,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::initialize()
 	if (this->problem_.dims == 2)
 		cores_division_[2] = 1;
 
+	cores_division_[0] = 1;
+
 	const index_t substrate_group_size = cores_division_[0] * cores_division_[1] * cores_division_[2];
 
 	substrate_groups_ = (get_max_threads() + substrate_group_size - 1) / substrate_group_size;
@@ -178,6 +180,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::initialize()
 		if (cores_division_[2] == 1)
 		{
 			countersz_count_ = 0;
+			group_block_offsetsz_ = { 0 };
+			group_block_lengthsz_ = { this->problem_.nz };
 
 			precompute_values(az_, b1z_, cz_, this->problem_.dz, this->problem_.dims, this->problem_.nz);
 		}
@@ -2164,7 +2168,7 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 
 			// the begin of backward part
 			{
-				x_backward_vectorized(cx, rows + 1, t, simd_length - 1, full_n - simd_length, s);
+				x_backward_vectorized(cx, rows + 1, t, remainder_work - 1, full_n - simd_length, s);
 
 				prev_x = rows[1];
 			}
@@ -2330,7 +2334,7 @@ static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densities, cons
 
 					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-					x_backward<false, false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
+					x_backward<false, false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
 
 					y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, cy_tmp);
 				}
@@ -2399,7 +2403,7 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 
 				x_forward(d, s, 0, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-				x_backward<false, false>(d, cy, s, 0, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
+				x_backward<false, false>(d, cx, s, 0, y, prev, ay_s, b1y_s, inside_data<real_t> { cy_tmp });
 
 				y_forward_inside_x<true>(d, s, 0, y, 0, prev, ay_s, b1y_s, cy_tmp);
 			}
@@ -2478,7 +2482,7 @@ static void solve_slice_xyz_fused_transpose_blocked(real_t* __restrict__ densiti
 
 					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-					x_backward<false, false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data { cy_tmp });
+					x_backward<false, false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data { cy_tmp });
 
 					y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, cy_tmp);
 				}
@@ -2592,7 +2596,7 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 
 					x_forward(d, s, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
 
-					x_backward<false, false>(d, cy, s, z, y, prev, ay_s, b1y_s, inside_data { cy_tmp });
+					x_backward<false, false>(d, cx, s, z, y, prev, ay_s, b1y_s, inside_data { cy_tmp });
 
 					y_forward_inside_x<true>(d, s, z, y, 0, prev, ay_s, b1y_s, cy_tmp);
 				}
@@ -3433,9 +3437,6 @@ least_memory_thomas_solver_d_f<real_t, aligned_x>::~least_memory_thomas_solver_d
 		std::free(c_scratchz_);
 	}
 }
-
-template class least_memory_thomas_solver_d_f<float, false>;
-template class least_memory_thomas_solver_d_f<double, false>;
 
 template class least_memory_thomas_solver_d_f<float, true>;
 template class least_memory_thomas_solver_d_f<double, true>;

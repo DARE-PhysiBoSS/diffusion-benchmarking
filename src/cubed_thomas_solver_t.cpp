@@ -132,22 +132,28 @@ void cubed_thomas_solver_t<real_t, aligned_x>::initialize()
 	if (this->problem_.dims == 2)
 		cores_division_[2] = 1;
 
-	countersx_count_ = cores_division_[1] * cores_division_[2];
-	countersy_count_ = cores_division_[0] * cores_division_[2];
-	countersz_count_ = cores_division_[0] * cores_division_[1];
 
 	if (this->problem_.dims >= 1)
+	{
+		countersx_count_ = cores_division_[1] * cores_division_[2];
 		precompute_values(ax_, b1x_, this->problem_.dx, this->problem_.dims, this->problem_.nx, countersx_count_,
 						  countersx_, cores_division_[0], group_blocks_[0], group_block_lengthsx_,
 						  group_block_offsetsx_, aligned_x);
+	}
 	if (this->problem_.dims >= 2)
+	{
+		countersy_count_ = cores_division_[0] * cores_division_[2];
 		precompute_values(ay_, b1y_, this->problem_.dy, this->problem_.dims, this->problem_.ny, countersy_count_,
 						  countersy_, cores_division_[1], group_blocks_[1], group_block_lengthsy_,
 						  group_block_offsetsy_, false);
+	}
 	if (this->problem_.dims >= 3)
+	{
+		countersz_count_ = cores_division_[0] * cores_division_[1];
 		precompute_values(az_, b1z_, this->problem_.dz, this->problem_.dims, this->problem_.nz, countersz_count_,
 						  countersz_, cores_division_[2], group_blocks_[2], group_block_lengthsz_,
 						  group_block_offsetsz_, false);
+	}
 
 	auto dens_l = get_substrates_layout<3>();
 
@@ -1896,7 +1902,7 @@ void cubed_thomas_solver_t<real_t, aligned_x>::solve()
 {
 	if (this->problem_.dims == 1)
 		return;
-	
+
 	for (index_t i = 0; i < countersx_count_; i++)
 	{
 		countersx_[i].value = 0;
@@ -2022,6 +2028,9 @@ cubed_thomas_solver_t<real_t, aligned_x>::cubed_thomas_solver_t(bool vectorized_
 	  b1y_(nullptr),
 	  az_(nullptr),
 	  b1z_(nullptr),
+	  countersx_count_(0),
+	  countersy_count_(0),
+	  countersz_count_(0),
 	  a_scratchx_(nullptr),
 	  c_scratchx_(nullptr),
 	  a_scratchy_(nullptr),
