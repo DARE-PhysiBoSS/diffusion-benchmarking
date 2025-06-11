@@ -8,8 +8,8 @@
 #include "biofvm.h"
 #include "blocked_thomas_solver.h"
 #include "blocked_thomas_solver_t.h"
-#include "cubed_thomas_solver_t.h"
 #include "cubed_mix_thomas_solver_t.h"
+#include "cubed_thomas_solver_t.h"
 #include "cyclic_reduction_solver.h"
 #include "cyclic_reduction_solver_t.h"
 #include "full_lapack_solver.h"
@@ -56,14 +56,8 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(false, true); });
 	solvers.emplace("lstmdtfai",
 					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(true, true); });
-	solvers.emplace("lstmfa",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(false, false); });
-	solvers.emplace("lstmfai",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, false); });
-	solvers.emplace("lstmfab",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(false, true); });
-	solvers.emplace("lstmfabi",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, true); });
+	solvers.emplace("lstmfai", []() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(false); });
+	solvers.emplace("lstmfabi", []() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true); });
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("lstmta", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("lstmtai", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(true); });
@@ -81,7 +75,8 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("cubeda", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("cubedai", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(true); });
-	solvers.emplace("cubedmai", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
+	solvers.emplace("cubedmai", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(false); });
+	solvers.emplace("cubedmabi", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
 	return solvers;
 }
 

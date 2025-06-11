@@ -132,9 +132,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::tune(const nlohmann::jso
 		params.contains("substrate_step") ? (index_t)params["substrate_step"] : this->problem_.substrates_count;
 
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
-														: std::array<index_t, 3> { 2, 2, 2 };
+														: std::array<index_t, 3> { 1, 2, 2 };
 
-	if (use_intrinsics_)
 	{
 		using simd_tag = hn::ScalableTag<real_t>;
 		simd_tag d;
@@ -3381,7 +3380,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 }
 
 template <typename real_t, bool aligned_x>
-least_memory_thomas_solver_d_f<real_t, aligned_x>::least_memory_thomas_solver_d_f(bool use_intrinsics, bool use_fused)
+least_memory_thomas_solver_d_f<real_t, aligned_x>::least_memory_thomas_solver_d_f(bool use_alt_blocked)
 	: ax_(nullptr),
 	  b1x_(nullptr),
 	  cx_(nullptr),
@@ -3395,8 +3394,7 @@ least_memory_thomas_solver_d_f<real_t, aligned_x>::least_memory_thomas_solver_d_
 	  c_scratchy_(nullptr),
 	  a_scratchz_(nullptr),
 	  c_scratchz_(nullptr),
-	  use_intrinsics_(use_intrinsics),
-	  use_alt_blocked_(use_fused)
+	  use_alt_blocked_(use_alt_blocked)
 {}
 
 template <typename real_t, bool aligned_x>

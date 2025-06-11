@@ -39,7 +39,7 @@ protected:
 	std::size_t x_tile_size_;
 	index_t substrate_step_;
 
-	bool vectorized_x_;
+	bool use_alt_blocked_;
 
 	std::array<index_t, 3> cores_division_;
 
@@ -70,7 +70,7 @@ protected:
 public:
 	static constexpr index_t min_block_size = 2;
 
-	cubed_mix_thomas_solver_t(bool vectorized_x);
+	cubed_mix_thomas_solver_t(bool use_alt_blocked);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const

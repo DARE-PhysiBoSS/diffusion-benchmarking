@@ -145,9 +145,6 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& 
 	solver_utils::initialize_substrate(substrates_layout, this->substrates_, this->problem_);
 }
 
-bool skip = false;
-bool fused = false;
-
 template <typename real_t, bool aligned_x>
 void cubed_mix_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
@@ -157,14 +154,6 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::json& pa
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
 														: std::array<index_t, 3> { 2, 2, 2 };
 
-
-	if (params.contains("skip"))
-		skip = (bool)params["skip"];
-
-	if (params.contains("fused"))
-		fused = (bool)params["fused"];
-
-	if (vectorized_x_)
 	{
 		using simd_tag = hn::ScalableTag<real_t>;
 		simd_tag d;
@@ -2848,7 +2837,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve_y()
 						tid_x * cores_division_[2] + substrate_group * cores_division_[0] * cores_division_[2] + tid_z;
 					const auto lane_scratch_l = scratchy_l ^ noarr::fix<'l'>(lane_id);
 
-					if (!skip)
+					if (!use_alt_blocked_)
 						solve_block_y_start<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_, epoch_y,
 													 countersy_[lane_id].value, cores_division_[1], dens_l,
 													 lane_scratch_l, s, s + s_step_length, block_x_begin, block_x_end,
@@ -2942,7 +2931,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve_z()
 						tid_x * cores_division_[1] + substrate_group * cores_division_[0] * cores_division_[1] + tid_y;
 					const auto lane_scratch_l = scratchz_l ^ noarr::fix<'l'>(lane_id);
 
-					if (!skip)
+					if (!use_alt_blocked_)
 						solve_block_z_start<index_t>(
 							this->substrates_, az_, b1z_, a_scratchz_, c_scratchz_, epoch_z, countersz_[lane_id].value,
 							cores_division_[2], dens_l, lane_scratch_l, s, s + s_step_length, block_x_begin,
@@ -3074,7 +3063,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 											 + substrate_group * cores_division_[0] * cores_division_[2] + tid_z;
 						const auto lane_scratch_l = scratchy_l ^ noarr::fix<'l'>(lane_id);
 
-						if (!skip)
+						if (!use_alt_blocked_)
 							solve_block_y_start<index_t>(this->substrates_, ay_, b1y_, a_scratchy_, c_scratchy_,
 														 epoch_y, countersy_[lane_id].value, cores_division_[1], dens_l,
 														 lane_scratch_l, s, s + s_step_length, block_x_begin,
@@ -3106,7 +3095,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 												 + substrate_group * cores_division_[0] * cores_division_[1] + tid_y;
 							const auto lane_scratch_l = scratchz_l ^ noarr::fix<'l'>(lane_id);
 
-							if (!skip)
+							if (!use_alt_blocked_)
 								solve_block_z_start<index_t>(this->substrates_, az_, b1z_, a_scratchz_, c_scratchz_,
 															 epoch_z, countersz_[lane_id].value, cores_division_[2],
 															 dens_l, lane_scratch_l, s, s + s_step_length,
@@ -3127,7 +3116,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 }
 
 template <typename real_t, bool aligned_x>
-cubed_mix_thomas_solver_t<real_t, aligned_x>::cubed_mix_thomas_solver_t(bool vectorized_x)
+cubed_mix_thomas_solver_t<real_t, aligned_x>::cubed_mix_thomas_solver_t(bool use_alt_blocked)
 	: ax_(nullptr),
 	  b1x_(nullptr),
 	  cx_(nullptr),
@@ -3145,7 +3134,7 @@ cubed_mix_thomas_solver_t<real_t, aligned_x>::cubed_mix_thomas_solver_t(bool vec
 	  c_scratchy_(nullptr),
 	  a_scratchz_(nullptr),
 	  c_scratchz_(nullptr),
-	  vectorized_x_(vectorized_x),
+	  use_alt_blocked_(use_alt_blocked),
 	  group_block_lengthsy_({ 1 }),
 	  group_block_lengthsz_({ 1 }),
 	  group_block_offsetsy_({ 0 }),
@@ -3190,9 +3179,6 @@ cubed_mix_thomas_solver_t<real_t, aligned_x>::~cubed_mix_thomas_solver_t()
 		std::free(c_scratchz_);
 	}
 }
-
-template class cubed_mix_thomas_solver_t<float, false>;
-template class cubed_mix_thomas_solver_t<double, false>;
 
 template class cubed_mix_thomas_solver_t<float, true>;
 template class cubed_mix_thomas_solver_t<double, true>;
