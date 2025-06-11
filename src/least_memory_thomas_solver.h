@@ -1,7 +1,6 @@
 #pragma once
 
 #include "base_solver.h"
-#include "least_memory_thomas_solver_data.h"
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
 
@@ -29,7 +28,6 @@ d_n'' == d_n'/b_n'
 d_i'' == (d_i' - c_i*d_(i+1)'')*b_i'                          n >  i >= 1
 
 Optimizations:
-- Substrates are the outermost dimension
 - Precomputed a_i, b_1, b_i'
 - Minimized memory accesses by computing e_i on the fly
 */
@@ -40,11 +38,15 @@ class least_memory_thomas_solver : public locally_onedimensional_solver,
 
 {
 	using index_t = std::int32_t;
-	using data_t = least_memory_thomas_solver_data<real_t>;
 
-	data_t x_data_, y_data_, z_data_;
+	std::unique_ptr<real_t[]> ax_, b1x_, bx_;
+	std::unique_ptr<real_t[]> ay_, b1y_, by_;
+	std::unique_ptr<real_t[]> az_, b1z_, bz_;
 
 	static auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
+
+	void precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b1, std::unique_ptr<real_t[]>& b,
+						   index_t shape, index_t dims, index_t n);
 
 public:
 	template <std::size_t dims = 3>
