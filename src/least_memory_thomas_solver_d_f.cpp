@@ -3253,7 +3253,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 
 		const index_t group_size = cores_division_[1];
 
-		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
@@ -3326,7 +3326,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 		const auto lane_scratchz_l =
 			get_scratch_layout(this->problem_.nz, substrate_groups_ * cores_division_[1]) ^ noarr::fix<'l'>(lane_id_z);
 
-		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 

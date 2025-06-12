@@ -2711,7 +2711,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve_x()
 
 		index_t epoch_x = 0;
 
-		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
@@ -2800,7 +2800,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve_y()
 
 		index_t epoch_y = 0;
 
-		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
@@ -2894,7 +2894,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve_z()
 
 		index_t epoch_z = 0;
 
-		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
@@ -3002,7 +3002,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 		index_t epoch_y = 0;
 		index_t epoch_z = 0;
 
-		for (index_t s = substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
