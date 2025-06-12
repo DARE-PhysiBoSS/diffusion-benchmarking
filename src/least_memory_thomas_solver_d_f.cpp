@@ -735,29 +735,22 @@ static void y_backward_blocked_vectorized(const density_layout_t dens_l, real_t*
 }
 
 
-template <typename index_t, typename density_bag_t, typename scratch_bag_t>
+template <typename index_t, typename density_bag_t, typename scratch_bag_t, typename dim_scratch_bag_t>
 static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
-							 const index_t coop_size, const index_t s)
+							 dim_scratch_bag_t c_scratch, const index_t tid, const index_t coop_size, const index_t s)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 	const index_t n = d | noarr::get_length<'y'>();
 
 	const index_t block_size = n / coop_size;
 
-	// const index_t block_tid = get_thread_num() % blocks_count;
-
-	// const index_t y_block_size = (y_len + blocks_count - 1) / blocks_count;
-	// const index_t y_begin = y_block_size * block_tid;
-	// const index_t y_end = std::min(y_begin + y_block_size, y_len);
-
-
-	// const index_t y_begin = 0;
-	// const index_t y_end = y_len;
-
+	const index_t block_size_x = x_len / coop_size;
+	const auto x_begin = tid * block_size_x + std::min(tid, x_len % coop_size);
+	const auto x_end = x_begin + block_size_x + ((tid < x_len % coop_size) ? 1 : 0);
 
 	// #pragma omp critical
-	// std::cout << "Thread " << block_tid << " s_begin: " << s << " block_y_begin: " << y_begin
-	// 		  << " block_y_end: " << y_end << std::endl;
+	// 	std::cout << "Thread " << tid << " s_begin: " << s << " block_begin: " << x_begin << " block_end: " << x_end
+	// 			  << " block_size: " << block_size_x << std::endl;
 
 	auto get_i = [block_size, n](index_t equation_idx) {
 		const index_t block_idx = equation_idx / 2;
@@ -767,18 +760,21 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 		return i;
 	};
 
+	auto c_tmp = c.template at<'s', 'i'>(s, get_i(0));
+	c_scratch.template at<'i', 't'>(0, tid) = c_tmp;
+
 	for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
 	{
 		const index_t i = get_i(equation_idx);
 		const index_t prev_i = get_i(equation_idx - 1);
 		const auto state = noarr::idx<'s', 'i'>(s, i);
-		const auto prev_state = noarr::idx<'s', 'i'>(s, prev_i);
 
-		const auto r = 1 / (1 - a[state] * c[prev_state]);
+		const auto r = 1 / (1 - a[state] * c_tmp);
 
-		c[state] *= r;
+		c_tmp = c[state] * r;
+		c_scratch.template at<'i', 't'>(equation_idx, tid) = c_tmp;
 
-		for (index_t x = 0; x < x_len; x++)
+		for (index_t x = x_begin; x < x_end; x++)
 		{
 			d.template at<'s', 'x', 'y', 'z'>(s, x, i, z) =
 				r
@@ -796,13 +792,13 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 	{
 		const index_t i = get_i(equation_idx);
 		const index_t next_i = get_i(equation_idx + 1);
-		const auto state = noarr::idx<'s', 'i'>(s, i);
+		const auto state = noarr::idx<'t', 'i'>(tid, equation_idx);
 
-		for (index_t x = 0; x < x_len; x++)
+		for (index_t x = x_begin; x < x_end; x++)
 		{
 			d.template at<'s', 'x', 'y', 'z'>(s, x, i, z) =
 				d.template at<'s', 'x', 'y', 'z'>(s, x, i, z)
-				- c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, next_i, z);
+				- c_scratch[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, next_i, z);
 
 			// #pragma omp critical
 			// 			std::cout << "mb z: " << z << " y: " << i << " x: " << x << " c: " << c[state]
@@ -2623,12 +2619,7 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			}
 		}
 
-		// #pragma omp barrier
-
-		// if (z_begin == 0)
 		z_blocked_middle(d, a_scratch, c_scratch, z_scratch, tid, coop_size, 0, y_len, s);
-
-		// #pragma omp barrier
 
 		{
 			epoch++;
@@ -2647,15 +2638,14 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
-		  typename scratch_layout_t>
-static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densities, const real_t* __restrict__ ax,
-												   const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
-												   const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-												   real_t* __restrict__ a_data, real_t* __restrict__ c_data,
-												   const density_layout_t dens_l, const diagonal_layout_t diagx_l,
-												   const scratch_layout_t scratch_l, const index_t s_begin,
-												   const index_t s_end, const index_t y_begin, const index_t y_end,
-												   const index_t coop_size, index_t& epoch, std::atomic<long>& counter)
+		  typename scratch_layout_t, typename dim_scratch_layout_t>
+static void solve_slice_xy_fused_transpose_blocked(
+	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
+	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+	real_t* __restrict__ a_data, real_t* __restrict__ c_data, real_t* __restrict__ y_data,
+	const density_layout_t dens_l, const diagonal_layout_t diagx_l, const scratch_layout_t scratch_l,
+	const dim_scratch_layout_t dim_scratch_l, const index_t s_begin, const index_t s_end, const index_t y_begin,
+	const index_t y_end, const index_t tid, const index_t coop_size, index_t& epoch, std::atomic<long>& counter)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -2679,6 +2669,8 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 
 		const auto a_scratch = noarr::make_bag(scratch_l, a_data);
 		const auto c_scratch = noarr::make_bag(scratch_l, c_data);
+
+		const auto y_scratch = noarr::make_bag(dim_scratch_l, y_data);
 
 		real_t cy_tmp = ay_s;
 
@@ -2732,8 +2724,7 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 
 		// #pragma omp barrier
 
-		if (y_begin == 0)
-			y_blocked_middle(d, 0, a_scratch, c_scratch, coop_size, s);
+		y_blocked_middle(d, 0, a_scratch, c_scratch, y_scratch, tid, coop_size, s);
 
 		// #pragma omp barrier
 
@@ -2753,13 +2744,14 @@ static void solve_slice_xy_fused_transpose_blocked(real_t* __restrict__ densitie
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
-		  typename scratch_layout_t>
+		  typename scratch_layout_t, typename dim_scratch_layout_t>
 static void solve_slice_xy_fused_transpose_blocked_alt(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-	real_t* __restrict__ a_data, real_t* __restrict__ c_data, const density_layout_t dens_l,
-	const diagonal_layout_t diagx_l, const scratch_layout_t scratch_l, const index_t s_begin, const index_t s_end,
-	const index_t y_begin, const index_t y_end, const index_t coop_size, index_t& epoch, std::atomic<long>& counter)
+	real_t* __restrict__ a_data, real_t* __restrict__ c_data, real_t* __restrict__ y_data,
+	const density_layout_t dens_l, const diagonal_layout_t diagx_l, const scratch_layout_t scratch_l,
+	const dim_scratch_layout_t dim_scratch_l, const index_t s_begin, const index_t s_end, const index_t y_begin,
+	const index_t y_end, const index_t tid, const index_t coop_size, index_t& epoch, std::atomic<long>& counter)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -2782,6 +2774,8 @@ static void solve_slice_xy_fused_transpose_blocked_alt(
 
 		const auto a_scratch = noarr::make_bag(scratch_l, a_data);
 		const auto c_scratch = noarr::make_bag(scratch_l, c_data);
+
+		const auto y_scratch = noarr::make_bag(dim_scratch_l, y_data);
 
 		{
 			real_t ay_tmp = ay_s;
@@ -2836,12 +2830,7 @@ static void solve_slice_xy_fused_transpose_blocked_alt(
 			}
 		}
 
-		// #pragma omp barrier
-
-		if (y_begin == 0)
-			y_blocked_middle(d, 0, a_scratch, c_scratch, coop_size, s);
-
-		// #pragma omp barrier
+		y_blocked_middle(d, 0, a_scratch, c_scratch, y_scratch, tid, coop_size, s);
 
 		{
 			epoch++;
@@ -2889,6 +2878,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 	const auto az_scratch = noarr::make_bag(scratchz_l, az_data);
 	const auto cz_scratch = noarr::make_bag(scratchz_l, cz_data);
 
+	const auto y_scratch = noarr::make_bag(dim_scratchy_l, y_data);
 	const auto z_scratch = noarr::make_bag(dim_scratchz_l, z_data);
 
 	auto cx = noarr::make_bag(diagx_l, back_cx);
@@ -2946,7 +2936,6 @@ static void solve_slice_xyz_fused_transpose_blocked(
 
 			y_backward_blocked(d, z, y_begin, y_end, ay_scratch, cy_scratch, s);
 
-
 			{
 				epoch_y++;
 
@@ -2958,13 +2947,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 				}
 			}
 
-			// #pragma omp barrier
-
-			if (y_begin == 0)
-				y_blocked_middle(d, z, ay_scratch, cy_scratch, coop_size_y, s);
-
-			// #pragma omp barrier
-
+			y_blocked_middle(d, z, ay_scratch, cy_scratch, y_scratch, tid_y, coop_size_y, s);
 
 			{
 				epoch_y++;
@@ -3058,6 +3041,7 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 	const auto az_scratch = noarr::make_bag(scratchz_l, az_data);
 	const auto cz_scratch = noarr::make_bag(scratchz_l, cz_data);
 
+	const auto y_scratch = noarr::make_bag(dim_scratchy_l, y_data);
 	const auto z_scratch = noarr::make_bag(dim_scratchz_l, z_data);
 
 	auto cx = noarr::make_bag(diagx_l, back_cx);
@@ -3131,12 +3115,7 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 				}
 			}
 
-			// #pragma omp barrier
-
-			if (y_begin == 0)
-				y_blocked_middle(d, z, ay_scratch, cy_scratch, coop_size_y, s);
-
-			// #pragma omp barrier
+			y_blocked_middle(d, z, ay_scratch, cy_scratch, y_scratch, tid_y, coop_size_y, s);
 
 			{
 				epoch_y++;
@@ -3167,12 +3146,7 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			}
 		}
 
-		// #pragma omp barrier
-
-		// if (z_begin == 0)
 		z_blocked_middle(d, az_scratch, cz_scratch, z_scratch, tid_z, coop_size_z, y_begin, y_end, s);
-
-		// #pragma omp barrier
 
 		{
 			epoch_z++;
@@ -3278,17 +3252,19 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 			{
 				if (!use_alt_blocked_)
 					solve_slice_xy_fused_transpose_blocked<index_t>(
-						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_,
+						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_, y_scratch_,
 						get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
-						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group), s,
-						s + s_step_length, block_y_begin, block_y_end, group_size, epoch,
+						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group),
+						get_dim_scratch_layout(this->problem_.ny, cores_division_[1]), s, s + s_step_length,
+						block_y_begin, block_y_end, substrate_group_tid, group_size, epoch,
 						countersy_[substrate_group].value);
 				else
 					solve_slice_xy_fused_transpose_blocked_alt<index_t>(
-						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_,
+						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_, y_scratch_,
 						get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
-						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group), s,
-						s + s_step_length, block_y_begin, block_y_end, group_size, epoch,
+						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group),
+						get_dim_scratch_layout(this->problem_.ny, cores_division_[1]), s, s + s_step_length,
+						block_y_begin, block_y_end, substrate_group_tid, group_size, epoch,
 						countersy_[substrate_group].value);
 			}
 		}
@@ -3359,7 +3335,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 							z_scratch_, get_substrates_layout<3>(),
 							get_diagonal_layout(this->problem_, this->problem_.nx),
 							get_diagonal_layout(this->problem_, this->problem_.ny), lane_scratchz_l,
-							get_dim_scratch_layout(this->problem_.ny, cores_division_[2]), s, s + s_step_length,
+							get_dim_scratch_layout(this->problem_.nz, cores_division_[2]), s, s + s_step_length,
 							block_z_begin, block_z_end, tid_z, cores_division_[2], epoch_z,
 							countersz_[lane_id_z].value);
 					else
@@ -3368,7 +3344,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 							z_scratch_, get_substrates_layout<3>(),
 							get_diagonal_layout(this->problem_, this->problem_.nx),
 							get_diagonal_layout(this->problem_, this->problem_.ny), lane_scratchz_l,
-							get_dim_scratch_layout(this->problem_.ny, cores_division_[2]), s, s + s_step_length,
+							get_dim_scratch_layout(this->problem_.nz, cores_division_[2]), s, s + s_step_length,
 							block_z_begin, block_z_end, tid_z, cores_division_[2], epoch_z,
 							countersz_[lane_id_z].value);
 				else
