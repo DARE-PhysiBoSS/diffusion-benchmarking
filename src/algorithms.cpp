@@ -98,7 +98,7 @@ std::unique_ptr<locally_onedimensional_solver> algorithms::try_get_adi_solver(co
 
 void algorithms::append_params(std::ostream& os, const nlohmann::json& params, bool header)
 {
-	std::vector<std::string> keys_to_skip = { "warmup_time", "outer_iterations", "inner_iterations", "benchmark_kind" };
+	std::vector<std::string> keys_to_skip = { "warmup_time", "outer_iterations", "inner_iterations", "benchmark_kind", "papi_counters" };
 	if (header)
 	{
 		for (auto it = params.begin(); it != params.end(); ++it)
