@@ -39,7 +39,7 @@ int main(int argc, char** argv)
 	}
 	
 
-	argparse::ArgumentParser program("diffuse");
+	argparse::ArgumentParser program("diffuse_mpi");
 
 	std::string alg;
 	program.add_argument("--alg").help("Algorithm to use").required().store_into(alg);

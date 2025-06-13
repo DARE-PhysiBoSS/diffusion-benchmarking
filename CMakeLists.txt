@@ -81,16 +81,48 @@ target_link_libraries(diffuse LAPACK::LAPACK)
 
 # Find and link PAPI
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAPI REQUIRED papi)
+pkg_check_modules(PAPI IMPORTED_TARGET papi)
+
+if(PAPI_FOUND)
+
+  target_link_libraries(diffuse PkgConfig::PAPI)
+
+else()
+
+  message(STATUS "'papi' will be built from source:")
+
+  # Fetch papi
+  FetchContent_Declare(
+    papi
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    URL file://${CMAKE_CURRENT_SOURCE_DIR}/submodules/papi)
+  FetchContent_MakeAvailable(papi)
+
+  execute_process(COMMAND ./configure --prefix=${papi_BINARY_DIR}
+                  WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
+
+  add_custom_target(
+    papi_build
+    BYPRODUCTS ${papi_BINARY_DIR}/lib/libpapi.a
+    COMMAND make -j
+    COMMAND make install
+    WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
+
+  add_dependencies(diffuse papi_build)
+
+  target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
+  target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
+
+  set(CMAKE_PREFIX_PATH
+      ${papi_BINARY_DIR}
+      CACHE PATH "Path to installed packages" FORCE)
+
+endif()
 
 include_directories(BEFORE ${PAPI_INCLUDE_DIRS})
 target_include_directories(diffuse PUBLIC ${PAPI_INCLUDE_DIRS})
 target_compile_options(diffuse PUBLIC ${PAPI_CFLAGS_OTHER})
-target_link_libraries(diffuse ${PAPI_LIBRARIES})
 
-message(PAPI_INCLUDE_DIR="${PAPI_INCLUDE_DIRS}")
-message(PAPI_LIBRARIES="${PAPI_LIBRARIES}")
-message(PAPI_COMPILE_OPTIONS="${PAPI_CFLAGS_OTHER}")
 
 find_package(MPI)
 if (MPI_FOUND)
@@ -122,18 +154,25 @@ if (MPI_FOUND)
   find_package(LAPACK REQUIRED)
   target_link_libraries(diffuse_mpi LAPACK::LAPACK)
 
-  # Find and link PAPI
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(PAPI REQUIRED papi)
-
   target_include_directories(diffuse_mpi PRIVATE ${MPI_CXX_INCLUDE_DIRS})
   target_link_libraries(diffuse_mpi MPI::MPI_CXX)
 
 
-  include_directories(BEFORE ${PAPI_INCLUDE_DIRS})
-  target_include_directories(diffuse_mpi PUBLIC ${PAPI_INCLUDE_DIRS})
-  target_compile_options(diffuse_mpi PUBLIC ${PAPI_CFLAGS_OTHER})
-  target_link_libraries(diffuse_mpi ${PAPI_LIBRARIES})
+    if(PAPI_FOUND)
+
+    target_link_libraries(diffuse_mpi PkgConfig::PAPI)
+
+    else()
+
+    add_dependencies(diffuse_mpi papi_build)
+
+    target_include_directories(diffuse_mpi PRIVATE ${papi_BINARY_DIR}/include)
+    target_link_libraries(diffuse_mpi ${papi_BINARY_DIR}/lib/libpapi.a)
+
+    endif()
+  
+    target_include_directories(diffuse_mpi PUBLIC ${PAPI_INCLUDE_DIRS})
+    target_compile_options(diffuse_mpi PUBLIC ${PAPI_CFLAGS_OTHER})
   target_compile_definitions(diffuse_mpi PUBLIC USE_MPI)
 
 

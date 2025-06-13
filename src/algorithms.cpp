@@ -164,6 +164,7 @@ void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_prob
 	ref.initialize();
 }
 
+/*
 std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, diffusion_solver& ref,
 													  const max_problem_t& problem)
 {
@@ -185,12 +186,17 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 	std::size_t x_end = problem.nx;
 	#endif
 
+	std:: cout << "x [" << x_ini << "," << x_end << "]" << "| y [" << y_ini << "," << y_end << "]" 
+		<< "| z [" << z_ini << "," << z_end << "]" << std::endl;
+
 	for (std::size_t z = z_ini; z < z_end; z++)
 		for (std::size_t y = y_ini; y < y_end; y++)
 			for (std::size_t x = x_ini; x < x_end; x++)
 				for (std::size_t s = 0; s < problem.substrates_count; s++)
 				{
 				auto ref_val = ref.access(s, x, y, z);
+				auto val = alg.access(s, x - x_ini, y - y_ini, z - z_ini);
+				
 				#ifdef USE_MPI
 				auto val = alg.access(s, x - x_ini, y - y_ini, z - z_ini);
 				#else
@@ -223,6 +229,36 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 	return { maximum_absolute_difference, rmse };
 	
+}*/
+
+std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, diffusion_solver& ref,
+	const max_problem_t& problem)
+{
+double maximum_absolute_difference = 0.;
+double rmse = 0.;
+
+for (std::size_t z = 0; z < problem.nz; z++)
+for (std::size_t y = 0; y < problem.ny; y++)
+for (std::size_t x = 0; x < problem.nx; x++)
+for (std::size_t s = 0; s < problem.substrates_count; s++)
+{
+auto ref_val = ref.access(s, x, y, z);
+auto val = alg.access(s, x, y, z);
+
+auto diff = std::abs(val - ref_val);
+maximum_absolute_difference = std::max(maximum_absolute_difference, diff);
+rmse += diff * diff;
+
+auto relative_diff = diff / std::abs(ref_val);
+if (diff > absolute_difference_print_threshold_
+&& relative_diff > relative_difference_print_threshold_ && verbose_)
+std::cout << "At [" << s << ", " << x << ", " << y << ", " << z << "]: " << val
+<< " is not close to the reference " << ref_val << std::endl;
+}
+
+rmse = std::sqrt(rmse / (problem.nz * problem.ny * problem.nx * problem.substrates_count));
+
+return { maximum_absolute_difference, rmse };
 }
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)

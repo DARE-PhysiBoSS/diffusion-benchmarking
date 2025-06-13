@@ -62,6 +62,8 @@ public:
 	void solve_x() override;
 	void solve_y() override;
 	void solve_z() override;
+	void forward( index_t start, index_t end, index_t step, const std::vector<real_t>& cons, index_t d, const std::vector<std::vector<real_t>>& b);
+	void backward( index_t start, index_t end, index_t step, index_t d, const std::vector<std::vector<real_t>>& c);
 
 	void solve() override; //done
 

@@ -321,59 +321,56 @@ void MPI_1D_blocking<real_t>::solve()
 	solve_z();
 }
 
+template <typename real_t>
+void MPI_1D_blocking<real_t>::backward( index_t start, index_t end, index_t step, index_t d, const std::vector<std::vector<real_t>>& c){
+    index_t prev = start;
+    index_t i = c.size() - 1; // Start from the last index
+    for (index_t curr = start + step; curr >= end; curr += step){
+        substrates_[curr] -= c[i][d] * substrates_[prev];
+        prev = curr;
+        --i; 
+    }
+}
+
+template <typename real_t>
+void MPI_1D_blocking<real_t>::forward( index_t start, index_t end, index_t step, 
+            const std::vector<real_t>& cons, index_t d, 
+            const std::vector<std::vector<real_t>>& b){
+            
+    substrates_[start] /= b[0][d];
+    index_t prev = start;
+    index_t i = 1;
+    for (index_t curr = start + step; curr <= end; curr += step){
+        substrates_[curr] += cons[d] * substrates_[prev];
+        substrates_[curr] /= b[i][d];
+        prev = curr;
+        ++i; 
+    }
+}
 
 template <typename real_t>
 void MPI_1D_blocking<real_t>::solve_x()
 {
-	#pragma omp parallel for collapse(2)
+	#pragma omp parallel for collapse(3)
     for (index_t k = 0; k < local_z_nodes; k++)
         {
         for (index_t j = 0; j < local_y_nodes; j++)
         {
-            index_t index = k * thomas_k_jump + j * thomas_j_jump;
-            //(*(*M.p_density_vectors))[n] /= M.thomas_denomz[0];
             for (index_t d = 0; d < problem_.substrates_count; d++)
             {
-                substrates_[index + d] /= bx_[0][d];
+                index_t start = k * thomas_k_jump + j * thomas_j_jump + d;
+                index_t end = start + (local_x_nodes - 1) * thomas_i_jump;
+                forward(start, end, thomas_i_jump, constant1, d, bx_);
+                backward(end, start, -thomas_i_jump, d, cx_);
             }
-
-            // should be an empty loop if mesh.z_coordinates.size() < 2
-            for (index_t i = 1; i < local_x_nodes; i++)
-            {
-
-                index_t index_inc = index + thomas_i_jump;
-                // axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n - problem_.substrates_count]);
-                for (index_t d = 0; d < problem_.substrates_count; d++)
-                {
-                    substrates_[index_inc + d] += constant1[d] * substrates_[index + d]; 
-                }
-                //(*(*M.p_density_vectors))[n] /= M.thomas_denomz[k];
-                for (index_t d = 0; d < problem_.substrates_count; d++)
-                {
-                    substrates_[index_inc + d] /= bx_[i][d];
-                }
-
-                index = index_inc;
-            }
-
-            index = k * thomas_k_jump + j * thomas_j_jump + (thomas_i_jump * (local_x_nodes - 1));
-            for (index_t i = local_x_nodes - 2; i >= 0; i--)
-            {
-                index_t index_dec = index - thomas_i_jump;
-                // naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + problem_.substrates_count]);
-                for (index_t d = 0; d < problem_.substrates_count; d++)
-                {
-                    substrates_[index_dec + d] -= cx_[i][d] * substrates_[index + d];
-                }
-                index = index_dec;
-            }
+            
         }
     }
 }
 
 
 
-
+/*
 template <typename real_t>
 void MPI_1D_blocking<real_t>::solve_y()
 {
@@ -415,7 +412,27 @@ void MPI_1D_blocking<real_t>::solve_y()
 			}
 		}
 	}
+}*/
+
+template <typename real_t>
+void MPI_1D_blocking<real_t>::solve_y()
+{
+	#pragma omp parallel for collapse(3)
+	for (index_t k = 0; k < local_z_nodes; k++)
+	{
+		for (index_t i = 0; i < local_x_nodes; i++)
+		{
+            for (index_t d = 0; d < problem_.substrates_count; d++) {
+                index_t start = k * thomas_k_jump + i * thomas_i_jump + d;
+                index_t end = start + (local_y_nodes - 1) * thomas_j_jump;
+                forward(start, end, thomas_j_jump, constant1, d, by_);
+                backward(end, start, -thomas_j_jump, d, cy_);
+            }
+        }
+    }		
 }
+
+
 
 
 template <typename real_t>

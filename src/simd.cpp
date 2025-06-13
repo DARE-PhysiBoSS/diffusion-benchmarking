@@ -418,7 +418,7 @@ void simd<real_t>::solve_z()
         }
 
         long_index_t index_aux = index + last_zplane;
-        index_t gd = (index - last_zplane)%gvec_size;
+         gd = (index - last_zplane)%gvec_size;
         for (index_t k = problem_.nz - 2; k >= 0; k--)
         {
             long_index_t index_dec = index_aux - thomas_k_jump;
