@@ -3024,9 +3024,9 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 			// cores_division_[1] + tid_y
 			// 					  << std::endl;
 
-			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
 				// do x
+			for (index_t i = 0; i < this->problem_.iterations; i++)
 				{
 					if (cores_division_[0] == 1)
 					{
@@ -3049,6 +3049,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 				}
 
 				// do Y
+			for (index_t i = 0; i < this->problem_.iterations; i++)
 				{
 					if (cores_division_[1] == 1)
 					{
@@ -3080,6 +3081,7 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 
 				if (z_len > 1)
 				{
+			for (index_t i = 0; i < this->problem_.iterations; i++)
 					// do Z
 					{
 						if (cores_division_[2] == 1)

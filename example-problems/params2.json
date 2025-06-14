@@ -1,0 +1,14 @@
+{
+    "inner_iterations": 10,
+    "outer_iterations": 5,
+    "warmup_time": 1,
+    "benchmark_kind": "per_dimension",
+    "substrate_step": 1,
+    "x_tile_size": 48,
+    "cores_division": [1,2,2],
+    "block_size": 5,
+    "t": 2,
+    "div": 300,
+    "skip": true,
+    "fused": false
+}

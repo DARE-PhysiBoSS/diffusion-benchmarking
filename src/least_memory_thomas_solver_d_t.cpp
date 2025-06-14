@@ -1671,19 +1671,23 @@ void least_memory_thomas_solver_d_t<real_t, aligned_x>::solve_3d_fused()
 #pragma omp parallel
 		for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
 		{
+			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
-
 				solve_slice_xy_fused_transpose<index_t>(
 					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, get_substrates_layout<3>(),
 					get_diagonal_layout(this->problem_, this->problem_.nx),
 					get_diagonal_layout(this->problem_, this->problem_.ny), s, s + s_step_length);
+			}
+
 #pragma omp barrier
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
 				solve_slice_z_3d_intrinsics_dispatch<index_t>(
 					this->substrates_, az_, b1z_, cz_, get_substrates_layout<3>(),
 					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length, x_tile_size_);
-#pragma omp barrier
 			}
 		}
 	}

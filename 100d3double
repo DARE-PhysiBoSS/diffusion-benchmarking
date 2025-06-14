@@ -1,0 +1,176 @@
+Running benchmark for algorithm: lstc
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstc,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,7,487336,38466.5
+lstc,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,426369,29225.2
+lstc,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,434097,36155
+lstc,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,17,429299,32003.8
+lstc,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,425384,29599.2
+-----------------------------------
+Running benchmark for algorithm: lstcm
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,7,470214,44565.7
+lstcm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,434703,28804.4
+lstcm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,426814,25038.4
+lstcm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,13,439063,26875.5
+lstcm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,429974,23547.2
+-----------------------------------
+Running benchmark for algorithm: lstcma
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcma,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,6,386920,26938
+lstcma,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,380876,32052.3
+lstcma,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,415875,56033.6
+lstcma,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,17,393270,27198.4
+lstcma,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,17,385883,37772.5
+-----------------------------------
+Running benchmark for algorithm: lstct
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstct,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,17,375176,26693.6
+lstct,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,36,379888,29026.5
+lstct,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,34,385720,27794.1
+lstct,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,35,370039,19190.7
+lstct,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,28,379423,36772.2
+-----------------------------------
+Running benchmark for algorithm: lstcta
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,17,390522,39098.6
+lstcta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,40,402112,25672.2
+lstcta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,70,362009,20288
+lstcta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,44,369617,25628.7
+lstcta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,28,375207,23573.9
+-----------------------------------
+Running benchmark for algorithm: lstcs
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcs,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,5,373192,27306.4
+lstcs,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,366648,19102.8
+lstcs,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,403722,32667.9
+lstcs,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,391265,30597
+lstcs,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,394206,21958.9
+-----------------------------------
+Running benchmark for algorithm: lstcst
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcst,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,7,455387,48282.4
+lstcst,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,23,444537,36299.5
+lstcst,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,23,437414,36099.3
+lstcst,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,19,447858,29064.1
+lstcst,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,18,436567,13176.6
+-----------------------------------
+Running benchmark for algorithm: lstcsta
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcsta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,8,471683,37259.5
+lstcsta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,20,450628,23741.5
+lstcsta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,445474,31741.7
+lstcsta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,466096,25453.8
+lstcsta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,13,459650,38910.3
+-----------------------------------
+Running benchmark for algorithm: lstcstai
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstcstai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,8,458077,69839.6
+lstcstai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,15,448398,36427.5
+lstcstai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,441625,19004.2
+lstcstai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,15,452332,22890.4
+lstcstai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,451626,34401.6
+-----------------------------------
+Running benchmark for algorithm: lstm
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,8,412191,17000.2
+lstm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,412996,17663.7
+lstm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,428015,24666
+lstm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,419820,30066.1
+lstm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,483342,40660.3
+-----------------------------------
+Running benchmark for algorithm: lstmt
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,5,463720,34521.3
+lstmt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,16,460209,30590.7
+lstmt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,456638,27794.3
+lstmt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,9,504468,80242.7
+lstmt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,482094,33693.6
+-----------------------------------
+Running benchmark for algorithm: lstmta
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+-----------------------------------
+Running benchmark for algorithm: lstmtai
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+-----------------------------------
+Running benchmark for algorithm: lstmdt
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmdt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,9,482172,54736.1
+lstmdt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,9,477060,43506.9
+lstmdt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,461250,47197.6
+lstmdt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,502622,71859.3
+lstmdt,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,464498,46514.5
+-----------------------------------
+Running benchmark for algorithm: lstmdta
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmdta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,462149,31449.9
+lstmdta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,466422,38971
+lstmdta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,467240,33990.1
+lstmdta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,516154,76709.9
+lstmdta,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,596019,49914.2
+-----------------------------------
+Running benchmark for algorithm: lstmdtai
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmdtai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,13,537212,26110.4
+lstmdtai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,18,553837,25091.4
+lstmdtai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,530426,28095.3
+lstmdtai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,14,501233,46779.7
+lstmdtai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,510908,39300.8
+-----------------------------------
+Running benchmark for algorithm: lstmdtfa
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmdtfa,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,434448,37448.9
+lstmdtfa,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,437387,27367.5
+lstmdtfa,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,471051,101415
+lstmdtfa,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,13,443593,46026.6
+lstmdtfa,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,455227,41654.2
+-----------------------------------
+Running benchmark for algorithm: lstmdtfai
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmdtfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,389039,23045.4
+lstmdtfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,11,397472,30478.4
+lstmdtfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,12,383512,20626.6
+lstmdtfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,15,392691,29314.1
+lstmdtfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,393740,18622.8
+-----------------------------------
+Running benchmark for algorithm: lstmfai
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,6,121178,7184.1
+lstmfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,9,124431,9965.1
+lstmfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,9,130744,17336.1
+lstmfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,8,131738,11263.7
+lstmfai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,7,123588,14521.9
+-----------------------------------
+Running benchmark for algorithm: lstmfabi
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+lstmfabi,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,7,136947,9046.36
+lstmfabi,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,9,142675,8580.11
+lstmfabi,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,7,139943,14133.8
+lstmfabi,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,10,137466,9813.48
+lstmfabi,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,13,143164,13755.6
+-----------------------------------
+Running benchmark for algorithm: cubedmai
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+cubedmai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,47,153282,8461.22
+cubedmai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,39,159950,10546
+cubedmai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,40,155775,10659.7
+cubedmai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,42,151779,9347.3
+cubedmai,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,43,154179,9734.06
+-----------------------------------
+Running benchmark for algorithm: avx256d
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+avx256d,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,28,468627,56229.3
+avx256d,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,50,487645,51721.1
+avx256d,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,58,469004,43320.4
+avx256d,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,51,459130,45372.7
+avx256d,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,50,479908,51596.4
+-----------------------------------
+Running benchmark for algorithm: biofvm
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev
+biofvm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,17,416470,42141.6
+biofvm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,34,417430,38716.2
+biofvm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,34,408644,40385.8
+biofvm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,46,417062,40766.3
+biofvm,3,8,100,100,100,16,[1,2,2],300,false,false,1,2,48,34,411703,40676.9
+-----------------------------------
+Running benchmark for algorithm: lapack
+algorithm,dims,s,nx,ny,nz,block_size,cores_division,div,fused,skip,substrate_step,t,x_tile_size,init_time,time,std_dev

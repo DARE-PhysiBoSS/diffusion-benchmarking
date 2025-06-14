@@ -1,6 +1,7 @@
 #include "least_memory_thomas_solver_d_f.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <iostream>
 
@@ -2529,6 +2530,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 	}
 }
 
+long now;
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
@@ -2608,16 +2610,27 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 													  inside_data_blocked_alt { z_begin, z_end, a_scratch, c_scratch });
 		}
 
+		auto micros = std::chrono::steady_clock::now().time_since_epoch().count();
+
 		{
 			epoch++;
 
 			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+			// counter.notify_all();
 
 			while (val < epoch * coop_size)
 			{
+				// counter.wait(val, std::memory_order_acquire);
 				val = counter.load(std::memory_order_acquire);
 			}
 		}
+		
+		auto micros2 = std::chrono::steady_clock::now().time_since_epoch().count();
+
+// #pragma omp critical
+// 		{
+// 			std::cout << "Thread before : " << (micros - now) << " after: " <<(micros2 - now)<< " " << get_thread_num() << std::endl;
+// 		}
 
 		z_blocked_middle(d, a_scratch, c_scratch, z_scratch, tid, coop_size, 0, y_len, s);
 
@@ -2625,9 +2638,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			epoch++;
 
 			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+			// counter.notify_all();
 
 			while (val < epoch * coop_size)
 			{
+				// counter.wait(val, std::memory_order_acquire);
 				val = counter.load(std::memory_order_acquire);
 			}
 		}
@@ -3283,6 +3298,9 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 	{
 		countersz_[i].value = 0;
 	}
+
+	
+		now = std::chrono::steady_clock::now().time_since_epoch().count();
 
 #pragma omp parallel
 	{
