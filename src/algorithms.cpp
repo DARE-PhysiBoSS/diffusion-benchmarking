@@ -375,6 +375,12 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 		auto [mean, std_dev] = compute_mean_and_std(times);
 
+		for (auto t : times)
+		{
+			if (verbose_)
+				std::cout << t << " ";
+		}
+
 		std::cout << mean << "," << std_dev << std::endl;
 	}
 }
