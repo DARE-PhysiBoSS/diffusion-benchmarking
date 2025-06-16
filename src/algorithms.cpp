@@ -9,6 +9,8 @@
 #include "blocked_thomas_solver.h"
 #include "blocked_thomas_solver_t.h"
 #include "cubed_thomas_solver_t.h"
+#include "blocked_thomas_solver_t.h"
+#include "cubed_thomas_solver_t.h"
 #include "cyclic_reduction_solver.h"
 #include "cyclic_reduction_solver_t.h"
 #include "full_lapack_solver.h"
@@ -20,6 +22,7 @@
 #include "least_compute_thomas_solver_s_t.h"
 #include "least_compute_thomas_solver_t.h"
 #include "least_memory_thomas_solver.h"
+#include "least_memory_thomas_solver_d_t.h"
 #include "least_memory_thomas_solver_d_t.h"
 #include "least_memory_thomas_solver_t.h"
 #include "reference_thomas_solver.h"
@@ -54,6 +57,16 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("lstcsta", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>(false); });
 	solvers.emplace("lstcstai", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>(true); });
 	solvers.emplace("lstm", []() { return std::make_unique<least_memory_thomas_solver<real_t>>(); });
+	solvers.emplace("lstmdt",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, false>>(false, false); });
+	solvers.emplace("lstmdta",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(false, false); });
+	solvers.emplace("lstmdtai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(true, false); });
+	solvers.emplace("lstmdtfa",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(false, true); });
+	solvers.emplace("lstmdtfai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(true, true); });
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("lstmta", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("lstmtai", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(true); });
@@ -137,19 +150,22 @@ void algorithms::run(const std::string& alg, const max_problem_t& problem, const
 	solver->prepare(problem);
 	solver->initialize();
 
-	std::filesystem::path output_path(output_file);
-	auto init_output_path = (output_path.parent_path() / ("initial_" + output_path.filename().string()));
-
-	auto init_output = open_file(init_output_path.string());
-	solver->save(init_output);
-
-	for (std::size_t i = 0; i < problem.iterations; i++)
+	if (!output_file.empty())
 	{
-		solver->solve();
+		std::filesystem::path output_path(output_file);
+		auto init_output_path = (output_path.parent_path() / ("initial_" + output_path.filename().string()));
+
+		auto init_output = open_file(init_output_path.string());
+		solver->save(init_output);
 	}
 
-	auto output = open_file(output_file);
-	solver->save(output);
+	solver->solve();
+
+	if (!output_file.empty())
+	{
+		auto output = open_file(output_file);
+		solver->save(output);
+	}
 }
 
 void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_problem_t& problem,
@@ -164,7 +180,7 @@ void common_prepare(diffusion_solver& alg, diffusion_solver& ref, const max_prob
 	ref.initialize();
 }
 
-/*
+
 std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, diffusion_solver& ref,
 													  const max_problem_t& problem)
 {
@@ -186,16 +202,13 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 	std::size_t x_end = problem.nx;
 	#endif
 
-	std:: cout << "x [" << x_ini << "," << x_end << "]" << "| y [" << y_ini << "," << y_end << "]" 
-		<< "| z [" << z_ini << "," << z_end << "]" << std::endl;
-
 	for (std::size_t z = z_ini; z < z_end; z++)
 		for (std::size_t y = y_ini; y < y_end; y++)
 			for (std::size_t x = x_ini; x < x_end; x++)
 				for (std::size_t s = 0; s < problem.substrates_count; s++)
 				{
 				auto ref_val = ref.access(s, x, y, z);
-				auto val = alg.access(s, x - x_ini, y - y_ini, z - z_ini);
+				//auto val = alg.access(s, x - x_ini, y - y_ini, z - z_ini);
 				
 				#ifdef USE_MPI
 				auto val = alg.access(s, x - x_ini, y - y_ini, z - z_ini);
@@ -229,8 +242,9 @@ std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, dif
 
 	return { maximum_absolute_difference, rmse };
 	
-}*/
+}
 
+/*
 std::pair<double, double> algorithms::common_validate(diffusion_solver& alg, diffusion_solver& ref,
 	const max_problem_t& problem)
 {
@@ -259,11 +273,13 @@ std::cout << "At [" << s << ", " << x << ", " << y << ", " << z << "]: " << val
 rmse = std::sqrt(rmse / (problem.nz * problem.ny * problem.nx * problem.substrates_count));
 
 return { maximum_absolute_difference, rmse };
-}
+}*/
 
 void algorithms::validate(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	if (try_get_adi_solver(alg))
+	benchmark_kind kind = get_benchmark_kind(params);
+
+	if (try_get_adi_solver(alg) && kind == benchmark_kind::per_dimension)
 	{
 		double max_absolute_diff_x = 0.;
 		double max_absolute_diff_y = 0.;
@@ -373,8 +389,11 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 	auto compute_mean_and_std = [](const std::vector<std::size_t>& times) {
 		double mean = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
-		double sq_sum = std::inner_product(times.begin(), times.end(), times.begin(), 0.0);
-		double std_dev = std::sqrt(sq_sum / times.size() - mean * mean);
+		std::vector<double> variances(times.size());
+		std::transform(times.begin(), times.end(), variances.begin(),
+					   [mean](double x) { return (x - mean) * (x - mean); });
+		double variance = std::accumulate(variances.begin(), variances.end(), 0.0) / times.size();
+		double std_dev = std::sqrt(variance);
 		return std::make_pair(mean, std_dev);
 	};
 	#ifdef USE_MPI
@@ -465,20 +484,7 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
-	benchmark_kind kind = benchmark_kind::per_dimension;
-
-	#ifdef USE_MPI
-	if (MPI_writter()) 
-	#endif
-
-	if (params.contains("benchmark_kind"))
-	{
-		auto kind_str = params["benchmark_kind"].get<std::string>();
-		if (kind_str == "full_solve")
-			kind = benchmark_kind::full_solve;
-		else if (kind_str == "per_dimension")
-			kind = benchmark_kind::per_dimension;
-	}
+	benchmark_kind kind = get_benchmark_kind(params);
 
 	// make header
 	{
@@ -532,40 +538,42 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 	}
 }
 
-struct EventData {
-    uint32_t Code;
-    std::string Deriv;
-    std::string Description;
+struct EventData
+{
+	uint32_t Code;
+	std::string Deriv;
+	std::string Description;
 };
 
-void readPapiJson(std::map<std::string, EventData>& events, const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file) {
-        throw std::runtime_error("Cannot open file: " + filename  + "\n" +
-								 "Try running: $./scripts/obtain_counters.sh");
-    }
+void readPapiJson(std::map<std::string, EventData>& events, const std::string& filename)
+{
+	std::ifstream file(filename);
+	if (!file)
+	{
+		throw std::runtime_error("Cannot open file: " + filename + "\n" + "Try running: $./scripts/obtain_counters.sh");
+	}
 
-    nlohmann::json j;
-    file >> j;
+	nlohmann::json j;
+	file >> j;
 
-    for (auto& [name, data] : j.items()) {
-        events[name] = EventData(
-            data["Code"].get<uint32_t>(),
-            data["Deriv"].get<std::string>(),
-            data["Description"].get<std::string>()
-		);
-    }
+	for (auto& [name, data] : j.items())
+	{
+		events[name] = EventData(data["Code"].get<uint32_t>(), data["Deriv"].get<std::string>(),
+								 data["Description"].get<std::string>());
+	}
 }
-
 
 
 
 void algorithms::profile(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
 {
 	std::string csv_path;
-	if (params.contains("profile_output")) {
+	if (params.contains("profile_output"))
+	{
 		csv_path = params["profile_output"];
-	} else {
+	}
+	else
+	{
 		csv_path = "./profile.csv";
 	}
 	std::ofstream file(csv_path, std::ios::app);
@@ -576,55 +584,74 @@ void algorithms::profile(const std::string& alg, const max_problem_t& problem, c
 	solver->prepare(problem);
 	solver->initialize();
 
-	std::map<std::string, EventData> counters_info; 
+	std::map<std::string, EventData> counters_info;
 
-	readPapiJson(counters_info, "./example-problems/counters.json");	
+	readPapiJson(counters_info, "./example-problems/counters.json");
 
-	if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {
-        std::cerr << "PAPI library init error!" << std::endl;
-        return;
-    }
+	if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT)
+	{
+		std::cerr << "PAPI library init error!" << std::endl;
+		return;
+	}
 
 	// Events to monitor
-    int events = PAPI_NULL;
+	int events = PAPI_NULL;
 	std::vector<std::string> counters_names = params["papi_counters"].get<std::vector<std::string>>();
 	const int NUM_EVENTS = counters_names.size();
-    std::vector<long long> counters(NUM_EVENTS);
+	std::vector<long long> counters(NUM_EVENTS);
 
-	//add events
+	// add events
 	PAPI_create_eventset(&events);
-	for (int i = 0; i < NUM_EVENTS; ++i) {
+	for (int i = 0; i < NUM_EVENTS; ++i)
+	{
 		PAPI_add_event(events, counters_info[counters_names[i]].Code);
 	}
 
 	file << counters_names[0];
-	for (int i = 1; i < NUM_EVENTS; ++i){
+	for (int i = 1; i < NUM_EVENTS; ++i)
+	{
 		file << "," << counters_names[i];
-   	}
+	}
 	file << std::endl;
 
-	for (std::size_t i = 0; i < problem.iterations; i++)
+	// Start counters
+	if (PAPI_start(events) != PAPI_OK)
 	{
-		// Start counters
-		if (PAPI_start(events) != PAPI_OK) {
-			std::cerr << "PAPI failed to start counters." << std::endl;
-			return;
-		}
-		solver->solve();
+		std::cerr << "PAPI failed to start counters." << std::endl;
+		return;
+	}
+	solver->solve();
 
-		// Stop counters
-		if (PAPI_stop(events, counters.data()) != PAPI_OK) {
-			std::cerr << "PAPI failed to stop counters." << std::endl;
-			return;
-		}
-	   
-	   file << counters[0];
-	   for (int i = 1; i < NUM_EVENTS; ++i){
-			file << "," << counters[i];
-	   }
-	   file << std::endl;
-	   PAPI_reset(events); 
+	// Stop counters
+	if (PAPI_stop(events, counters.data()) != PAPI_OK)
+	{
+		std::cerr << "PAPI failed to stop counters." << std::endl;
+		return;
 	}
 
+	file << counters[0];
+	for (int i = 1; i < NUM_EVENTS; ++i)
+	{
+		file << "," << counters[i];
+	}
+	file << std::endl;
+	PAPI_reset(events);
+
 	file.close();
+}
+
+benchmark_kind algorithms::get_benchmark_kind(const nlohmann::json& params)
+{
+	benchmark_kind kind = benchmark_kind::per_dimension;
+
+	if (params.contains("benchmark_kind"))
+	{
+		auto kind_str = params["benchmark_kind"].get<std::string>();
+		if (kind_str == "full_solve")
+			kind = benchmark_kind::full_solve;
+		else if (kind_str == "per_dimension")
+			kind = benchmark_kind::per_dimension;
+	}
+
+	return kind;
 }

@@ -562,13 +562,15 @@ void cyclic_reduction_solver_t<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
-								  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
-								  get_substrates_layout<1>());
+		for (index_t i = 0; i < this->problem_.iterations; i++)
+			solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
+									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
+									  get_substrates_layout<1>());
 	}
 	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 											 b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
@@ -577,11 +579,13 @@ void cyclic_reduction_solver_t<real_t, aligned_x>::solve()
 			solve_slice_y_2d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
 									  get_substrates_layout<2>(), x_tile_size_);
+#pragma omp barrier
 		}
 	}
 	if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 											 b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
@@ -594,6 +598,7 @@ void cyclic_reduction_solver_t<real_t, aligned_x>::solve()
 			solve_slice_z_3d<index_t>(this->substrates_, ax_, b1x_, a_scratch_[get_thread_num()],
 									  b_scratch_[get_thread_num()], c_scratch_[get_thread_num()],
 									  get_substrates_layout<3>(), x_tile_size_);
+#pragma omp barrier
 		}
 	}
 }

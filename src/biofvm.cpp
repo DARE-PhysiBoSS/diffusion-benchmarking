@@ -152,9 +152,12 @@ void biofvm<real_t>::prepare(const max_problem_t& problem)
 template <typename real_t>
 void biofvm<real_t>::solve()
 {
-	solve_x();
-	solve_y();
-	solve_z();
+	for (index_t i = 0; i < this->problem_.iterations; i++)
+	{
+		solve_x();
+		solve_y();
+		solve_z();
+	}
 }
 
 template <typename real_t>
@@ -214,7 +217,7 @@ void biofvm<real_t>::solve_y()
 	{
 		for (index_t i = 0; i < problem_.nx; i++)
 		{
-			long_index_t index = k * thomas_k_jump + i * thomas_i_jump;
+			index_t index = k * thomas_k_jump + i * thomas_i_jump;
 			//(*(*M.p_density_vectors))[n] /= M.thomas_denomz[0];
 			for (index_t d = 0; d < problem_.substrates_count; d++)
 			{
@@ -224,7 +227,7 @@ void biofvm<real_t>::solve_y()
 			// should be an empty loop if mesh.z_coordinates.size() < 2
 			for (index_t j = 1; j < problem_.ny; j++)
 			{
-				long_index_t index_inc = index + thomas_j_jump;
+				index_t index_inc = index + thomas_j_jump;
 				// axpy(&(*(*M.p_density_vectors))[n], M.thomas_constant1, (*(*M.p_density_vectors))[n -
 				// M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
@@ -243,7 +246,7 @@ void biofvm<real_t>::solve_y()
 			index = k * thomas_k_jump + i * thomas_i_jump + (thomas_j_jump * (problem_.ny - 1));
 			for (index_t j = problem_.ny - 2; j >= 0; j--)
 			{
-				long_index_t index_dec = index - thomas_j_jump;
+				index_t index_dec = index - thomas_j_jump;
 				// naxpy(&(*(*M.p_density_vectors))[n], M.thomas_cz[k], (*(*M.p_density_vectors))[n + M.thomas_k_jump]);
 				for (index_t d = 0; d < problem_.substrates_count; d++)
 				{
@@ -326,7 +329,7 @@ double biofvm<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::
 	auto dens_l = get_substrates_layout(problem_);
 
 	return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
-	// return substrates_[z * thomas_k_jump + y * thomas_j_jump + x * thomas_i_jump + s];
+	//return substrates_[z * thomas_k_jump + y * thomas_j_jump + x * thomas_i_jump + s];
 }
 
 template class biofvm<float>;

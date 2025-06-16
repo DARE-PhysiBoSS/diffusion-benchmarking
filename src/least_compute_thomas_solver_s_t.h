@@ -51,6 +51,7 @@ class least_compute_thomas_solver_s_t : public locally_onedimensional_solver,
 	bool vectorized_x_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
+	index_t substrate_step_;
 
 	void precompute_values(real_t*& b, real_t*& c, real_t*& e, index_t shape, index_t dims, index_t n,
 						   bool prepended_e);

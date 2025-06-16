@@ -66,8 +66,7 @@ target_compile_options(
 
 target_include_directories(
   diffuse PRIVATE ${noarr_structures_SOURCE_DIR}/include
-                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR}
-                  ${PAPI_INCLUDE_DIRS})
+                  ${argparse_SOURCE_DIR}/include ${highway_SOURCE_DIR})
 
 target_link_libraries(diffuse nlohmann_json::nlohmann_json)
 

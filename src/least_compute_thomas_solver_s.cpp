@@ -352,12 +352,14 @@ void least_compute_thomas_solver_s<real_t>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
-								  get_diagonal_layout(this->problem_, this->problem_.nx));
+		for (index_t i = 0; i < this->problem_.iterations; i++)
+			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
+									  get_diagonal_layout(this->problem_, this->problem_.nx));
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
@@ -365,11 +367,13 @@ void least_compute_thomas_solver_s<real_t>::solve()
 #pragma omp barrier
 			solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
 									  get_diagonal_layout(this->problem_, this->problem_.ny));
+#pragma omp barrier
 		}
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
+		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
 			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
 											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
@@ -380,6 +384,7 @@ void least_compute_thomas_solver_s<real_t>::solve()
 #pragma omp barrier
 			solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
 									  get_diagonal_layout(this->problem_, this->problem_.nz));
+#pragma omp barrier
 		}
 	}
 }

@@ -32,7 +32,7 @@ An example usage of the app looks as follows:
 ```
 This command benchmarks the diffusion on a problem defined in `example-problems/50x50x50x1.json` file, using algorithm named `lstc` with the parameter set defined in `example-problems/params.json` in double precision. 
 
-Instead of providing `--benchmark` command line parameter, one can use `--validate` to check the correctness of the selected algorithm with respect to the reference algorithm `ref`. Lastly, `--run_and_save FILE` just runs the problem and outputs the result in the provided file. In addition, `--profile` will activate the PAPI counters specified in the params file with `papi_counters` header. Firstly, run `scripts/obtain_counters.sh` to generate `example-problems/counters.json` which contain available PAPI counters for your system. 
+Instead of providing `--benchmark` command line parameter, one can use `--validate` to check the correctness of the selected algorithm with respect to the reference algorithm `ref`. Lastly, `--run [FILE]` just runs the problem and outputs the result in the provided file (if selected). In addition, `--profile` will activate the PAPI counters specified in the params file with `papi_counters` header. Firstly, run `scripts/obtain_counters.sh` to generate `example-problems/counters.json` which contain available PAPI counters for your system. 
 
 
 ## List of algorithms

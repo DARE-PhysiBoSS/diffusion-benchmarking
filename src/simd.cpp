@@ -388,7 +388,6 @@ void simd<real_t>::solve_z()
     long_index_t initial_index = 0;
     long_index_t limit = initial_index + thomas_k_jump;
     long_index_t limit_vec = limit -(thomas_k_jump%vl_);
-    long_index_t last_zplane = ((problem_.nz - 1)*thomas_k_jump);
     #pragma omp parallel for
     for (long_index_t index = initial_index; index < limit_vec; index += vl_)
     {
@@ -416,21 +415,6 @@ void simd<real_t>::solve_z()
             
             index_dec = index_inc;
         }
-
-        long_index_t index_aux = index + last_zplane;
-         gd = (index - last_zplane)%gvec_size;
-        for (index_t k = problem_.nz - 2; k >= 0; k--)
-        {
-            long_index_t index_dec = index_aux - thomas_k_jump;
-            __m256d cy1 = _mm256_loadu_pd(&vcz_[k][gd]);
-            __m256d density_curr1 = _mm256_loadu_pd(&substrates_[index_aux]);
-            __m256d density_dec1 = _mm256_loadu_pd(&substrates_[index_dec]);
-
-            density_curr1 = _mm256_fnmadd_pd(cy1, density_curr1, density_dec1);
-
-            _mm256_storeu_pd(&substrates_[index_dec], density_curr1);
-            index_aux = index_dec;
-        }
     }
 
     //Epilogo vectorization
@@ -457,11 +441,29 @@ void simd<real_t>::solve_z()
 
     // Back substitution
 
-   
+    long_index_t last_zplane = ((problem_.nz - 1)*thomas_k_jump);
     initial_index = last_zplane;
     limit = initial_index + thomas_k_jump;
     limit_vec = limit - (thomas_k_jump%vl_);
-    
+    #pragma omp parallel for 
+    for (long_index_t index = initial_index; index < limit_vec; index += vl_)
+    {
+        long_index_t index_aux = index;
+        index_t gd = (index - last_zplane)%gvec_size;
+        for (index_t k = problem_.nz - 2; k >= 0; k--)
+        {
+            long_index_t index_dec = index_aux - thomas_k_jump;
+            __m256d cy1 = _mm256_loadu_pd(&vcz_[k][gd]);
+            __m256d density_curr1 = _mm256_loadu_pd(&substrates_[index_aux]);
+            __m256d density_dec1 = _mm256_loadu_pd(&substrates_[index_dec]);
+
+            density_curr1 = _mm256_fnmadd_pd(cy1, density_curr1, density_dec1);
+
+            _mm256_storeu_pd(&substrates_[index_dec], density_curr1);
+            index_aux = index_dec;
+        }
+    }
+
     //Epilogo Vectorizacion Back Last rank
     
     for (long_index_t index = limit_vec; index < limit; ++index){

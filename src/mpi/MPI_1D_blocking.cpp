@@ -284,7 +284,10 @@ void MPI_1D_blocking<real_t>::prepare(const max_problem_t& problem)
     mpi_type = get_mpi_type<real_t>();
 
 	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	substrates_ = std::make_unique<real_t[]>(local_z_nodes * problem_.ny * problem_.nx * problem_.substrates_count);
+    long long int size = local_z_nodes * problem_.ny;
+    size *= problem_.nx;
+    size *= problem_.substrates_count;
+	substrates_ = std::make_unique<real_t[]>(size);
     //set the 3D subdomain
     z_min = init_z_node;
     z_max = init_z_node + local_z_nodes;
