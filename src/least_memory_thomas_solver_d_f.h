@@ -54,7 +54,7 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	real_t *a_scratchy_, *c_scratchy_;
 	real_t *a_scratchz_, *c_scratchz_;
 
-	real_t *y_scratch_, *z_scratch_;
+	real_t* dim_scratch_;
 
 	bool use_alt_blocked_;
 	std::size_t alignment_size_;
@@ -73,10 +73,10 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
-	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, real_t*& dim_data, index_t shape,
-						   index_t dims, index_t n, index_t counters_count,
-						   std::unique_ptr<aligned_atomic<long>[]>& counters, index_t group_size, index_t& block_size,
-						   std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets);
+	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims,
+						   index_t n, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters,
+						   index_t group_size, index_t& block_size, std::vector<index_t>& group_block_lengths,
+						   std::vector<index_t>& group_block_offsets);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
@@ -97,9 +97,11 @@ public:
 		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 'l', 's'>(n, groups, this->problem_.substrates_count);
 	}
 
-	auto get_dim_scratch_layout(const index_t n, const index_t threads) const
+	auto get_dim_scratch_layout() const
 	{
-		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 't'>(n, threads);
+		index_t max_n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
+
+		return noarr::scalar<real_t>() ^ noarr::vectors<'i', 't'>(max_n, get_max_threads());
 	}
 
 	void prepare(const max_problem_t& problem) override;
