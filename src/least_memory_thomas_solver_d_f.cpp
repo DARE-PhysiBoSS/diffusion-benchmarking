@@ -254,7 +254,7 @@ static real_t z_forward_inside_y(const density_bag_t d, const index_t s, const i
 }
 
 template <typename index_t, typename density_bag_t, typename diag_bag_t>
-static void z_backward(const density_bag_t d, const diag_bag_t c, const index_t s)
+constexpr static void z_backward(const density_bag_t d, const diag_bag_t c, const index_t s)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -291,9 +291,9 @@ struct inside_data_blocked_alt
 };
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void z_forward_inside_y_blocked(const density_bag_t d, const index_t s, const index_t z, const index_t y,
-									   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
-									   const index_t z_begin, scratch_bag_t c)
+constexpr static void z_forward_inside_y_blocked(const density_bag_t d, const index_t s, const index_t z,
+												 const index_t y, const index_t x, real_t data, const real_t a_s,
+												 const real_t b1_s, const index_t z_begin, scratch_bag_t c)
 
 {
 	const index_t z_len = d | noarr::get_length<'z'>();
@@ -330,9 +330,10 @@ static void z_forward_inside_y_blocked(const density_bag_t d, const index_t s, c
 
 template <typename vec_t, typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t,
 		  typename simd_tag>
-static void z_forward_inside_y_blocked_vectorized(const density_bag_t d, simd_tag t, const index_t s, const index_t z,
-												  const index_t y, const index_t X, vec_t data, const real_t a_s,
-												  const real_t b1_s, const index_t z_begin, scratch_bag_t c)
+constexpr static void z_forward_inside_y_blocked_vectorized(const density_bag_t d, simd_tag t, const index_t s,
+															const index_t z, const index_t y, const index_t X,
+															vec_t data, const real_t a_s, const real_t b1_s,
+															const index_t z_begin, scratch_bag_t c)
 
 {
 	const index_t z_len = d | noarr::get_length<'z'>();
@@ -365,9 +366,10 @@ static void z_forward_inside_y_blocked_vectorized(const density_bag_t d, simd_ta
 
 template <typename vec_t, typename tag, typename index_t, typename real_t, typename density_bag_t,
 		  typename scratch_bag_t>
-static void z_forward_inside_y_vectorized_blocked(const density_bag_t d, tag t, const index_t s, const index_t z,
-												  const index_t y, vec_t data, const real_t a_s, const real_t b1_s,
-												  const index_t z_begin, scratch_bag_t c)
+constexpr static void z_forward_inside_y_vectorized_blocked(const density_bag_t d, tag t, const index_t s,
+															const index_t z, const index_t y, vec_t data,
+															const real_t a_s, const real_t b1_s, const index_t z_begin,
+															scratch_bag_t c)
 
 {
 	const index_t z_len = d | noarr::get_length<'z'>();
@@ -413,9 +415,9 @@ static void z_forward_inside_y_vectorized_blocked(const density_bag_t d, tag t, 
 }
 
 template <typename index_t, typename real_t, typename scratch_bag_t>
-static void z_forward_inside_y_blocked_next(const index_t s, const index_t z, const real_t a_s, const real_t b1_s,
-											const index_t z_len, const index_t z_begin, scratch_bag_t a,
-											scratch_bag_t c)
+constexpr static void z_forward_inside_y_blocked_next(const index_t s, const index_t z, const real_t a_s,
+													  const real_t b1_s, const index_t z_len, const index_t z_begin,
+													  scratch_bag_t a, scratch_bag_t c)
 
 {
 	if (z < z_begin + 2)
@@ -446,8 +448,9 @@ static void z_forward_inside_y_blocked_next(const index_t s, const index_t z, co
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void z_backward_blocked(const density_bag_t d, const real_t y_begin, const real_t y_end, const real_t z_begin,
-							   const real_t z_end, const scratch_bag_t a, const scratch_bag_t c, const index_t s)
+constexpr static void z_backward_blocked(const density_bag_t d, const real_t y_begin, const real_t y_end,
+										 const real_t z_begin, const real_t z_end, const scratch_bag_t a,
+										 const scratch_bag_t c, const index_t s)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -504,9 +507,9 @@ static void z_backward_blocked(const density_bag_t d, const real_t y_begin, cons
 
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t, typename dim_scratch_bag_t>
-static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, dim_scratch_bag_t c_scratch,
-							 const index_t tid, const index_t coop_size, index_t y_begin, index_t y_end,
-							 const index_t s)
+constexpr static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, dim_scratch_bag_t c_scratch,
+									   const index_t tid, const index_t coop_size, index_t y_begin, index_t y_end,
+									   const index_t s)
 {
 	constexpr char dim = 'z';
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -576,8 +579,8 @@ static void z_blocked_middle(density_bag_t d, scratch_bag_t a, scratch_bag_t c, 
 }
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
-static void z_blocked_end(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t y_begin, const index_t y_end,
-						  const index_t z_begin, const index_t z_end, const index_t s)
+constexpr static void z_blocked_end(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+									const index_t y_end, const index_t z_begin, const index_t z_end, const index_t s)
 {
 	constexpr char dim = 'z';
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -600,8 +603,9 @@ static void z_blocked_end(density_bag_t d, scratch_bag_t a, scratch_bag_t c, con
 }
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
-static void z_blocked_end_alt(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
-							  const index_t y_end, const index_t z_begin, const index_t z_end, const index_t s)
+constexpr static void z_blocked_end_alt(density_bag_t d, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+										const index_t y_end, const index_t z_begin, const index_t z_end,
+										const index_t s)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 
@@ -630,8 +634,9 @@ static void z_blocked_end_alt(density_bag_t d, scratch_bag_t a, scratch_bag_t c,
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void y_backward_blocked(const density_bag_t d, const index_t z, const real_t y_begin, const real_t y_end,
-							   const scratch_bag_t a, const scratch_bag_t c, const index_t s)
+constexpr static void y_backward_blocked(const density_bag_t d, const index_t z, const real_t y_begin,
+										 const real_t y_end, const scratch_bag_t a, const scratch_bag_t c,
+										 const index_t s)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -685,10 +690,10 @@ static void y_backward_blocked(const density_bag_t d, const index_t z, const rea
 
 template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
 		  typename simd_tag>
-static void y_backward_blocked_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
-										  const index_t simd_length, const index_t z, const real_t y_begin,
-										  const real_t y_end, const scratch_bag_t a, const scratch_bag_t c,
-										  const index_t s)
+constexpr static void y_backward_blocked_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities,
+													simd_tag t, const index_t simd_length, const index_t z,
+													const real_t y_begin, const real_t y_end, const scratch_bag_t a,
+													const scratch_bag_t c, const index_t s)
 
 {
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
@@ -736,8 +741,9 @@ static void y_backward_blocked_vectorized(const density_layout_t dens_l, real_t*
 
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t, typename dim_scratch_bag_t>
-static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
-							 dim_scratch_bag_t c_scratch, const index_t tid, const index_t coop_size, const index_t s)
+constexpr static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
+									   dim_scratch_bag_t c_scratch, const index_t tid, const index_t coop_size,
+									   const index_t s)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 	const index_t n = d | noarr::get_length<'y'>();
@@ -808,8 +814,8 @@ static void y_blocked_middle(density_bag_t d, const index_t z, scratch_bag_t a, 
 }
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
-static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
-						  const index_t y_end, const index_t s)
+constexpr static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
+									const index_t y_begin, const index_t y_end, const index_t s)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 
@@ -829,9 +835,10 @@ static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scr
 
 template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
 		  typename simd_tag>
-static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
-									 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
-									 const index_t y_begin, const index_t y_end, const index_t s)
+constexpr static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities,
+											   simd_tag t, const index_t simd_length, const index_t z, scratch_bag_t a,
+											   scratch_bag_t c, const index_t y_begin, const index_t y_end,
+											   const index_t s)
 {
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
 	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
@@ -857,9 +864,10 @@ static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __re
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void z_forward_inside_y_blocked_alt(const density_bag_t d, const index_t s, const index_t y, const index_t z,
-										   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
-										   const index_t z_begin, const index_t z_end, scratch_bag_t a, scratch_bag_t c)
+constexpr static void z_forward_inside_y_blocked_alt(const density_bag_t d, const index_t s, const index_t y,
+													 const index_t z, const index_t x, real_t data, const real_t a_s,
+													 const real_t b1_s, const index_t z_begin, const index_t z_end,
+													 scratch_bag_t a, scratch_bag_t c)
 
 {
 	const index_t z_len = d | noarr::get_length<'z'>();
@@ -919,17 +927,18 @@ static void z_forward_inside_y_blocked_alt(const density_bag_t d, const index_t 
 
 template <typename vec_t, typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t,
 		  typename simd_tag>
-static void z_forward_inside_y_blocked_alt_vectorized(const density_bag_t d, simd_tag t, const index_t s,
-													  const index_t y, const index_t z, const index_t X, vec_t data,
-													  const real_t a_s, const real_t b1_s, const index_t z_begin,
-													  const index_t z_end, scratch_bag_t a, scratch_bag_t c)
+constexpr static void z_forward_inside_y_blocked_alt_vectorized(const density_bag_t d, simd_tag t, const index_t s,
+																const index_t y, const index_t z, const index_t X,
+																vec_t data, const real_t a_s, const real_t b1_s,
+																const index_t z_begin, const index_t z_end,
+																scratch_bag_t a, scratch_bag_t c)
 
 {
 	const index_t z_len = d | noarr::get_length<'z'>();
 
 	real_t a_state;
 
-	if (z < z_begin + 2)
+	if (z < z_begin + 2) [[unlikely]]
 	{
 		const auto a_tmp = a_s * (z == 0 ? 0 : 1);
 		const auto b_tmp = b1_s + ((z == 0) || (z == z_len - 1) ? a_s : 0);
@@ -943,7 +952,7 @@ static void z_forward_inside_y_blocked_alt_vectorized(const density_bag_t d, sim
 		// #pragma omp critical
 		// 		std::cout << "f0: " << z << " " << y << " " << x << " " << data << " " << b_tmp << std::endl;
 	}
-	else
+	else [[likely]]
 	{
 		const auto prev_state = noarr::idx<'s', 'i'>(s, z - 1);
 
@@ -966,7 +975,7 @@ static void z_forward_inside_y_blocked_alt_vectorized(const density_bag_t d, sim
 		// 				  << c[prev_state] << std::endl;
 	}
 
-	if (z != z_begin && z != z_end - 1)
+	if (z != z_begin && z != z_end - 1) [[likely]]
 	{
 		const auto state0 = noarr::idx<'s', 'i'>(s, z_begin);
 
@@ -988,8 +997,9 @@ static void z_forward_inside_y_blocked_alt_vectorized(const density_bag_t d, sim
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t, typename z_data_t>
-static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
-						  const index_t y_end, const index_t s, const real_t az_s, const real_t b1z_s, z_data_t z_data)
+constexpr static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
+									const index_t y_begin, const index_t y_end, const index_t s, const real_t az_s,
+									const real_t b1z_s, z_data_t z_data)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 
@@ -1015,10 +1025,10 @@ static void y_blocked_end(density_bag_t d, const index_t z, scratch_bag_t a, scr
 
 template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
 		  typename z_data_t, typename simd_tag>
-static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
-									 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
-									 const index_t y_begin, const index_t y_end, const index_t s, const real_t az_s,
-									 const real_t b1z_s, z_data_t z_data)
+constexpr static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities,
+											   simd_tag t, const index_t simd_length, const index_t z, scratch_bag_t a,
+											   scratch_bag_t c, const index_t y_begin, const index_t y_end,
+											   const index_t s, const real_t az_s, const real_t b1z_s, z_data_t z_data)
 {
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
 	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
@@ -1046,8 +1056,8 @@ static void y_blocked_end_vectorized(const density_layout_t dens_l, real_t* __re
 }
 
 template <typename index_t, typename density_bag_t, typename scratch_bag_t>
-static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
-							  const index_t y_end, const index_t s)
+constexpr static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
+										const index_t y_begin, const index_t y_end, const index_t s)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 
@@ -1074,9 +1084,10 @@ static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a,
 
 template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
 		  typename simd_tag>
-static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
-										 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
-										 const index_t y_begin, const index_t y_end, const index_t s)
+constexpr static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities,
+												   simd_tag t, const index_t simd_length, const index_t z,
+												   scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+												   const index_t y_end, const index_t s)
 {
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
 	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
@@ -1103,9 +1114,9 @@ static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* 
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t, typename z_data_t>
-static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
-							  const index_t y_end, const index_t s, const real_t az_s, const real_t b1z_s,
-							  z_data_t z_data)
+constexpr static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a, scratch_bag_t c,
+										const index_t y_begin, const index_t y_end, const index_t s, const real_t az_s,
+										const real_t b1z_s, z_data_t z_data)
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
 
@@ -1135,10 +1146,11 @@ static void y_blocked_end_alt(density_bag_t d, const index_t z, scratch_bag_t a,
 
 template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
 		  typename z_data_t, typename simd_tag>
-static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities, simd_tag t,
-										 const index_t simd_length, const index_t z, scratch_bag_t a, scratch_bag_t c,
-										 const index_t y_begin, const index_t y_end, const index_t s, const real_t az_s,
-										 const real_t b1z_s, z_data_t z_data)
+constexpr static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities,
+												   simd_tag t, const index_t simd_length, const index_t z,
+												   scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+												   const index_t y_end, const index_t s, const real_t az_s,
+												   const real_t b1z_s, z_data_t z_data)
 {
 	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
 	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
@@ -1174,8 +1186,9 @@ static void y_blocked_end_alt_vectorized(const density_layout_t dens_l, real_t* 
 }
 
 template <bool update_c, typename index_t, typename real_t, typename density_bag_t>
-static void y_forward_inside_x(const density_bag_t d, const index_t s, const index_t z, const index_t y,
-							   const index_t x, real_t data, const real_t a_s, const real_t b1_s, real_t& c_tmp)
+constexpr static void y_forward_inside_x(const density_bag_t d, const index_t s, const index_t z, const index_t y,
+										 const index_t x, real_t data, const real_t a_s, const real_t b1_s,
+										 real_t& c_tmp)
 
 {
 	const index_t y_len = d | noarr::get_length<'y'>();
@@ -1206,9 +1219,9 @@ static void y_forward_inside_x(const density_bag_t d, const index_t s, const ind
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void y_forward_inside_x_blocked(const density_bag_t d, const index_t s, const index_t z, const index_t y,
-									   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
-									   const index_t y_begin, scratch_bag_t c)
+constexpr static void y_forward_inside_x_blocked(const density_bag_t d, const index_t s, const index_t z,
+												 const index_t y, const index_t x, real_t data, const real_t a_s,
+												 const real_t b1_s, const index_t y_begin, scratch_bag_t c)
 
 {
 	const index_t y_len = d | noarr::get_length<'y'>();
@@ -1244,9 +1257,10 @@ static void y_forward_inside_x_blocked(const density_bag_t d, const index_t s, c
 }
 
 template <typename index_t, typename real_t, typename density_bag_t, typename scratch_bag_t>
-static void y_forward_inside_x_blocked_alt(const density_bag_t d, const index_t s, const index_t z, const index_t y,
-										   const index_t x, real_t data, const real_t a_s, const real_t b1_s,
-										   const index_t y_begin, const index_t y_end, scratch_bag_t a, scratch_bag_t c)
+constexpr static void y_forward_inside_x_blocked_alt(const density_bag_t d, const index_t s, const index_t z,
+													 const index_t y, const index_t x, real_t data, const real_t a_s,
+													 const real_t b1_s, const index_t y_begin, const index_t y_end,
+													 scratch_bag_t a, scratch_bag_t c)
 
 {
 	const index_t y_len = d | noarr::get_length<'y'>();
@@ -1306,8 +1320,8 @@ static void y_forward_inside_x_blocked_alt(const density_bag_t d, const index_t 
 
 template <bool z_blocked, typename index_t, typename real_t, typename density_bag_t, typename diag_bag_t,
 		  typename z_data_t>
-static void y_backward(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z, const real_t az_s,
-					   const real_t b1z_s, z_data_t z_data)
+constexpr static void y_backward(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z,
+								 const real_t az_s, const real_t b1z_s, z_data_t z_data)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -1331,7 +1345,7 @@ static void y_backward(const density_bag_t d, const diag_bag_t c, const index_t 
 }
 
 // template <typename index_t, typename density_bag_t, typename diag_bag_t, typename z_data_t>
-// static void y_backward_blocked(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z,
+// constexpr static void y_backward_blocked(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z,
 // 							   z_data_t z_data)
 
 // {
@@ -1353,8 +1367,9 @@ static void y_backward(const density_bag_t d, const diag_bag_t c, const index_t 
 // }
 
 template <typename index_t, typename real_t, typename density_bag_t>
-static void x_forward(const density_bag_t d, const index_t s, const index_t z, const index_t y, const real_t a_s,
-					  const real_t b1_s, real_t& a_tmp, real_t& b_tmp, real_t& c_tmp, real_t& prev)
+constexpr static void x_forward(const density_bag_t d, const index_t s, const index_t z, const index_t y,
+								const real_t a_s, const real_t b1_s, real_t& a_tmp, real_t& b_tmp, real_t& c_tmp,
+								real_t& prev)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -1376,8 +1391,8 @@ static void x_forward(const density_bag_t d, const index_t s, const index_t z, c
 
 template <bool y_blocked, bool blocked_alt, typename index_t, typename real_t, typename density_bag_t,
 		  typename diag_bag_t, typename y_data_t>
-static void x_backward(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z, const index_t y,
-					   real_t& prev, const real_t ay_s, const real_t b1y_s, y_data_t y_data)
+constexpr static void x_backward(const density_bag_t d, const diag_bag_t c, const index_t s, const index_t z,
+								 const index_t y, real_t& prev, const real_t ay_s, const real_t b1y_s, y_data_t y_data)
 
 {
 	const index_t x_len = d | noarr::get_length<'x'>();
@@ -1401,14 +1416,14 @@ static void x_backward(const density_bag_t d, const diag_bag_t c, const index_t 
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_xyz_fused(real_t* __restrict__ densities, const real_t* __restrict__ ax,
-								  const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
-								  const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-								  const real_t* __restrict__ back_cy, const real_t* __restrict__ az,
-								  const real_t* __restrict__ b1z, const real_t* __restrict__ back_cz,
-								  const density_layout_t dens_l, const diagonal_layout_t diagx_l,
-								  const diagonal_layout_t diagy_l, const diagonal_layout_t diagz_l,
-								  const index_t s_begin, const index_t s_end)
+constexpr static void solve_slice_xyz_fused(real_t* __restrict__ densities, const real_t* __restrict__ ax,
+											const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
+											const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+											const real_t* __restrict__ back_cy, const real_t* __restrict__ az,
+											const real_t* __restrict__ b1z, const real_t* __restrict__ back_cz,
+											const density_layout_t dens_l, const diagonal_layout_t diagx_l,
+											const diagonal_layout_t diagy_l, const diagonal_layout_t diagz_l,
+											const index_t s_begin, const index_t s_end)
 {
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
@@ -1473,7 +1488,7 @@ static void solve_slice_xyz_fused(real_t* __restrict__ densities, const real_t* 
 
 // template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 // 		  typename scratch_layout_t>
-// static void solve_slice_xyz_fused_blocked(
+// constexpr static void solve_slice_xyz_fused_blocked(
 // 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 // 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 // 	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
@@ -1602,9 +1617,9 @@ constexpr static void x_backward_vectorized(const diagonal_bag_t c, vec_t* rows,
 }
 
 template <typename index_t, typename real_t, typename vec_t, typename simd_tag, typename density_layout_t>
-constexpr static real_t z_forward_inside_y_vectorized(const density_layout_t d, simd_tag t, const index_t z,
-													  const index_t y, vec_t data, const real_t az_s,
-													  const real_t b1z_s, const index_t z_len, const real_t cz_tmp)
+static real_t z_forward_inside_y_vectorized(const density_layout_t d, simd_tag t, const index_t z, const index_t y,
+											vec_t data, const real_t az_s, const real_t b1z_s, const index_t z_len,
+											const real_t cz_tmp)
 {
 	real_t r;
 
@@ -1698,10 +1713,11 @@ constexpr static void y_forward_inside_x_vectorized(const density_bag_t d, vec_t
 }
 
 template <typename index_t, typename real_t, typename vec_t, typename simd_tag, typename density_bag_t>
-static void y_forward_inside_x_vectorized_blocked(const density_bag_t d, vec_t* rows, simd_tag t, const index_t z,
-												  const index_t y_offset, const index_t x, const index_t s,
-												  const index_t length, const index_t y_len, const real_t ay_s,
-												  const real_t b1y_s, const index_t y_begin, real_t cy_tmp)
+constexpr static void y_forward_inside_x_vectorized_blocked(const density_bag_t d, vec_t* rows, simd_tag t,
+															const index_t z, const index_t y_offset, const index_t x,
+															const index_t s, const index_t length, const index_t y_len,
+															const real_t ay_s, const real_t b1y_s,
+															const index_t y_begin, real_t cy_tmp)
 {
 	vec_t prev;
 
@@ -1757,11 +1773,10 @@ static void y_forward_inside_x_vectorized_blocked(const density_bag_t d, vec_t* 
 }
 
 template <typename index_t, typename real_t, typename vec_t, typename simd_tag, typename density_bag_t>
-static void y_forward_inside_x_vectorized_blocked_alt(const density_bag_t d, vec_t* rows, simd_tag t, const index_t z,
-													  const index_t y_offset, const index_t x, const index_t s,
-													  const index_t length, const index_t y_len, const real_t ay_s,
-													  const real_t b1y_s, const index_t y_begin, const index_t y_end,
-													  real_t ay_tmp, real_t cy_tmp, real_t ay0_tmp, real_t cy0_tmp)
+constexpr static void y_forward_inside_x_vectorized_blocked_alt(
+	const density_bag_t d, vec_t* rows, simd_tag t, const index_t z, const index_t y_offset, const index_t x,
+	const index_t s, const index_t length, const index_t y_len, const real_t ay_s, const real_t b1y_s,
+	const index_t y_begin, const index_t y_end, real_t ay_tmp, real_t cy_tmp, real_t cy0_tmp)
 {
 	vec_t prev;
 	vec_t y0;
@@ -1841,7 +1856,6 @@ static void y_forward_inside_x_vectorized_blocked_alt(const density_bag_t d, vec
 			// 						  << " r0: " << r0 << " d: " << hn::ExtractLane(y0, l) << std::endl;
 			// 			}
 
-			ay0_tmp *= r0;
 			cy0_tmp = r0 * -cy_tmp * cy0_tmp;
 		}
 	}
@@ -1853,9 +1867,9 @@ static void y_forward_inside_x_vectorized_blocked_alt(const density_bag_t d, vec
 }
 
 template <typename index_t, typename real_t, typename scratch_bag_t>
-static void y_forward_inside_x_blocked_next(const index_t s, const index_t y, const real_t a_s, const real_t b1_s,
-											const index_t y_len, const index_t y_begin, scratch_bag_t a,
-											scratch_bag_t c)
+constexpr static void y_forward_inside_x_blocked_next(const index_t s, const index_t y, const real_t a_s,
+													  const real_t b1_s, const index_t y_len, const index_t y_begin,
+													  scratch_bag_t a, scratch_bag_t c)
 
 {
 	if (y < y_begin + 2)
@@ -1886,9 +1900,9 @@ static void y_forward_inside_x_blocked_next(const index_t s, const index_t y, co
 }
 
 template <typename index_t, typename real_t, typename scratch_bag_t>
-static void y_forward_inside_x_blocked_next_alt(const index_t s, const index_t y, const real_t a_s, const real_t b1_s,
-												const index_t y_len, const index_t y_begin, const index_t y_end,
-												scratch_bag_t a, scratch_bag_t c)
+constexpr static void y_forward_inside_x_blocked_next_alt(const index_t s, const index_t y, const real_t a_s,
+														  const real_t b1_s, const index_t y_len, const index_t y_begin,
+														  const index_t y_end, scratch_bag_t a, scratch_bag_t c)
 
 {
 	if (y < y_begin + 2)
@@ -1929,9 +1943,9 @@ static void y_forward_inside_x_blocked_next_alt(const index_t s, const index_t y
 }
 
 template <typename index_t, typename real_t, typename scratch_bag_t>
-static void z_forward_inside_y_blocked_next_alt(const index_t s, const index_t z, const real_t a_s, const real_t b1_s,
-												const index_t z_len, const index_t z_begin, const index_t z_end,
-												scratch_bag_t a, scratch_bag_t c)
+constexpr static void z_forward_inside_y_blocked_next_alt(const index_t s, const index_t z, const real_t a_s,
+														  const real_t b1_s, const index_t z_len, const index_t z_begin,
+														  const index_t z_end, scratch_bag_t a, scratch_bag_t c)
 
 {
 	if (z < z_begin + 2)
@@ -2097,7 +2111,7 @@ constexpr static void y_backward_vectorized(const density_layout_t dens_l, real_
 
 template <bool y_blocked, bool blocked_alt, typename simd_t, typename simd_tag, typename index_t, typename real_t,
 		  typename density_bag_t, typename diag_bag_t, typename y_data_t>
-static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t, const index_t simd_length,
+constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t, const index_t simd_length,
 											  const index_t y_begin, const index_t y_end, const index_t z,
 											  const index_t s, const real_t ax_s, const real_t b1x_s, const real_t ay_s,
 											  const real_t b1y_s, const diag_bag_t cx, y_data_t y_data)
@@ -2186,7 +2200,7 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 			else
 				y_forward_inside_x_vectorized_blocked_alt(d, rows + 1, t, z, y, full_n - simd_length, s, simd_length,
 														  y_len, ay_s, b1y_s, y_data.y_begin, y_data.y_end,
-														  y_data.ay_tmp, y_data.cy_tmp, y_data.ay0_tmp, y_data.cy0_tmp);
+														  y_data.ay_tmp, y_data.cy_tmp, y_data.cy0_tmp);
 
 			// aligned stores
 			for (index_t v = 0; v < simd_length; v++)
@@ -2224,7 +2238,7 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 			else
 				y_forward_inside_x_vectorized_blocked_alt(d, rows, t, z, y, i, s, simd_length, y_len, ay_s, b1y_s,
 														  y_data.y_begin, y_data.y_end, y_data.ay_tmp, y_data.cy_tmp,
-														  y_data.ay0_tmp, y_data.cy0_tmp);
+														  y_data.cy0_tmp);
 
 			// aligned stores
 			for (index_t v = 0; v < simd_length; v++)
@@ -2261,7 +2275,6 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 			y_data.ay_tmp = y_data.ay_scratch.template at<'s', 'i'>(s, y + simd_length - 1);
 			y_data.cy_tmp = y_data.cy_scratch.template at<'s', 'i'>(s, y + simd_length - 1);
 
-			y_data.ay0_tmp = y_data.ay_scratch.template at<'s', 'i'>(s, y_begin);
 			y_data.cy0_tmp = y_data.cy_scratch.template at<'s', 'i'>(s, y_begin);
 		}
 	}
@@ -2270,14 +2283,12 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densities, const real_t* __restrict__ ax,
-											const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
-											const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-											const real_t* __restrict__ back_cy, const real_t* __restrict__ az,
-											const real_t* __restrict__ b1z, const real_t* __restrict__ back_cz,
-											const density_layout_t dens_l, const diagonal_layout_t diagx_l,
-											const diagonal_layout_t diagy_l, const diagonal_layout_t diagz_l,
-											const index_t s_begin, const index_t s_end)
+constexpr static void solve_slice_xyz_fused_transpose(
+	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
+	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
+	const real_t* __restrict__ back_cz, const density_layout_t dens_l, const diagonal_layout_t diagx_l,
+	const diagonal_layout_t diagy_l, const diagonal_layout_t diagz_l, const index_t s_begin, const index_t s_end)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -2350,12 +2361,12 @@ static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densities, cons
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
-static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const real_t* __restrict__ ax,
-										   const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
-										   const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
-										   const real_t* __restrict__ back_cy, const density_layout_t dens_l,
-										   const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l,
-										   const index_t s_begin, const index_t s_end)
+constexpr static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const real_t* __restrict__ ax,
+													 const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx,
+													 const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
+													 const real_t* __restrict__ back_cy, const density_layout_t dens_l,
+													 const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l,
+													 const index_t s_begin, const index_t s_end)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -2417,7 +2428,7 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
-static void solve_slice_xyz_fused_transpose_blocked(
+constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
@@ -2529,10 +2540,11 @@ static void solve_slice_xyz_fused_transpose_blocked(
 	}
 }
 
+long now;
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
-static void solve_slice_xyz_fused_transpose_blocked_alt(
+constexpr static void solve_slice_xyz_fused_transpose_blocked_alt(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 	const real_t* __restrict__ back_cy, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
@@ -2612,9 +2624,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			epoch++;
 
 			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+			counter.notify_all();
 
 			while (val < epoch * coop_size)
 			{
+				counter.wait(val, std::memory_order_acquire);
 				val = counter.load(std::memory_order_acquire);
 			}
 		}
@@ -2625,9 +2639,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			epoch++;
 
 			auto val = counter.fetch_add(1, std::memory_order_acq_rel) + 1;
+			counter.notify_all();
 
 			while (val < epoch * coop_size)
 			{
+				counter.wait(val, std::memory_order_acquire);
 				val = counter.load(std::memory_order_acquire);
 			}
 		}
@@ -2639,7 +2655,7 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
-static void solve_slice_xy_fused_transpose_blocked(
+constexpr static void solve_slice_xy_fused_transpose_blocked(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 	real_t* __restrict__ a_data, real_t* __restrict__ c_data, real_t* __restrict__ y_data,
@@ -2745,7 +2761,7 @@ static void solve_slice_xy_fused_transpose_blocked(
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
-static void solve_slice_xy_fused_transpose_blocked_alt(
+constexpr static void solve_slice_xy_fused_transpose_blocked_alt(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 	real_t* __restrict__ a_data, real_t* __restrict__ c_data, real_t* __restrict__ y_data,
@@ -2849,7 +2865,7 @@ static void solve_slice_xy_fused_transpose_blocked_alt(
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
-static void solve_slice_xyz_fused_transpose_blocked(
+constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 	const real_t* __restrict__ az, const real_t* __restrict__ b1z, real_t* __restrict__ ay_data,
@@ -3013,7 +3029,7 @@ static void solve_slice_xyz_fused_transpose_blocked(
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
-static void solve_slice_xyz_fused_transpose_blocked_alt(
+constexpr static void solve_slice_xyz_fused_transpose_blocked_alt(
 	real_t* __restrict__ densities, const real_t* __restrict__ ax, const real_t* __restrict__ b1x,
 	const real_t* __restrict__ back_cx, const real_t* __restrict__ ay, const real_t* __restrict__ b1y,
 	const real_t* __restrict__ az, const real_t* __restrict__ b1z, real_t* __restrict__ ay_data,
@@ -3108,9 +3124,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 				epoch_y++;
 
 				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+				counter_y.notify_all();
 
 				while (val < epoch_y * coop_size_y)
 				{
+					counter_y.wait(val, std::memory_order_acquire);
 					val = counter_y.load(std::memory_order_acquire);
 				}
 			}
@@ -3121,9 +3139,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 				epoch_y++;
 
 				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+				counter_y.notify_all();
 
 				while (val < epoch_y * coop_size_y)
 				{
+					counter_y.wait(val, std::memory_order_acquire);
 					val = counter_y.load(std::memory_order_acquire);
 				}
 			}
@@ -3139,9 +3159,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			epoch_z++;
 
 			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+			counter_z.notify_all();
 
 			while (val < epoch_z * coop_size_z)
 			{
+				counter_z.wait(val, std::memory_order_acquire);
 				val = counter_z.load(std::memory_order_acquire);
 			}
 		}
@@ -3152,9 +3174,11 @@ static void solve_slice_xyz_fused_transpose_blocked_alt(
 			epoch_z++;
 
 			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+			counter_z.notify_all();
 
 			while (val < epoch_z * coop_size_z)
 			{
+				counter_z.wait(val, std::memory_order_acquire);
 				val = counter_z.load(std::memory_order_acquire);
 			}
 		}
