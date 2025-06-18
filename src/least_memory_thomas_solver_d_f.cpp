@@ -764,10 +764,10 @@ constexpr static void y_blocked_middle(density_bag_t d, const index_t z, scratch
 	// 	std::cout << "Thread " << tid << " s_begin: " << s << " block_begin: " << x_begin << " block_end: " << x_end
 	// 			  << " block_size: " << block_size_x << std::endl;
 
-	auto get_i = [block_size, n](index_t equation_idx) {
+	auto get_i = [block_size, n, coop_size](index_t equation_idx) {
 		const index_t block_idx = equation_idx / 2;
-		const auto block_start = block_idx * block_size + std::min(block_idx, n % block_size);
-		const auto actual_block_size = (block_idx < n % block_size) ? block_size + 1 : block_size;
+		const auto block_start = block_idx * block_size + std::min(block_idx, n % coop_size);
+		const auto actual_block_size = (block_idx < n % coop_size) ? block_size + 1 : block_size;
 		const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
 		return i;
 	};
