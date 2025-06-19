@@ -8,6 +8,32 @@
 #include "omp_helper.h"
 #include "vector_transpose_helper.h"
 
+
+template <typename real_t, bool aligned_x>
+domain_ranges_t<typename least_memory_thomas_solver_d_f<real_t, aligned_x>::index_t> least_memory_thomas_solver_d_f<
+	real_t, aligned_x>::get_thread_domain_distribution() const
+{}
+
+template <typename real_t, bool aligned_x>
+thread_id_t<typename least_memory_thomas_solver_d_f<real_t, aligned_x>::index_t> least_memory_thomas_solver_d_f<
+	real_t, aligned_x>::get_thread_id() const
+{
+	thread_id_t<typename least_memory_thomas_solver_d_f<real_t, aligned_x>::index_t> id;
+
+	const index_t tid = get_thread_num();
+	const index_t group_size = cores_division_[1] * cores_division_[2];
+
+	const index_t substrate_group_tid = tid % group_size;
+
+	id.group = tid / group_size;
+
+	id.x = substrate_group_tid % cores_division_[0];
+	id.y = (substrate_group_tid / cores_division_[0]) % cores_division_[1];
+	id.z = substrate_group_tid / (cores_division_[0] * cores_division_[1]);
+
+	return id;
+}
+
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(
 	real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims, index_t n,
@@ -2547,8 +2573,6 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	}
 }
 
-long now;
-
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t, typename dim_scratch_layout_t>
 constexpr static void solve_slice_xyz_fused_transpose_blocked_alt(
@@ -3255,18 +3279,15 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 
 		index_t epoch = 0;
 
-		const index_t tid = get_thread_num();
+		const thread_id_t<index_t> tid = get_thread_id();
 
-		const index_t substrate_group_tid = tid % cores_division_[1];
-		const index_t substrate_group = tid / cores_division_[1];
-
-		const auto block_y_begin = group_block_offsetsy_[substrate_group_tid];
-		const auto block_y_end = block_y_begin + group_block_lengthsy_[substrate_group_tid];
+		const auto block_y_begin = group_block_offsetsy_[tid.y];
+		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid.y];
 
 
 		const index_t group_size = cores_division_[1];
 
-		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * tid.group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
@@ -3281,16 +3302,16 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 					solve_slice_xy_fused_transpose_blocked<index_t>(
 						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_, dim_scratch_,
 						get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
-						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group),
-						get_dim_scratch_layout(), s, s + s_step_length, block_y_begin, block_y_end, substrate_group_tid,
-						group_size, epoch, countersy_[substrate_group].value);
+						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(tid.group),
+						get_dim_scratch_layout(), s, s + s_step_length, block_y_begin, block_y_end, tid.y, group_size,
+						epoch, countersy_[tid.group].value);
 				else
 					solve_slice_xy_fused_transpose_blocked_alt<index_t>(
 						this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_, dim_scratch_,
 						get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
-						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(substrate_group),
-						get_dim_scratch_layout(), s, s + s_step_length, block_y_begin, block_y_end, substrate_group_tid,
-						group_size, epoch, countersy_[substrate_group].value);
+						get_scratch_layout(this->problem_.ny, substrate_groups_) ^ noarr::fix<'l'>(tid.group),
+						get_dim_scratch_layout(), s, s + s_step_length, block_y_begin, block_y_end, tid.y, group_size,
+						epoch, countersy_[tid.group].value);
 			}
 		}
 	}
@@ -3316,30 +3337,23 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 		index_t epoch_y = 0;
 		index_t epoch_z = 0;
 
-		const index_t tid = get_thread_num();
-		const index_t group_size = cores_division_[1] * cores_division_[2];
+		const thread_id_t<index_t> tid = get_thread_id();
 
-		const index_t substrate_group_tid = tid % group_size;
-		const index_t substrate_group = tid / group_size;
+		const auto block_y_begin = group_block_offsetsy_[tid.y];
+		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid.y];
 
-		const auto tid_y = (substrate_group_tid / cores_division_[0]) % cores_division_[1];
-		const auto tid_z = substrate_group_tid / (cores_division_[0] * cores_division_[1]);
+		const auto block_z_begin = group_block_offsetsz_[tid.z];
+		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid.z];
 
-		const auto block_y_begin = group_block_offsetsy_[tid_y];
-		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid_y];
-
-		const auto block_z_begin = group_block_offsetsz_[tid_z];
-		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid_z];
-
-		const auto lane_id_y = tid_z + substrate_group * cores_division_[2];
+		const auto lane_id_y = tid.z + tid.group * cores_division_[2];
 		const auto lane_scratchy_l =
 			get_scratch_layout(this->problem_.ny, substrate_groups_ * cores_division_[2]) ^ noarr::fix<'l'>(lane_id_y);
 
-		const auto lane_id_z = tid_y + substrate_group * cores_division_[1];
+		const auto lane_id_z = tid.y + tid.group * cores_division_[1];
 		const auto lane_scratchz_l =
 			get_scratch_layout(this->problem_.nz, substrate_groups_ * cores_division_[1]) ^ noarr::fix<'l'>(lane_id_z);
 
-		for (index_t s = substrate_step_ * substrate_group; s < s_len; s += substrate_step_ * substrate_groups_)
+		for (index_t s = substrate_step_ * tid.group; s < s_len; s += substrate_step_ * substrate_groups_)
 		{
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
@@ -3360,7 +3374,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 							dim_scratch_, get_substrates_layout<3>(),
 							get_diagonal_layout(this->problem_, this->problem_.nx),
 							get_diagonal_layout(this->problem_, this->problem_.ny), lane_scratchz_l,
-							get_dim_scratch_layout(), s, s + s_step_length, block_z_begin, block_z_end, tid_z,
+							get_dim_scratch_layout(), s, s + s_step_length, block_z_begin, block_z_end, tid.z,
 							cores_division_[2], epoch_z, countersz_[lane_id_z].value);
 					else
 						solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
@@ -3368,7 +3382,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 							dim_scratch_, get_substrates_layout<3>(),
 							get_diagonal_layout(this->problem_, this->problem_.nx),
 							get_diagonal_layout(this->problem_, this->problem_.ny), lane_scratchz_l,
-							get_dim_scratch_layout(), s, s + s_step_length, block_z_begin, block_z_end, tid_z,
+							get_dim_scratch_layout(), s, s + s_step_length, block_z_begin, block_z_end, tid.z,
 							cores_division_[2], epoch_z, countersz_[lane_id_z].value);
 				else
 				{
@@ -3378,7 +3392,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 							a_scratchz_, c_scratchz_, dim_scratch_, get_substrates_layout<3>(),
 							get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l, lane_scratchz_l,
 							get_dim_scratch_layout(), s, s + s_step_length, block_y_begin, block_y_end, block_z_begin,
-							block_z_end, tid_y, cores_division_[1], tid_z, cores_division_[2], epoch_y,
+							block_z_end, tid.y, cores_division_[1], tid.z, cores_division_[2], epoch_y,
 							countersy_[lane_id_y].value, epoch_z, countersz_[lane_id_z].value);
 					else
 						solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
@@ -3386,7 +3400,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 							a_scratchz_, c_scratchz_, dim_scratch_, get_substrates_layout<3>(),
 							get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l, lane_scratchz_l,
 							get_dim_scratch_layout(), s, s + s_step_length, block_y_begin, block_y_end, block_z_begin,
-							block_z_end, tid_y, cores_division_[1], tid_z, cores_division_[2], epoch_y,
+							block_z_end, tid.y, cores_division_[1], tid.z, cores_division_[2], epoch_y,
 							countersy_[lane_id_y].value, epoch_z, countersz_[lane_id_z].value);
 				}
 			}

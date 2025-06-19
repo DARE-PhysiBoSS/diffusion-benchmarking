@@ -37,6 +37,24 @@ y/z dimensions are solved alongside tiled x dimension
 transposed so the vectorization can be utilized
 */
 
+template <typename index_t>
+struct domain_ranges_t
+{
+	index_t x_begin = 0, x_end = 0;
+	index_t y_begin = 0, y_end = 0;
+	index_t z_begin = 0, z_end = 0;
+};
+
+template <typename index_t>
+struct thread_id_t
+{
+	index_t x = 0;
+	index_t y = 0;
+	index_t z = 0;
+
+	index_t group;
+};
+
 template <typename real_t, bool aligned_x>
 class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 									   public base_solver<real_t, least_memory_thomas_solver_d_f<real_t, aligned_x>>
@@ -79,6 +97,10 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 						   std::vector<index_t>& group_block_offsets);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
+
+	domain_ranges_t<index_t> get_thread_domain_distribution() const;
+
+	thread_id_t<index_t> get_thread_id() const;
 
 public:
 	least_memory_thomas_solver_d_f(bool use_alt_blocked);
