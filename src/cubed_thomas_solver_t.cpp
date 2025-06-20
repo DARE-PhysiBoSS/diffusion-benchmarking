@@ -99,15 +99,13 @@ void cubed_thomas_solver_t<real_t, aligned_x>::prepare(const max_problem_t& prob
 	else
 		this->substrates_ = (real_t*)std::malloc((substrates_layout | noarr::get_size()));
 
-	constexpr real_t initial_pulse_time = 0.01;
-
 	omp_trav_for_each(noarr::traverser(substrates_layout ^ noarr::slice<'x'>(this->problem_.nx)), [&](auto state) {
 		index_t s = noarr::get_index<'s'>(state);
 		index_t x = noarr::get_index<'x'>(state);
 		index_t y = noarr::get_index<'y'>(state);
 		index_t z = noarr::get_index<'z'>(state);
 
-		at(s, x, y, z) = solver_utils::gaussian_analytical_solution(s, x, y, z, initial_pulse_time, this->problem_);
+		at(s, x, y, z) = solver_utils::gaussian_analytical_solution(s, x, y, z, this->problem_);
 	});
 }
 

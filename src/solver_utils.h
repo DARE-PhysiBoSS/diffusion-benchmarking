@@ -12,9 +12,11 @@ class solver_utils
 {
 public:
 	template <typename index_t, typename real_t>
-	static real_t gaussian_analytical_solution(index_t s, index_t x, index_t y, index_t z, real_t time,
+	static real_t gaussian_analytical_solution(index_t s, index_t x, index_t y, index_t z,
 											   const problem_t<index_t, real_t>& problem)
 	{
+		constexpr real_t initial_pulse_time = 0.01;
+
 		real_t x_coord = 0, y_coord = 0, z_coord = 0;
 		// 1D
 		{
@@ -41,9 +43,9 @@ public:
 		}
 
 		return std::exp(-(x_coord * x_coord + y_coord * y_coord + z_coord * z_coord)
-						/ (4 * problem.diffusion_coefficients[s] * time))
-			   * std::exp(-problem.decay_rates[s] * time) * problem.initial_conditions[s]
-			   / std::pow(4 * M_PI * problem.diffusion_coefficients[s] * time, problem.dims / 2);
+						/ (4 * problem.diffusion_coefficients[s] * initial_pulse_time))
+			   * std::exp(-problem.decay_rates[s] * initial_pulse_time) * problem.initial_conditions[s]
+			   / std::pow(4 * M_PI * problem.diffusion_coefficients[s] * initial_pulse_time, problem.dims / 2);
 	}
 
 	template <typename index_t, typename real_t>
@@ -85,16 +87,13 @@ public:
 	static void initialize_gaussian_pulse(auto substrates_layout, real_t* substrates,
 										  const problem_t<index_t, real_t>& problem)
 	{
-		constexpr real_t initial_pulse_time = 0.01;
-
 		omp_trav_for_each(noarr::traverser(substrates_layout), [&](auto state) {
 			index_t s = noarr::get_index<'s'>(state);
 			index_t x = noarr::get_index<'x'>(state);
 			index_t y = noarr::get_index<'y'>(state);
 			index_t z = noarr::get_index<'z'>(state);
 
-			(substrates_layout | noarr::get_at(substrates, state)) =
-				gaussian_analytical_solution(s, x, y, z, initial_pulse_time, problem);
+			(substrates_layout | noarr::get_at(substrates, state)) = gaussian_analytical_solution(s, x, y, z, problem);
 		});
 	}
 };
