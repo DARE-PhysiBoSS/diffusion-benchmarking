@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <utility>
+
 #ifdef _OPENMP
 	#include <omp.h>
 #endif
@@ -37,4 +40,16 @@ inline auto get_max_threads()
 #else
 	return 1;
 #endif
+}
+
+template <typename numeric_t>
+std::pair<numeric_t, numeric_t> evened_work_distribution(numeric_t n, numeric_t workers, numeric_t work_id)
+{
+	numeric_t work_per_thread = n / workers;
+	numeric_t remainder = n % workers;
+
+	numeric_t start = work_id * work_per_thread + std::min(work_id, remainder);
+	numeric_t end = start + work_per_thread + (work_id < remainder ? 1 : 0);
+
+	return { start, end };
 }

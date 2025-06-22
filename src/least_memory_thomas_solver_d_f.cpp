@@ -3387,12 +3387,18 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 
 		auto scratch_l = get_scratch_layout('y') ^ noarr::fix<'z'>(tid.z) ^ noarr::fix<'g'>(tid.group);
 
-		for (index_t s = substrate_step_ * tid.group; s < s_len; s += substrate_step_ * substrate_groups_)
+		auto ss_len = (s_len + substrate_step_ - 1) / substrate_step_;
+
+		const auto [ss_begin, ss_end] = evened_work_distribution(ss_len, substrate_groups_, tid.group);
+
+		for (index_t ss = ss_begin; ss < ss_end; ss++)
 		{
+			const index_t s = ss * substrate_step_;
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
 // #pragma omp critical
-// 			std::cout << "Thread " << get_thread_num() << " s_begin: " << s << " s_end: " << s + s_step_length
+			// 			std::cout << "Thread " << get_thread_num() << " s_begin: " << s << " s_end: " << s +
+			// s_step_length
 // 					  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
 // 					  << " group: " << tid.group << std::endl;
 
@@ -3449,8 +3455,13 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 		const auto lane_scratchy_l = get_scratch_layout('y') ^ noarr::fix<'g'>(tid.group);
 		const auto lane_scratchz_l = get_scratch_layout('z') ^ noarr::fix<'g'>(tid.group);
 
-		for (index_t s = substrate_step_ * tid.group; s < s_len; s += substrate_step_ * substrate_groups_)
+		auto ss_len = (s_len + substrate_step_ - 1) / substrate_step_;
+
+		const auto [ss_begin, ss_end] = evened_work_distribution(ss_len, substrate_groups_, tid.group);
+
+		for (index_t ss = ss_begin; ss < ss_end; ss++)
 		{
+			const index_t s = ss * substrate_step_;
 			auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
 
 			// #pragma omp critical
