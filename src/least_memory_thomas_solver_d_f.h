@@ -115,6 +115,8 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 			return layout ^ noarr::set_length<'z', 's'>(nz, substrates_count);
 		else if constexpr (dim_to_skip == 'z')
 			return layout ^ noarr::set_length<'y', 's'>(ny, substrates_count);
+		else if constexpr (dim_to_skip == '*')
+			return layout ^ noarr::set_length<'s'>(substrates_count);
 		else
 			return layout ^ noarr::set_length<'y', 'z', 's'>(ny, nz, substrates_count);
 	}

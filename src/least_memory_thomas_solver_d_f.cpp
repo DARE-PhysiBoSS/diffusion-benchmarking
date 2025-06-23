@@ -1688,6 +1688,48 @@ constexpr static void y_blocked_end_alt_vectorized(const density_layout_t dens_l
 	}
 }
 
+
+template <typename vec_t, typename index_t, typename real_t, typename density_layout_t, typename scratch_bag_t,
+		  typename z_data_t, typename simd_tag>
+constexpr static void y_blocked_end_alt_numa_vectorized(const density_layout_t dens_l, real_t* __restrict__ densities,
+														simd_tag t, const index_t simd_length, const index_t z,
+														scratch_bag_t a, scratch_bag_t c, const index_t y_begin,
+														const index_t y_end, const real_t az_s, const real_t b1z_s,
+														z_data_t z_data)
+{
+	auto blocked_dens_l = dens_l ^ noarr::into_blocks_dynamic<'x', 'X', 'x', 'b'>(simd_length);
+	const index_t X_len = blocked_dens_l | noarr::get_length<'X'>();
+
+	const auto d = noarr::make_bag(blocked_dens_l ^ noarr::fix<'b', 'x'>(noarr::lit<0>, noarr::lit<0>), densities);
+
+	for (index_t X = 0; X < X_len; X++)
+	{
+		vec_t begins = hn::Load(t, &d.template at<'X', 'z', 'y'>(X, z, y_begin));
+		vec_t prev = hn::Load(t, &d.template at<'X', 'z', 'y'>(X, z, y_end - 1));
+
+		for (index_t i = y_end - 2; i >= y_begin + 1; i--)
+		{
+			const auto state = noarr::idx<'i'>(i);
+
+			vec_t data = hn::Load(t, &d.template at<'X', 'z', 'y'>(X, z, i));
+			data = hn::MulAdd(begins, hn::Set(t, -a[state]), data);
+			data = hn::MulAdd(prev, hn::Set(t, -c[state]), data);
+
+			// hn::Store(data, t, &d.template at<'s', 'X', 'z', 'y'>(s, X, z, i));
+
+			z_forward_inside_y_blocked_alt_numa_vectorized(d, t, i + 1, z, X, prev, az_s, b1z_s, z_data.begin,
+														   z_data.end, z_data.length, z_data.a, z_data.c);
+			prev = data;
+		}
+
+		z_forward_inside_y_blocked_alt_numa_vectorized(d, t, y_begin + 1, z, X, prev, az_s, b1z_s, z_data.begin,
+													   z_data.end, z_data.length, z_data.a, z_data.c);
+
+		z_forward_inside_y_blocked_alt_numa_vectorized(d, t, y_begin, z, X, begins, az_s, b1z_s, z_data.begin,
+													   z_data.end, z_data.length, z_data.a, z_data.c);
+	}
+}
+
 template <bool update_c, typename index_t, typename real_t, typename density_bag_t>
 constexpr static void y_forward_inside_x(const density_bag_t d, const index_t z, const index_t y, const index_t x,
 										 real_t data, const real_t a_s, const real_t b1_s, real_t& c_tmp)
@@ -4206,6 +4248,183 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked_alt(
 	}
 }
 
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename scratch_layout_t, typename dim_scratch_layout_t, typename thread_distribution_layout>
+constexpr static void solve_slice_xyz_fused_transpose_blocked_alt(
+	thread_distribution_layout dist_l, real_t** __restrict__ densities, const real_t* __restrict__ ax,
+	const real_t* __restrict__ b1x, const real_t* __restrict__ back_cx, const real_t* __restrict__ ay,
+	const real_t* __restrict__ b1y, const real_t* __restrict__ az, const real_t* __restrict__ b1z,
+	real_t** __restrict__ ay_data, real_t** __restrict__ cy_data, real_t** __restrict__ az_data,
+	real_t** __restrict__ cz_data, real_t** __restrict__ dim_data, const density_layout_t dens_l,
+	const diagonal_layout_t diagx_l, const scratch_layout_t scratch_l, const dim_scratch_layout_t dim_scratch_l,
+	const index_t s_global_offset, const index_t s_begin, const index_t s_end, const index_t y_global_begin,
+	const index_t y_global_end, const index_t y_global_len, const index_t z_global_begin, const index_t z_global_end,
+	const index_t z_global_len, const index_t tid_y, const index_t coop_size_y, const index_t tid_z,
+	const index_t coop_size_z, index_t& epoch_y, std::atomic<long>& counter_y, index_t& epoch_z,
+	std::atomic<long>& counter_z)
+{
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+	const index_t y_local_len = y_global_end - y_global_begin;
+	const index_t z_local_len = z_global_end - z_global_begin;
+
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		const real_t ax_s = ax[s];
+		const real_t b1x_s = b1x[s];
+
+		const real_t ay_s = ay[s];
+		const real_t b1y_s = b1y[s];
+
+		const real_t az_s = az[s];
+		const real_t b1z_s = b1z[s];
+
+		const auto denss_l = dens_l ^ noarr::fix<'s'>(s - s_global_offset);
+		const auto scratchs_l = scratch_l ^ noarr::fix<'s'>(s - s_global_offset);
+
+		real_t* __restrict__ densities_t = dist_l | noarr::get_at<'y', 'z'>(densities, tid_y, tid_z);
+
+		const auto d = noarr::make_bag(
+			denss_l ^ noarr::set_length<'y'>(y_local_len) ^ noarr::set_length<'z'>(z_local_len), densities_t);
+
+
+		const auto ay_scratch = noarr::make_bag(scratchs_l ^ noarr::set_length<'i'>(y_local_len),
+												dist_l | noarr::get_at<'y', 'z'>(ay_data, tid_y, tid_z));
+		const auto cy_scratch = noarr::make_bag(scratchs_l ^ noarr::set_length<'i'>(y_local_len),
+												dist_l | noarr::get_at<'y', 'z'>(cy_data, tid_y, tid_z));
+
+
+		const auto az_scratch = noarr::make_bag(scratchs_l ^ noarr::set_length<'i'>(z_local_len),
+												dist_l | noarr::get_at<'y', 'z'>(az_data, tid_y, tid_z));
+		const auto cz_scratch = noarr::make_bag(scratchs_l ^ noarr::set_length<'i'>(z_local_len),
+												dist_l | noarr::get_at<'y', 'z'>(cz_data, tid_y, tid_z));
+
+		const auto dim_scratch = noarr::make_bag(dim_scratch_l, dim_data[get_thread_num()]);
+
+		auto cx = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), back_cx);
+
+		for (index_t z = 0; z < z_local_len; z++)
+		{
+			{
+				real_t ay_tmp = ay_s;
+				real_t cy_tmp = ay_s;
+
+				const auto a_tmp = ay_s * (y_global_begin == 0 ? 0 : 1);
+				const auto b_tmp = b1y_s + ((y_global_begin == 0) || (y_global_begin == y_global_len - 1) ? ay_s : 0);
+				const auto c_tmp = ay_s * (y_global_begin == y_global_len - 1 ? 0 : 1);
+
+				real_t ay0_tmp = a_tmp / b_tmp;
+				real_t cy0_tmp = c_tmp / b_tmp;
+
+				auto y_remainder = y_local_len % simd_length;
+
+				xy_fused_transpose_part<true, true, true, simd_t>(
+					d, t, simd_length, 0, y_local_len - y_remainder, y_global_len, z, ax_s, b1x_s, ay_s, b1y_s, cx,
+					inner_y_data_blocked_alt { y_global_begin, y_global_end, ay_tmp, cy_tmp, ay0_tmp, cy0_tmp,
+											   ay_scratch, cy_scratch });
+			}
+
+			// y remainder
+			{
+				auto y_remainder = y_local_len % simd_length;
+
+				for (index_t y = y_local_len - y_remainder; y < y_local_len; y++)
+				{
+					real_t a_tmp = 0;
+					real_t b_tmp = b1x_s + ax_s;
+					real_t c_tmp = ax_s;
+					real_t prev = 0;
+
+					x_forward(d, z, y, ax_s, b1x_s, a_tmp, b_tmp, c_tmp, prev);
+
+					x_backward<true, true, true>(d, cx, z, y, prev, ay_s, b1y_s,
+												 inside_data_blocked_alt_numa { y_global_begin, y_global_end,
+																				y_global_len, ay_scratch, cy_scratch });
+
+					y_forward_inside_x_blocked_alt_numa(d, z, y, 0, prev, ay_s, b1y_s, y_global_begin, y_global_end,
+														y_global_len, ay_scratch, cy_scratch);
+
+					y_forward_inside_x_blocked_next_alt_numa(y, ay_s, b1y_s, y_global_len, y_global_begin, y_global_end,
+															 ay_scratch, cy_scratch);
+				}
+			}
+
+			{
+				epoch_y++;
+
+				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+				counter_y.notify_all();
+
+				while (val < epoch_y * coop_size_y)
+				{
+					counter_y.wait(val, std::memory_order_acquire);
+					val = counter_y.load(std::memory_order_acquire);
+				}
+			}
+
+			y_blocked_middle(denss_l ^ noarr::set_length<'z'>(z_local_len),
+							 scratchs_l ^ noarr::set_length<'z'>(z_local_len), dist_l ^ noarr::fix<'z'>(tid_z),
+							 densities, ay_data, cy_data, y_global_len, z, dim_scratch, tid_y, coop_size_y);
+
+			{
+				epoch_y++;
+
+				auto val = counter_y.fetch_add(1, std::memory_order_acq_rel) + 1;
+				counter_y.notify_all();
+
+				while (val < epoch_y * coop_size_y)
+				{
+					counter_y.wait(val, std::memory_order_acquire);
+					val = counter_y.load(std::memory_order_acquire);
+				}
+			}
+
+			y_blocked_end_alt_numa_vectorized<simd_t>(
+				d.structure(), densities_t, t, simd_length, z, ay_scratch, cy_scratch, 0, y_local_len, az_s, b1z_s,
+				inside_data_blocked_alt_numa { z_global_begin, z_global_end, z_global_len, az_scratch, cz_scratch });
+
+			z_forward_inside_y_blocked_next_alt_numa(z, az_s, b1z_s, z_global_len, z_global_begin, z_global_end,
+													 az_scratch, cz_scratch);
+		}
+
+		{
+			epoch_z++;
+
+			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+			counter_z.notify_all();
+
+			while (val < epoch_z * coop_size_z)
+			{
+				counter_z.wait(val, std::memory_order_acquire);
+				val = counter_z.load(std::memory_order_acquire);
+			}
+		}
+
+		z_blocked_middle(denss_l ^ noarr::set_length<'y'>(y_local_len),
+						 scratchs_l ^ noarr::set_length<'y'>(y_local_len), dist_l ^ noarr::fix<'y'>(tid_y), densities,
+						 az_data, cz_data, z_global_len, dim_scratch, tid_z, coop_size_z, 0, y_local_len);
+
+		{
+			epoch_z++;
+
+			auto val = counter_z.fetch_add(1, std::memory_order_acq_rel) + 1;
+			counter_z.notify_all();
+
+			while (val < epoch_z * coop_size_z)
+			{
+				counter_z.wait(val, std::memory_order_acquire);
+				val = counter_z.load(std::memory_order_acquire);
+			}
+		}
+
+		z_blocked_end_alt(d, az_scratch, cz_scratch, 0, y_local_len, 0, z_local_len);
+	}
+}
+
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_x()
 {}
@@ -4432,22 +4651,48 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 				}
 				else
 				{
-					if (!use_alt_blocked_)
-						solve_slice_xyz_fused_transpose_blocked<index_t>(
-							this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
-							a_scratchz_, c_scratchz_, dim_scratch_, get_substrates_layout<3>(),
-							get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l, lane_scratchz_l,
-							get_dim_scratch_layout(), s, s_end, block_y_begin, block_y_end, block_z_begin, block_z_end,
-							tid.y, cores_division_[1], tid.z, cores_division_[2], epoch_y, countersy_[lane_id_y].value,
-							epoch_z, countersz_[lane_id_z].value);
-					else
+					if (use_thread_distributed_allocation_)
+					{
+						auto dist_l =
+							noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
+
+						auto dens_l = get_blocked_substrate_layout<'*'>(this->problem_.nx, group_block_lengthsy_[tid.y],
+																		group_block_lengthsz_[tid.z],
+																		group_block_lengthss_[tid.group]);
+
+						auto scratch_l = noarr::scalar<real_t>() ^ noarr::vector<'i'>()
+										 ^ noarr::vector<'s'>(group_block_lengthss_[tid.group]);
+
 						solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
-							this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
-							a_scratchz_, c_scratchz_, dim_scratch_, get_substrates_layout<3>(),
-							get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l, lane_scratchz_l,
-							get_dim_scratch_layout(), s, s_end, block_y_begin, block_y_end, block_z_begin, block_z_end,
-							tid.y, cores_division_[1], tid.z, cores_division_[2], epoch_y, countersy_[lane_id_y].value,
-							epoch_z, countersz_[lane_id_z].value);
+							dist_l, thread_substrate_array_.get(), thread_ax_[thread_num], thread_b1x_[thread_num],
+							thread_cx_[thread_num], thread_ay_[thread_num], thread_b1y_[thread_num],
+							thread_az_[thread_num], thread_b1z_[thread_num], thread_a_scratchy_.get(),
+							thread_c_scratchy_.get(), thread_a_scratchz_.get(), thread_c_scratchz_.get(),
+							thread_dim_scratch_.get(), dens_l, get_diagonal_layout(this->problem_, this->problem_.nx),
+							scratch_l, get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end,
+							block_y_begin, block_y_end, this->problem_.ny, block_z_begin, block_z_end,
+							this->problem_.nz, tid.y, cores_division_[1], tid.z, cores_division_[2], epoch_y,
+							countersy_[lane_id_y].value, epoch_z, countersz_[lane_id_z].value);
+					}
+					else
+					{
+						if (!use_alt_blocked_)
+							solve_slice_xyz_fused_transpose_blocked<index_t>(
+								this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
+								a_scratchz_, c_scratchz_, dim_scratch_, get_substrates_layout<3>(),
+								get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l,
+								lane_scratchz_l, get_dim_scratch_layout(), s, s_end, block_y_begin, block_y_end,
+								block_z_begin, block_z_end, tid.y, cores_division_[1], tid.z, cores_division_[2],
+								epoch_y, countersy_[lane_id_y].value, epoch_z, countersz_[lane_id_z].value);
+						else
+							solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
+								this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
+								a_scratchz_, c_scratchz_, dim_scratch_, get_substrates_layout<3>(),
+								get_diagonal_layout(this->problem_, this->problem_.nx), lane_scratchy_l,
+								lane_scratchz_l, get_dim_scratch_layout(), s, s_end, block_y_begin, block_y_end,
+								block_z_begin, block_z_end, tid.y, cores_division_[1], tid.z, cores_division_[2],
+								epoch_y, countersy_[lane_id_y].value, epoch_z, countersz_[lane_id_z].value);
+					}
 				}
 			}
 		}
