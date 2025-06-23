@@ -38,6 +38,14 @@ transposed so the vectorization can be utilized
 */
 
 template <typename index_t>
+struct domain_ranges_t
+{
+	index_t x_begin = 0, x_end = 0;
+	index_t y_begin = 0, y_end = 0;
+	index_t z_begin = 0, z_end = 0;
+};
+
+template <typename index_t>
 struct thread_id_t
 {
 	index_t x = 0;
@@ -113,7 +121,7 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
-	auto get_scratch_layout(char dim) const;
+	auto get_scratch_layout(const index_t n, const index_t groups) const;
 
 	auto get_thread_distribution_layout() const;
 
@@ -123,7 +131,7 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 						  std::vector<index_t>& group_block_offsets);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims,
-						   index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters, char dim);
+						   index_t n, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters);
 
 	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1,
 						   std::unique_ptr<real_t*[]>& a_data, std::unique_ptr<real_t*[]>& c_data, index_t shape,
@@ -131,6 +139,8 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 						   const std::vector<index_t> group_block_lengths, char dim);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
+
+	domain_ranges_t<index_t> get_thread_domain_distribution() const;
 
 	thread_id_t<index_t> get_thread_id() const;
 
