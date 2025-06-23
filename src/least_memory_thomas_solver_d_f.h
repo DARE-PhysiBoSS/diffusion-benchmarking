@@ -67,6 +67,7 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	real_t* dim_scratch_;
 
 	bool use_alt_blocked_;
+	bool use_thread_distributed_allocation_;
 	std::size_t alignment_size_;
 	index_t substrate_step_;
 
@@ -75,29 +76,66 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	std::array<index_t, 3> group_blocks_;
 	std::vector<index_t> group_block_lengthsy_;
 	std::vector<index_t> group_block_lengthsz_;
+	std::vector<index_t> group_block_lengthss_;
 
 	std::vector<index_t> group_block_offsetsy_;
 	std::vector<index_t> group_block_offsetsz_;
+	std::vector<index_t> group_block_offsetss_;
 
 	index_t substrate_groups_;
+
+	std::unique_ptr<real_t*[]> thread_ax_, thread_b1x_, thread_cx_;
+	std::unique_ptr<real_t*[]> thread_ay_, thread_b1y_, thread_cy_;
+	std::unique_ptr<real_t*[]> thread_az_, thread_b1z_, thread_cz_;
+	std::unique_ptr<real_t*[]> thread_a_scratchy_, thread_c_scratchy_;
+	std::unique_ptr<real_t*[]> thread_a_scratchz_, thread_c_scratchz_;
+	std::unique_ptr<real_t*[]> thread_dim_scratch_;
+
+	std::unique_ptr<real_t*[]> thread_substrate_array_;
+
+	template <char dim_to_skip = ' '>
+	auto get_blocked_substrate_layout(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
+	{
+		std::size_t x_size = nx * sizeof(real_t);
+		std::size_t x_size_padded = (x_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		x_size_padded /= sizeof(real_t);
+
+		auto layout = noarr::scalar<real_t>() ^ noarr::vector<'x'>(x_size_padded) ^ noarr::vector<'y'>()
+					  ^ noarr::vector<'z'>() ^ noarr::vector<'s'>() ^ noarr::slice<'x'>(nx);
+
+		if constexpr (dim_to_skip == 'y')
+			return layout ^ noarr::set_length<'z', 's'>(nz, substrates_count);
+		else if constexpr (dim_to_skip == 'z')
+			return layout ^ noarr::set_length<'y', 's'>(ny, substrates_count);
+		else
+			return layout ^ noarr::set_length<'y', 'z', 's'>(ny, nz, substrates_count);
+	}
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
 	auto get_scratch_layout(char dim) const;
 
+	auto get_thread_distribution_layout() const;
+
 	auto get_dim_scratch_layout() const;
 
+	void set_block_bounds(index_t n, index_t group_size, index_t& block_size, std::vector<index_t>& group_block_lengths,
+						  std::vector<index_t>& group_block_offsets);
+
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims,
-						   index_t n, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters,
-						   index_t group_size, index_t& block_size, std::vector<index_t>& group_block_lengths,
-						   std::vector<index_t>& group_block_offsets, char dim);
+						   index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters, char dim);
+
+	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1,
+						   std::unique_ptr<real_t*[]>& a_data, std::unique_ptr<real_t*[]>& c_data, index_t shape,
+						   index_t dims, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters,
+						   const std::vector<index_t> group_block_lengths, char dim);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
 	thread_id_t<index_t> get_thread_id() const;
 
 public:
-	least_memory_thomas_solver_d_f(bool use_alt_blocked);
+	least_memory_thomas_solver_d_f(bool use_alt_blocked, bool use_thread_distributed_allocation);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
@@ -122,6 +160,8 @@ public:
 
 	void solve_blocked_2d();
 	void solve_blocked_3d();
+
+	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 
 	~least_memory_thomas_solver_d_f();
 };
