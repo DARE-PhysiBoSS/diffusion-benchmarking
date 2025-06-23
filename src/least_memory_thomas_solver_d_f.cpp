@@ -188,6 +188,27 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(real_t
 	}
 }
 
+
+template <typename real_t, bool aligned_x>
+void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t*[]>& a,
+																		  std::unique_ptr<real_t*[]>& b1,
+																		  std::unique_ptr<real_t*[]>& c, index_t shape,
+																		  index_t dims, index_t n)
+{
+	a = std::make_unique<real_t*[]>(get_max_threads());
+	b1 = std::make_unique<real_t*[]>(get_max_threads());
+	c = std::make_unique<real_t*[]>(get_max_threads());
+
+#pragma omp parallel
+	{
+		real_t*& a_t = a[get_thread_num()];
+		real_t*& b1_t = b1[get_thread_num()];
+		real_t*& c_t = c[get_thread_num()];
+
+		precompute_values(a_t, b1_t, c_t, shape, dims, n);
+	}
+}
+
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::prepare(const max_problem_t& problem)
 {
@@ -302,12 +323,22 @@ template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::initialize()
 {
 	if (this->problem_.dims >= 1)
-		precompute_values(ax_, b1x_, cx_, this->problem_.dx, this->problem_.dims, this->problem_.nx);
+	{
+		if (use_thread_distributed_allocation_)
+			precompute_values(thread_ax_, thread_b1x_, thread_cx_, this->problem_.dx, this->problem_.dims,
+							  this->problem_.nx);
+		else
+			precompute_values(ax_, b1x_, cx_, this->problem_.dx, this->problem_.dims, this->problem_.nx);
+	}
 	if (this->problem_.dims >= 2)
 	{
 		if (cores_division_[1] == 1)
 		{
-			precompute_values(ay_, b1y_, cy_, this->problem_.dy, this->problem_.dims, this->problem_.ny);
+			if (use_thread_distributed_allocation_)
+				precompute_values(thread_ay_, thread_b1y_, thread_cy_, this->problem_.dy, this->problem_.dims,
+								  this->problem_.ny);
+			else
+				precompute_values(ay_, b1y_, cy_, this->problem_.dy, this->problem_.dims, this->problem_.ny);
 		}
 		else
 		{
@@ -325,7 +356,11 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::initialize()
 	{
 		if (cores_division_[2] == 1)
 		{
-			precompute_values(az_, b1z_, cz_, this->problem_.dz, this->problem_.dims, this->problem_.nz);
+			if (use_thread_distributed_allocation_)
+				precompute_values(thread_az_, thread_b1z_, thread_cz_, this->problem_.dz, this->problem_.dims,
+								  this->problem_.nz);
+			else
+				precompute_values(az_, b1z_, cz_, this->problem_.dz, this->problem_.dims, this->problem_.nz);
 		}
 		else
 		{
@@ -4270,12 +4305,12 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 									 ^ noarr::vector<'s'>(group_block_lengthss_[tid.group]);
 
 					solve_slice_xy_fused_transpose_blocked_alt<index_t>(
-						dist_l, thread_substrate_array_.get(), ax_, b1x_, cx_, thread_ay_[thread_num],
-						thread_b1y_[thread_num], thread_a_scratchy_.get(), thread_c_scratchy_.get(),
-						thread_dim_scratch_.get(), dens_l, get_diagonal_layout(this->problem_, this->problem_.nx),
-						scratch_l, get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end,
-						block_y_begin, block_y_end, this->problem_.ny, tid.y, group_size, epoch,
-						countersy_[tid.group].value);
+						dist_l, thread_substrate_array_.get(), thread_ax_[thread_num], thread_b1x_[thread_num],
+						thread_cx_[thread_num], thread_ay_[thread_num], thread_b1y_[thread_num],
+						thread_a_scratchy_.get(), thread_c_scratchy_.get(), thread_dim_scratch_.get(), dens_l,
+						get_diagonal_layout(this->problem_, this->problem_.nx), scratch_l,
+						get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end, block_y_begin,
+						block_y_end, this->problem_.ny, tid.y, group_size, epoch, countersy_[tid.group].value);
 				}
 				else if (!use_alt_blocked_)
 					solve_slice_xy_fused_transpose_blocked<index_t>(
@@ -4365,9 +4400,10 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d()
 										 ^ noarr::vector<'s'>(group_block_lengthss_[tid.group]);
 
 						solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
-							dist_l, thread_substrate_array_.get(), ax_, b1x_, cx_, ay_, b1y_, cy_,
-							thread_az_[thread_num], thread_b1z_[thread_num], thread_a_scratchz_.get(),
-							thread_c_scratchz_.get(), thread_dim_scratch_.get(), dens_l,
+							dist_l, thread_substrate_array_.get(), thread_ax_[thread_num], thread_b1x_[thread_num],
+							thread_cx_[thread_num], thread_ay_[thread_num], thread_b1y_[thread_num],
+							thread_cy_[thread_num], thread_az_[thread_num], thread_b1z_[thread_num],
+							thread_a_scratchz_.get(), thread_c_scratchz_.get(), thread_dim_scratch_.get(), dens_l,
 							get_diagonal_layout(this->problem_, this->problem_.nx),
 							get_diagonal_layout(this->problem_, this->problem_.ny), scratch_l,
 							get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end, block_z_begin,
@@ -4486,14 +4522,35 @@ least_memory_thomas_solver_d_f<real_t, aligned_x>::~least_memory_thomas_solver_d
 
 	for (index_t i = 0; i < get_max_threads(); i++)
 	{
-		if (thread_ay_)
+		if (thread_cx_)
+		{
+			std::free(thread_ax_[i]);
+			std::free(thread_b1x_[i]);
+			std::free(thread_cx_[i]);
+		}
+
+		if (thread_cy_)
+		{
+			std::free(thread_ay_[i]);
+			std::free(thread_b1y_[i]);
+			std::free(thread_cy_[i]);
+		}
+
+		if (thread_cz_)
+		{
+			std::free(thread_az_[i]);
+			std::free(thread_b1z_[i]);
+			std::free(thread_cz_[i]);
+		}
+
+		if (thread_a_scratchy_)
 		{
 			std::free(thread_ay_[i]);
 			std::free(thread_b1y_[i]);
 			std::free(thread_a_scratchy_[i]);
 			std::free(thread_c_scratchy_[i]);
 		}
-		if (thread_az_)
+		if (thread_a_scratchz_)
 		{
 			std::free(thread_az_[i]);
 			std::free(thread_b1z_[i]);

@@ -140,6 +140,9 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
+	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1, std::unique_ptr<real_t*[]>& b,
+						   index_t shape, index_t dims, index_t n);
+
 	domain_ranges_t<index_t> get_thread_domain_distribution() const;
 
 	thread_id_t<index_t> get_thread_id() const;
