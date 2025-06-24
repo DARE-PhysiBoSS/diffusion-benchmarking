@@ -1,5 +1,7 @@
 #pragma once
 
+#include <barrier>
+
 #include "base_solver.h"
 #include "blocked_thomas_solver.h"
 #include "substrate_layouts.h"
@@ -66,7 +68,8 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 	real_t *ay_, *b1y_, *cy_;
 	real_t *az_, *b1z_, *cz_;
 
-	std::unique_ptr<aligned_atomic<long>[]> countersy_, countersz_;
+	std::unique_ptr<std::unique_ptr<aligned_atomic<long>>[]> countersy_, countersz_;
+	std::unique_ptr<std::unique_ptr<std::barrier<>>[]> barriersy_, barriersz_;
 	index_t countersy_count_, countersz_count_;
 
 	real_t *a_scratchy_, *c_scratchy_;
@@ -133,11 +136,15 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 						  std::vector<index_t>& group_block_offsets);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims,
-						   index_t n, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters);
+						   index_t n, index_t counters_count,
+						   std::unique_ptr<std::unique_ptr<aligned_atomic<long>>[]>& counters,
+						   std::unique_ptr<std::unique_ptr<std::barrier<>>[]>& barriers, index_t group_size);
 
 	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1,
 						   std::unique_ptr<real_t*[]>& a_data, std::unique_ptr<real_t*[]>& c_data, index_t shape,
-						   index_t dims, index_t counters_count, std::unique_ptr<aligned_atomic<long>[]>& counters,
+						   index_t dims, index_t counters_count,
+						   std::unique_ptr<std::unique_ptr<aligned_atomic<long>>[]>& counters,
+						   std::unique_ptr<std::unique_ptr<std::barrier<>>[]>& barriers, index_t group_size,
 						   const std::vector<index_t> group_block_lengths, char dim);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
@@ -174,7 +181,8 @@ public:
 	void solve() override;
 
 	void solve_blocked_2d();
-	void solve_blocked_3d();
+	void solve_blocked_3d_z();
+	void solve_blocked_3d_yz();
 
 	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 
