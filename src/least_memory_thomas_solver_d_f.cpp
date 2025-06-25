@@ -32,7 +32,7 @@ thread_id_t<typename least_memory_thomas_solver_d_f<real_t, aligned_x>::index_t>
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(
 	real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims, index_t n,
-	index_t counters_count, std::unique_ptr<std::unique_ptr<aligned_atomic<long>>[]>& counters,
+	index_t counters_count, std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]>& counters,
 	std::unique_ptr<std::unique_ptr<std::barrier<>>[]>& barriers, index_t group_size)
 {
 	// allocate memory for a and b1
@@ -48,10 +48,10 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(
 		b1[s] = 1 + this->problem_.decay_rates[s] * this->problem_.dt / dims
 				+ 2 * this->problem_.dt * this->problem_.diffusion_coefficients[s] / (shape * shape);
 
-	counters = std::make_unique<std::unique_ptr<aligned_atomic<long>>[]>(counters_count);
+	counters = std::make_unique<std::unique_ptr<aligned_atomic<index_t>>[]>(counters_count);
 	for (index_t i = 0; i < counters_count; i++)
 	{
-		counters[i] = std::make_unique<aligned_atomic<long>>(0);
+		counters[i] = std::make_unique<aligned_atomic<index_t>>(0);
 	}
 
 	barriers = std::make_unique<std::unique_ptr<std::barrier<>>[]>(counters_count);
@@ -116,7 +116,7 @@ template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(
 	std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1, std::unique_ptr<real_t*[]>& a_data,
 	std::unique_ptr<real_t*[]>& c_data, index_t shape, index_t dims, index_t counters_count,
-	std::unique_ptr<std::unique_ptr<aligned_atomic<long>>[]>& counters,
+	std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]>& counters,
 	std::unique_ptr<std::unique_ptr<std::barrier<>>[]>& barriers, index_t group_size,
 	const std::vector<index_t> group_block_lengths, char dim)
 {
@@ -125,7 +125,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(
 	a_data = std::make_unique<real_t*[]>(get_max_threads());
 	c_data = std::make_unique<real_t*[]>(get_max_threads());
 
-	counters = std::make_unique<std::unique_ptr<aligned_atomic<long>>[]>(counters_count);
+	counters = std::make_unique<std::unique_ptr<aligned_atomic<index_t>>[]>(counters_count);
 	barriers = std::make_unique<std::unique_ptr<std::barrier<>>[]>(counters_count);
 
 #pragma omp parallel
@@ -167,7 +167,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::precompute_values(
 
 		if (dim_id == 0)
 		{
-			counters[lane_id] = std::make_unique<aligned_atomic<long>>(0);
+			counters[lane_id] = std::make_unique<aligned_atomic<index_t>>(0);
 			barriers[lane_id] = std::make_unique<std::barrier<>>(group_size);
 		}
 	}
@@ -4166,7 +4166,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 		const auto block_y_begin = group_block_offsetsy_[tid.y];
 		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid.y];
 
-		barrier_t<false, long> barrier(cores_division_[1], countersy_[tid.group]->value);
+		barrier_t<true, index_t> barrier(cores_division_[1], countersy_[tid.group]->value);
 
 		const auto block_s_begin = group_block_offsetss_[tid.group];
 		const auto block_s_end = block_s_begin + group_block_lengthss_[tid.group];
@@ -4242,7 +4242,7 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d_z()
 		const auto lane_scratchz_l =
 			get_scratch_layout(this->problem_.nz, substrate_groups_ * cores_division_[1]) ^ noarr::fix<'l'>(lane_id_z);
 
-		barrier_t<false, long> barrier_z(cores_division_[2], countersz_[lane_id_z]->value);
+		barrier_t<true, index_t> barrier_z(cores_division_[2], countersz_[lane_id_z]->value);
 
 		const auto block_s_begin = group_block_offsetss_[tid.group];
 		const auto block_s_end = block_s_begin + group_block_lengthss_[tid.group];
@@ -4337,14 +4337,14 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d_yz()
 		const auto lane_scratchy_l =
 			get_scratch_layout(this->problem_.ny, substrate_groups_ * cores_division_[2]) ^ noarr::fix<'l'>(lane_id_y);
 
-		barrier_t<false, long> barrier_y(cores_division_[1], countersy_[lane_id_y]->value);
+		barrier_t<true, index_t> barrier_y(cores_division_[1], countersy_[lane_id_y]->value);
 		// auto& barrier_y = *barriersy_[lane_id_y];
 
 		const auto lane_id_z = tid.y + tid.group * cores_division_[1];
 		const auto lane_scratchz_l =
 			get_scratch_layout(this->problem_.nz, substrate_groups_ * cores_division_[1]) ^ noarr::fix<'l'>(lane_id_z);
 
-		barrier_t<false, long> barrier_z(cores_division_[2], countersz_[lane_id_z]->value);
+		barrier_t<true, index_t> barrier_z(cores_division_[2], countersz_[lane_id_z]->value);
 		// auto& barrier_z = *barriersz_[lane_id_z];
 
 		const auto block_s_begin = group_block_offsetss_[tid.group];
