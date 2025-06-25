@@ -1031,6 +1031,9 @@ static constexpr void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 
 			// the rest of forward part
 			{
+				if (remainder_work == 1)
+					bx_tmp = b1x_s + ax_s;
+
 				x_forward_vectorized<true>(rows + 1, t, remainder_work, ax_s, b1x_s, ax_tmp, bx_tmp, cx_tmp);
 			}
 
@@ -1916,7 +1919,8 @@ static void solve_xf_xb_yf_yb_block(real_t* __restrict__ densities, const real_t
 	}
 
 
-	// std::cout << "[" << x_begin << ", " << x_end << ") x [" << y_begin << ", " << y_end << ") xf xb yf yb" << std::endl;
+	// std::cout << "[" << x_begin << ", " << x_end << ") x [" << y_begin << ", " << y_end << ") xf xb yf yb" <<
+	// std::endl;
 
 	const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
 

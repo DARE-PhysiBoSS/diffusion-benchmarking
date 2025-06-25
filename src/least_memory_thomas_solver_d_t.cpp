@@ -261,6 +261,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 					// the rest of forward part
 					{
+						if (remainder_work == 1)
+							b_tmp = b1_s + a_s;
+
 						for (index_t v = 0; v < remainder_work; v++)
 						{
 							const real_t r = 1 / (b_tmp - a_tmp * c_tmp);
@@ -948,6 +951,9 @@ static void solve_slice_xy_fused_transpose(real_t* __restrict__ densities, const
 
 						// the rest of forward part
 						{
+							if (remainder_work == 1)
+								b_tmp = b1_s + a_s;
+
 							for (index_t v = 0; v < remainder_work; v++)
 							{
 								const real_t r = 1 / (b_tmp - a_tmp * c_tmp);

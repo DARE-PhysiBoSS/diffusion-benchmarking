@@ -2905,6 +2905,9 @@ constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 
 			// the rest of forward part
 			{
+				if (remainder_work == 1)
+					bx_tmp = b1x_s + ax_s;
+
 				x_forward_vectorized<true>(rows + 1, t, remainder_work, ax_s, b1x_s, ax_tmp, bx_tmp, cx_tmp);
 			}
 
