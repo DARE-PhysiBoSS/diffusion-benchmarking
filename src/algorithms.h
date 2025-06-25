@@ -19,6 +19,7 @@ class algorithms
 {
 	std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> solvers_;
 
+	bool double_precision_;
 	bool verbose_;
 
 	static constexpr double relative_difference_print_threshold_ = 0.001;

@@ -56,9 +56,12 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(false, true); });
 	solvers.emplace("lstmdtfai",
 					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(true, true); });
-	solvers.emplace("lstmfai", []() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(false, false); });
-	solvers.emplace("lstmfabi", []() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, false); });
-	solvers.emplace("lstmfabni", []() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, true); });
+	solvers.emplace("lstmfai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(false, false); });
+	solvers.emplace("lstmfabi",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, false); });
+	solvers.emplace("lstmfabni",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, true); });
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("lstmta", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("lstmtai", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(true); });
@@ -81,7 +84,7 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	return solvers;
 }
 
-algorithms::algorithms(bool double_precision, bool verbose) : verbose_(verbose)
+algorithms::algorithms(bool double_precision, bool verbose) : double_precision_(double_precision), verbose_(verbose)
 {
 	if (double_precision)
 		solvers_ = get_solvers_map<double>();
@@ -315,8 +318,8 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
-	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
-			  << "," << problem.nz << ",";
+	std::cout << alg << "," << (double_precision_ ? "D" : "S") << "," << problem.dims << "," << problem.iterations
+			  << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny << "," << problem.nz << ",";
 	append_params(std::cout, params, false);
 	std::cout << init_time_us << ",";
 
@@ -392,7 +395,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 
 	// make header
 	{
-		std::cout << "algorithm,dims,s,nx,ny,nz,";
+		std::cout << "algorithm,precision,dims,iterations,s,nx,ny,nz,";
 		append_params(std::cout, params, true);
 
 		if (try_get_adi_solver(alg) && kind == benchmark_kind::per_dimension)
