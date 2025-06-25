@@ -4130,24 +4130,64 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve()
 		return;
 	}
 
-#pragma omp parallel for schedule(static)
-	for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
+#pragma omp parallel
 	{
-		auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+		auto tid = get_thread_id();
+		auto work_id = tid.group;
 
-		for (index_t i = 0; i < this->problem_.iterations; i++)
+		auto s_global_begin = group_block_offsetss_[work_id];
+		auto s_global_end = s_global_begin + group_block_lengthss_[work_id];
+
+		for (index_t s = 0; s < group_block_lengthss_[work_id]; s += substrate_step_)
 		{
-			if (this->problem_.dims == 3)
-				solve_slice_xyz_fused_transpose<index_t>(
-					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, az_, b1z_, cz_, get_substrates_layout<3>(),
-					get_diagonal_layout(this->problem_, this->problem_.nx),
-					get_diagonal_layout(this->problem_, this->problem_.ny),
-					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length);
-			else if (this->problem_.dims == 2)
-				solve_slice_xy_fused_transpose<index_t>(
-					this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, get_substrates_layout<3>(),
-					get_diagonal_layout(this->problem_, this->problem_.nx),
-					get_diagonal_layout(this->problem_, this->problem_.ny), s, s + s_step_length);
+			auto s_end = std::min(s + substrate_step_, group_block_lengthss_[work_id]);
+
+			// #pragma omp critical
+			// 			std::cout << "Thread " << get_thread_num() << " s_begin: " << s_global_begin + s
+			// 					  << " s_end: " << s_global_begin + s_end << " group: " << tid.group << std::endl;
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				if (use_thread_distributed_allocation_)
+				{
+					auto s_slice = noarr::slice<'s'>(s_global_begin, s_global_end - s_global_begin);
+
+					if (this->problem_.dims == 3)
+						solve_slice_xyz_fused_transpose<index_t>(
+							thread_substrate_array_[work_id], thread_ax_[work_id] + s_global_begin,
+							thread_b1x_[work_id] + s_global_begin, thread_cx_[work_id],
+							thread_ay_[work_id] + s_global_begin, thread_b1y_[work_id] + s_global_begin,
+							thread_cy_[work_id], thread_az_[work_id] + s_global_begin,
+							thread_b1z_[work_id] + s_global_begin, thread_cz_[work_id], get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx) ^ s_slice,
+							get_diagonal_layout(this->problem_, this->problem_.ny) ^ s_slice,
+							get_diagonal_layout(this->problem_, this->problem_.nz) ^ s_slice, s, s_end);
+					else if (this->problem_.dims == 2)
+						solve_slice_xy_fused_transpose<index_t>(
+							thread_substrate_array_[work_id], thread_ax_[work_id] + s_global_begin,
+							thread_b1x_[work_id] + s_global_begin, thread_cx_[work_id],
+							thread_ay_[work_id] + s_global_begin, thread_b1y_[work_id] + s_global_begin,
+							thread_cy_[work_id], get_substrates_layout<3>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx) ^ s_slice,
+							get_diagonal_layout(this->problem_, this->problem_.ny) ^ s_slice, s, s_end);
+				}
+				else
+				{
+					if (this->problem_.dims == 3)
+						solve_slice_xyz_fused_transpose<index_t>(this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, az_,
+																 b1z_, cz_, get_substrates_layout<3>(),
+																 get_diagonal_layout(this->problem_, this->problem_.nx),
+																 get_diagonal_layout(this->problem_, this->problem_.ny),
+																 get_diagonal_layout(this->problem_, this->problem_.nz),
+																 s_global_begin + s, s_global_begin + s_end);
+					else if (this->problem_.dims == 2)
+						solve_slice_xy_fused_transpose<index_t>(this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_,
+																get_substrates_layout<3>(),
+																get_diagonal_layout(this->problem_, this->problem_.nx),
+																get_diagonal_layout(this->problem_, this->problem_.ny),
+																s_global_begin + s, s_global_begin + s_end);
+				}
+			}
 		}
 	}
 }
