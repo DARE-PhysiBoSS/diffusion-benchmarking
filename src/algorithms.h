@@ -50,6 +50,4 @@ public:
 
 	// Measure the algorithm performance
 	void benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params);
-
-	void profile(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params);
 };

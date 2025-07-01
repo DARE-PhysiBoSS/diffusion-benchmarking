@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 
+#include "perf_utils.h"
 #include "solver_utils.h"
 
 template <typename real_t>
@@ -139,7 +140,9 @@ template <typename real_t>
 void biofvm<real_t>::prepare(const max_problem_t& problem)
 {
 	problem_ = problems::cast<std::int32_t, real_t>(problem);
-	long long int array_size = static_cast<long long int>(problem_.nx) * static_cast<long long int>(problem_.ny) * static_cast<long long int>(problem_.nz) * static_cast<long long int>(problem_.substrates_count);
+	long long int array_size = static_cast<long long int>(problem_.nx) * static_cast<long long int>(problem_.ny)
+							   * static_cast<long long int>(problem_.nz)
+							   * static_cast<long long int>(problem_.substrates_count);
 	substrates_ = std::make_unique<real_t[]>(array_size);
 
 	// Initialize substrates
@@ -152,18 +155,23 @@ void biofvm<real_t>::prepare(const max_problem_t& problem)
 template <typename real_t>
 void biofvm<real_t>::solve()
 {
-	for (index_t i = 0; i < this->problem_.iterations; i++)
+#pragma omp parallel
 	{
-		solve_x();
-		solve_y();
-		solve_z();
+		perf_counter counter("biofvm");
+
+		for (index_t i = 0; i < this->problem_.iterations; i++)
+		{
+			solve_x();
+			solve_y();
+			solve_z();
+		}
 	}
 }
 
 template <typename real_t>
 void biofvm<real_t>::solve_x()
 {
-#pragma omp parallel for collapse(2)
+#pragma omp for collapse(2)
 	for (index_t k = 0; k < problem_.nz; k++)
 	{
 		for (index_t j = 0; j < problem_.ny; j++)
@@ -212,7 +220,7 @@ void biofvm<real_t>::solve_x()
 template <typename real_t>
 void biofvm<real_t>::solve_y()
 {
-#pragma omp parallel for collapse(2)
+#pragma omp for collapse(2)
 	for (index_t k = 0; k < problem_.nz; k++)
 	{
 		for (index_t i = 0; i < problem_.nx; i++)
@@ -261,7 +269,7 @@ void biofvm<real_t>::solve_y()
 template <typename real_t>
 void biofvm<real_t>::solve_z()
 {
-#pragma omp parallel for collapse(2)
+#pragma omp for collapse(2)
 	for (index_t j = 0; j < problem_.ny; j++)
 	{
 		for (index_t i = 0; i < problem_.nx; i++)

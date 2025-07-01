@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include "algorithms.h"
+#include "perf_utils.h"
 
 int main(int argc, char** argv)
 {
@@ -55,10 +56,7 @@ int main(int argc, char** argv)
 		.store_into(benchmark);
 
 	bool profile;
-	group.add_argument("--profile")
-		.help("Algorithm will be profiled using PAPI counters indicated in params")
-		.flag()
-		.store_into(profile);
+	group.add_argument("--profile").help("The run will be profiled using PAPI counters.").flag().store_into(profile);
 
 	try
 	{
@@ -117,7 +115,8 @@ int main(int argc, char** argv)
 		}
 		else if (profile)
 		{
-			algs.profile(alg, problem, params);
+			perf_counter::enable();
+			algs.run(alg, problem, params, output_file);
 		}
 	}
 	catch (const std::exception& err)

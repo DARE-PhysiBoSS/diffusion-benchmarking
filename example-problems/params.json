@@ -2,6 +2,5 @@
     "inner_iterations": 10,
     "outer_iterations": 5,
     "warmup_time": 1,
-    "benchmark_kind": "per_dimension",
-    "papi_counters" : ["PAPI_TOT_INS", "PAPI_TOT_CYC", "PAPI_L1_DCM", "PAPI_DP_OPS", "PAPI_LD_INS", "PAPI_ST_INS", "PAPI_LST_INS"]
+    "benchmark_kind": "per_dimension"
 }

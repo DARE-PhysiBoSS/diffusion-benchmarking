@@ -10,7 +10,6 @@ The requirements to build the application are:
 - CMake
 - LAPACK library
 - OpenMP
-- PAPI
 
 > We provide `.devcontainer/devcontainer.json` VSCode Devcontainer, which, after reopening the VSCode window in the Devcontainer, contains all the dependencies to build the application. 
 
@@ -32,7 +31,15 @@ An example usage of the app looks as follows:
 ```
 This command benchmarks the diffusion on a problem defined in `example-problems/50x50x50x1.json` file, using algorithm named `lstc` with the parameter set defined in `example-problems/params.json` in double precision. 
 
-Instead of providing `--benchmark` command line parameter, one can use `--validate` to check the correctness of the selected algorithm with respect to the reference algorithm `ref`. Lastly, `--run [FILE]` just runs the problem and outputs the result in the provided file (if selected). In addition, `--profile` will activate the PAPI counters specified in the params file with `papi_counters` header. Firstly, run `scripts/obtain_counters.sh` to generate `example-problems/counters.json` which contain available PAPI counters for your system. 
+Instead of providing `--benchmark` command line parameter, one can use `--validate` to check the correctness of the selected algorithm with respect to the reference algorithm `ref`. Further, `--run [FILE]` just runs the problem and outputs the result in the provided file (if selected). 
+
+In addition, `--profile` command line parameter outputs the performance counters collected by PAPI library. You can specify the counters to collect using `PAPI_EVENTS` environment variable and also the output directory using `PAPI_OUTPUT_DIRECTORY` environment variable. To see the usable performance counters on your system, run `papi_avail` (either present on your system or built and accesible in `<BUILD DIR>/_deps/papi-build/bin` directory). The work that is being profiled is equivalent to running the application with `--run` parameter. Here is a code snippet that collects specific performance counters and outputs them into a specified output directory:
+
+```bash
+export PAPI_EVENTS="PAPI_TOT_INS,PAPI_TOT_CYC"
+export PAPI_OUTPUT_DIRECTORY="scratch/measurement"
+./build/diffuse --problem example-problems/50x50x50x1.json --alg biofvm --params example-problems/params.json --profile
+```
 
 
 ## List of algorithms
