@@ -10,6 +10,7 @@
 #include "noarr/structures/extra/funcs.hpp"
 #include "noarr/structures/extra/shortcuts.hpp"
 #include "omp_helper.h"
+#include "perf_utils.h"
 #include "problem.h"
 #include "vector_transpose_helper.h"
 
@@ -2982,6 +2983,8 @@ void cubed_mix_thomas_solver_t<real_t, aligned_x>::solve()
 
 #pragma omp parallel
 	{
+		perf_counter counter("cubedmai");
+
 		const auto tid = get_thread_num();
 		const index_t group_size = cores_division_[0] * cores_division_[1] * cores_division_[2];
 

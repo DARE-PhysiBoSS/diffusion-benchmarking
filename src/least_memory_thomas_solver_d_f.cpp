@@ -6,6 +6,7 @@
 #include "barrier.h"
 #include "noarr/structures/extra/funcs.hpp"
 #include "omp_helper.h"
+#include "perf_utils.h"
 #include "vector_transpose_helper.h"
 
 
@@ -4132,6 +4133,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve()
 
 #pragma omp parallel
 	{
+		perf_counter counter("lstmfai");
+
 		auto tid = get_thread_id();
 		auto work_id = tid.group;
 
@@ -4202,6 +4205,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_2d()
 
 #pragma omp parallel
 	{
+		perf_counter counter("lstmfai");
+
 		const auto thread_num = get_thread_num();
 
 		const thread_id_t<index_t> tid = get_thread_id();
@@ -4274,6 +4279,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d_z()
 
 #pragma omp parallel
 	{
+		perf_counter counter("lstmfai");
+
 		const auto thread_num = get_thread_num();
 
 		const thread_id_t<index_t> tid = get_thread_id();
@@ -4366,6 +4373,8 @@ void least_memory_thomas_solver_d_f<real_t, aligned_x>::solve_blocked_3d_yz()
 
 #pragma omp parallel
 	{
+		perf_counter counter("lstmfai");
+
 		const auto thread_num = get_thread_num();
 
 		const thread_id_t<index_t> tid = get_thread_id();
