@@ -21,6 +21,7 @@
 #include "least_compute_thomas_solver_t.h"
 #include "least_memory_thomas_solver.h"
 #include "least_memory_thomas_solver_d_f.h"
+#include "least_memory_thomas_solver_d_f_p.h"
 #include "least_memory_thomas_solver_d_t.h"
 #include "least_memory_thomas_solver_t.h"
 #include "reference_thomas_solver.h"
@@ -61,6 +62,12 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, false); });
 	solvers.emplace("lstmfabni",
 					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, true); });
+	solvers.emplace("lstmfpai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, false); });
+	solvers.emplace("lstmfpabi",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, false); });
+	solvers.emplace("lstmfpabni",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, true); });
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("lstmta", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("lstmtai", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(true); });

@@ -1,11 +1,7 @@
 #pragma once
 
-#include <barrier>
+#include "least_memory_thomas_solver_d_f.h"
 
-#include "base_solver.h"
-#include "blocked_thomas_solver.h"
-#include "substrate_layouts.h"
-#include "tridiagonal_solver.h"
 /*
 The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
 For dimension x:
@@ -39,35 +35,16 @@ y/z dimensions are solved alongside tiled x dimension
 transposed so the vectorization can be utilized
 */
 
-template <typename index_t>
-struct thread_id_t
-{
-	index_t x = 0;
-	index_t y = 0;
-	index_t z = 0;
-
-	index_t group;
-};
-
 template <typename real_t, bool aligned_x>
-class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
-									   public base_solver<real_t, least_memory_thomas_solver_d_f<real_t, aligned_x>>
+class least_memory_thomas_solver_d_f_p : public locally_onedimensional_solver,
+										 public base_solver<real_t, least_memory_thomas_solver_d_f_p<real_t, aligned_x>>
 
 {
 	using index_t = std::int32_t;
 
-	real_t *ax_, *b1x_, *cx_;
-	real_t *ay_, *b1y_, *cy_;
-	real_t *az_, *b1z_, *cz_;
-
 	std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]> countersy_, countersz_;
 	std::unique_ptr<std::unique_ptr<std::barrier<>>[]> barriersy_, barriersz_;
 	index_t countersy_count_, countersz_count_;
-
-	real_t *a_scratchy_, *c_scratchy_;
-	real_t *a_scratchz_, *c_scratchz_;
-
-	real_t* dim_scratch_;
 
 	bool use_alt_blocked_;
 	bool use_thread_distributed_allocation_;
@@ -87,12 +64,9 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 
 	index_t substrate_groups_;
 
-	std::unique_ptr<real_t*[]> thread_ax_, thread_b1x_, thread_cx_;
-	std::unique_ptr<real_t*[]> thread_ay_, thread_b1y_, thread_cy_;
-	std::unique_ptr<real_t*[]> thread_az_, thread_b1z_, thread_cz_;
-	std::unique_ptr<real_t*[]> thread_a_scratchy_, thread_c_scratchy_;
-	std::unique_ptr<real_t*[]> thread_a_scratchz_, thread_c_scratchz_;
-	std::unique_ptr<real_t*[]> thread_dim_scratch_;
+	std::unique_ptr<real_t*[]> thread_ax_, thread_bx_, thread_cx_, thread_rf_x_, thread_rb_x_;
+	std::unique_ptr<real_t*[]> thread_ay_, thread_by_, thread_cy_, thread_rf_y_, thread_rb_y_;
+	std::unique_ptr<real_t*[]> thread_az_, thread_bz_, thread_cz_, thread_rf_z_, thread_rb_z_;
 
 	std::unique_ptr<real_t*[]> thread_substrate_array_;
 
@@ -118,36 +92,28 @@ class least_memory_thomas_solver_d_f : public locally_onedimensional_solver,
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
-	auto get_scratch_layout(const index_t n, const index_t groups) const;
-
 	auto get_thread_distribution_layout() const;
-
-	auto get_dim_scratch_layout() const;
 
 	void set_block_bounds(index_t n, index_t group_size, index_t& block_size, std::vector<index_t>& group_block_lengths,
 						  std::vector<index_t>& group_block_offsets);
 
-	void precompute_values(real_t*& a, real_t*& b1, real_t*& a_data, real_t*& c_data, index_t shape, index_t dims,
-						   index_t n, index_t counters_count,
-						   std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]>& counters,
-						   std::unique_ptr<std::unique_ptr<std::barrier<>>[]>& barriers, index_t group_size);
-
-	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1,
-						   std::unique_ptr<real_t*[]>& a_data, std::unique_ptr<real_t*[]>& c_data, index_t shape,
+	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b, std::unique_ptr<real_t*[]>& c,
+						   std::unique_ptr<real_t*[]>& rf, std::unique_ptr<real_t*[]>& rb, index_t n, index_t shape,
 						   index_t dims, index_t counters_count,
 						   std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]>& counters,
 						   std::unique_ptr<std::unique_ptr<std::barrier<>>[]>& barriers, index_t group_size,
-						   const std::vector<index_t> group_block_lengths, char dim);
+						   const std::vector<index_t> group_block_lengths,
+						   const std::vector<index_t> group_block_offsets, char dim);
 
-	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
+	void precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape, index_t dims, index_t n);
 
-	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b1, std::unique_ptr<real_t*[]>& b,
+	void precompute_values(std::unique_ptr<real_t*[]>& rf, std::unique_ptr<real_t*[]>& b, std::unique_ptr<real_t*[]>& c,
 						   index_t shape, index_t dims, index_t n);
 
 	thread_id_t<index_t> get_thread_id() const;
 
 public:
-	least_memory_thomas_solver_d_f(bool use_alt_blocked, bool use_thread_distributed_allocation);
+	least_memory_thomas_solver_d_f_p(bool use_alt_blocked, bool use_thread_distributed_allocation);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
@@ -176,5 +142,5 @@ public:
 
 	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 
-	~least_memory_thomas_solver_d_f();
+	~least_memory_thomas_solver_d_f_p();
 };
