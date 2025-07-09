@@ -124,73 +124,104 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::precompute_values(
 
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
 		{
-			real_t a = -this->problem_.dt * this->problem_.diffusion_coefficients[s] / (shape * shape);
-			real_t b = 1 + this->problem_.decay_rates[s] * this->problem_.dt / dims - 2 * a;
-			real_t b0 = 1 + this->problem_.decay_rates[s] * this->problem_.dt / dims - a;
-
-			for (index_t i = 0; i < 2; i++)
+			for (std::size_t block_idx = 0; block_idx < group_block_lengths.size(); block_idx++)
 			{
-				index_t global_i = i;
-				real_t a_tmp = global_i == 0 ? 0 : a;
-				real_t b_tmp = (global_i == 0 || global_i == n - 1) ? b0 : b;
-				real_t c_tmp = global_i == n - 1 ? 0 : a;
+				index_t i_begin = group_block_offsets[block_idx];
+				index_t i_end = i_begin + group_block_lengths[block_idx];
 
-				auto idx = noarr::idx<'s', 'i'>(s, i);
+				real_t a = -this->problem_.dt * this->problem_.diffusion_coefficients[s] / (shape * shape);
+				real_t b = 1 + this->problem_.decay_rates[s] * this->problem_.dt / dims - 2 * a;
+				real_t b0 = 1 + this->problem_.decay_rates[s] * this->problem_.dt / dims - a;
 
-				a_diag[idx] = a_tmp;
-				b_diag[idx] = b_tmp;
-				c_diag[idx] = c_tmp;
-				rf_diag[idx] = 0;
+				for (index_t i = i_begin; i < i_begin + 2; i++)
+				{
+					index_t global_i = i;
+					real_t a_tmp = global_i == 0 ? 0 : a;
+					real_t b_tmp = (global_i == 0 || global_i == n - 1) ? b0 : b;
+					real_t c_tmp = global_i == n - 1 ? 0 : a;
+
+					auto idx = noarr::idx<'s', 'i'>(s, i);
+
+					a_diag[idx] = a_tmp;
+					b_diag[idx] = b_tmp;
+					c_diag[idx] = c_tmp;
+					rf_diag[idx] = 0;
+
+					// if (get_thread_num() == 0)
+					// 	std::cout << dim << " " << i << " a: " << a_diag[idx] << " b: " << b_diag[idx]
+					// 			  << " c: " << c_diag[idx] << " rf: " << rf_diag[idx] << std::endl;
+				}
+
+				for (index_t i = i_begin + 2; i < i_end; i++)
+				{
+					index_t global_i = i;
+					real_t a_tmp = global_i == 0 ? 0 : a;
+					real_t b_tmp = (global_i == 0 || global_i == n - 1) ? b0 : b;
+					real_t c_tmp = global_i == n - 1 ? 0 : a;
+
+					auto idx = noarr::idx<'s', 'i'>(s, i);
+					auto prev_idx = noarr::idx<'s', 'i'>(s, i - 1);
+
+					a_diag[idx] = a_tmp;
+					b_diag[idx] = b_tmp;
+					c_diag[idx] = c_tmp;
+
+					rf_diag[idx] = a_diag[idx] / b_diag[prev_idx];
+
+					// if (get_thread_num() == 0)
+					// 	std::cout << dim << " " << i << " a: " << a_diag[idx] << " b: " << b_diag[idx]
+					// 			  << " c: " << c_diag[idx] << " rf: " << rf_diag[idx];
+
+					a_diag[idx] = -a_diag[prev_idx] * rf_diag[idx];
+					b_diag[idx] = b_diag[idx] - c_diag[prev_idx] * rf_diag[idx];
+
+					// if (get_thread_num() == 0)
+					// 	std::cout << " a': " << a_diag[idx] << " b': " << b_diag[idx] << " c: " << c_diag[idx]
+					// 			  << std::endl;
+				}
+
+				for (index_t i = i_end - 1; i >= i_end - 2; i--)
+				{
+					auto idx = noarr::idx<'s', 'i'>(s, i);
+					rb_diag[idx] = 0;
+				}
+
+				for (index_t i = i_end - 3; i >= i_begin; i--)
+				{
+					auto idx = noarr::idx<'s', 'i'>(s, i);
+					auto prev_idx = noarr::idx<'s', 'i'>(s, i + 1);
+
+					rb_diag[idx] = c_diag[idx] / b_diag[prev_idx];
+
+					if (i != i_begin)
+						a_diag[idx] = a_diag[idx] - a_diag[prev_idx] * rb_diag[idx];
+					else
+						b_diag[idx] = b_diag[idx] - a_diag[prev_idx] * rb_diag[idx];
+
+					c_diag[idx] = -c_diag[prev_idx] * rb_diag[idx];
+
+					// if (get_thread_num() == 0)
+					// 	std::cout << dim << " " << i << " a'': " << a_diag[idx] << " b': " << b_diag[idx]
+					// 			  << " c': " << c_diag[idx] << " rb: " << rb_diag[idx] << std::endl;
+				}
+
+				for (index_t i = i_begin + 1; i < i_end - 1; i++)
+				{
+					auto idx = noarr::idx<'s', 'i'>(s, i);
+
+					b_diag[idx] = 1 / b_diag[idx];
+
+					// if (get_thread_num() == 0)
+					// 	std::cout << dim << " " << i << " a'': " << a_diag[idx] << " b'': " << b_diag[idx]
+					// 			  << " c': " << c_diag[idx] << std::endl;
+				}
 			}
 
-			for (index_t i = 2; i < n; i++)
-			{
-				index_t global_i = i;
-				real_t a_tmp = global_i == 0 ? 0 : a;
-				real_t b_tmp = (global_i == 0 || global_i == n - 1) ? b0 : b;
-				real_t c_tmp = global_i == n - 1 ? 0 : a;
+			auto get_idx = [&](index_t equation_idx) {
+				auto idx = equation_idx / 2;
+				return group_block_offsets[idx] + (group_block_lengths[idx] - 1) * (equation_idx % 2);
+			};
 
-				auto idx = noarr::idx<'s', 'i'>(s, i);
-				auto prev_idx = noarr::idx<'s', 'i'>(s, i - 1);
-
-				a_diag[idx] = a_tmp;
-				b_diag[idx] = b_tmp;
-				c_diag[idx] = c_tmp;
-
-				rf_diag[idx] = a_diag[idx] / b_diag[prev_idx];
-				a_diag[idx] = -a_diag[prev_idx] * rf_diag[idx];
-				b_diag[idx] = b_diag[idx] - c_diag[prev_idx] * rf_diag[idx];
-			}
-
-			for (index_t i = n - 1; i >= n - 2; i--)
-			{
-				auto idx = noarr::idx<'s', 'i'>(s, i);
-				rb_diag[idx] = 0;
-			}
-
-			for (index_t i = n - 3; i >= 0; i--)
-			{
-				auto idx = noarr::idx<'s', 'i'>(s, i);
-				auto prev_idx = noarr::idx<'s', 'i'>(s, i + 1);
-
-				rb_diag[idx] = c_diag[idx] / b_diag[prev_idx];
-				a_diag[idx] = a_diag[idx] - a_diag[prev_idx] * rb_diag[idx];
-				c_diag[idx] = -c_diag[prev_idx] * rb_diag[idx];
-			}
-
-			for (index_t i = 0; i < n; i++)
-			{
-				b_diag.template at<'i', 's'>(i, s) = 1 / b_diag.template at<'i', 's'>(i, s);
-			}
-		}
-
-		auto get_idx = [&](index_t equation_idx) {
-			auto idx = equation_idx / 2;
-			return group_block_offsets[idx] + (group_block_lengths[idx] - 1) * (equation_idx % 2);
-		};
-
-		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-		{
 			index_t equations = group_block_lengths.size();
 
 			for (index_t equation_idx = 1; equation_idx < equations * 2; equation_idx++)
@@ -203,6 +234,10 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::precompute_values(
 
 				a_diag[idx] /= b_diag[prev_idx];
 				b_diag[idx] -= c_diag[prev_idx] * a_diag[idx];
+
+				// if (get_thread_num() == 0)
+				// 	std::cout << dim << " m " << i << " rf: " << a_diag[idx] << " b: " << b_diag[idx]
+				// 			  << " c: " << c_diag[idx] << std::endl;
 			}
 
 			for (index_t equation_idx = 0; equation_idx < equations * 2; equation_idx++)
@@ -211,7 +246,20 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::precompute_values(
 				auto idx = noarr::idx<'s', 'i'>(s, i);
 
 				b_diag[idx] = 1 / b_diag[idx];
+
+				// if (get_thread_num() == 0)
+				// 	std::cout << dim << " m " << i << " rf: " << a_diag[idx] << " b': " << b_diag[idx]
+				// 			  << " c: " << c_diag[idx] << std::endl;
 			}
+
+			// for (index_t i = 0; i < n; i++)
+			// {
+			// 	auto idx = noarr::idx<'s', 'i'>(s, i);
+			// 	if (get_thread_num() == 0)
+			// 		std::cout << dim << " f " << i << " a: " << a_diag[idx] << " b: " << b_diag[idx]
+			// 				  << " c: " << c_diag[idx] << " rf: " << rf_diag[idx] << " rb: " << rb_diag[idx]
+			// 				  << std::endl;
+			// }
 		}
 
 		index_t lane_id;
@@ -739,7 +787,6 @@ constexpr static void z_backward_blocked(const density_bag_t d, const real_t y_b
 				d.template at<'s', 'x', 'y', 'z'>(s, x, y, i) -=
 					c[state] * d.template at<'s', 'x', 'y', 'z'>(s, x, y, i + 1);
 
-
 				// #pragma omp critical
 				// 				std::cout << "b0: " << i << " " << y << " " << x << " " << d.template at<'s', 'x', 'y',
 				// 'z'>(s, x, y, i)
@@ -830,7 +877,7 @@ constexpr static void z_blocked_middle(density_bag_t d, const diag_bag_t rf, con
 	{
 		const index_t i = get_i(equation_idx);
 		const index_t next_i = get_i(equation_idx + 1);
-		const auto state = noarr::idx<'i'>(equation_idx);
+		const auto state = noarr::idx<'i'>(i);
 
 		for (index_t y = y_begin; y < y_end; y++)
 		{
@@ -1084,6 +1131,9 @@ constexpr static void y_backward_blocked_vectorized(const dens_bag_t d, const di
 			hn::Store(curr, t, &d_blocked.template at<'z', 'y'>(z, i));
 
 			prev = curr;
+
+			// #pragma omp critical
+			// 			std::cout << "b " << z << " " << i << " " << X * simd_length << " rb: " << rb[idx] << std::endl;
 		}
 	}
 }
@@ -1103,7 +1153,7 @@ constexpr static void y_blocked_middle(density_bag_t d, const diag_bag_t rf, con
 	const auto x_end = x_begin + block_size_x + ((tid < x_len % coop_size) ? 1 : 0);
 
 	// #pragma omp critical
-	// 	std::cout << "Thread " << tid << " s_begin: " << s << " block_begin: " << x_begin << " block_end: " << x_end
+	// 	std::cout << "Thread " << tid << " block_begin: " << x_begin << " block_end: " << x_end
 	// 			  << " block_size: " << block_size_x << std::endl;
 
 	auto get_i = [block_size, n, coop_size](index_t equation_idx) {
@@ -1126,8 +1176,7 @@ constexpr static void y_blocked_middle(density_bag_t d, const diag_bag_t rf, con
 				d.template at<'x', 'y', 'z'>(x, i, z) - rf[state] * d.template at<'x', 'y', 'z'>(x, prev_i, z);
 
 			// #pragma omp critical
-			// 			std::cout << "mf z: " << z << " y: " << i << " x: " << x << " a: " << a[state] << " cp: " <<
-			// c_tmp
+			// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
 			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
 		}
 	}
@@ -1141,7 +1190,7 @@ constexpr static void y_blocked_middle(density_bag_t d, const diag_bag_t rf, con
 	{
 		const index_t i = get_i(equation_idx);
 		const index_t next_i = get_i(equation_idx + 1);
-		const auto state = noarr::idx<'i'>(equation_idx);
+		const auto state = noarr::idx<'i'>(i);
 
 		for (index_t x = x_begin; x < x_end; x++)
 		{
@@ -1150,7 +1199,7 @@ constexpr static void y_blocked_middle(density_bag_t d, const diag_bag_t rf, con
 				* (d.template at<'x', 'y', 'z'>(x, i, z) - c[state] * d.template at<'x', 'y', 'z'>(x, next_i, z));
 
 			// #pragma omp critical
-			// 			std::cout << "mb z: " << z << " y: " << i << " x: " << x << " c: " << c[state]
+			// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
 			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
 		}
 	}
@@ -1306,6 +1355,11 @@ constexpr static void y_blocked_end_vectorized(const dens_bag_t d, const diag_ba
 			data = z_forward(data, d_blocked, i);
 
 			hn::Store(data, t, &d_blocked.template at<'z', 'y'>(z, i));
+
+			// #pragma omp critical
+			// 			std::cout << "f " << z << " " << i << " " << X * simd_length << " a: " << a[state] << " b: " <<
+			// b[state]
+			// 					  << " c: " << c[state] << std::endl;
 		}
 
 		begins = z_forward(begins, d_blocked, 0);
@@ -1741,6 +1795,9 @@ constexpr static real_t y_forward_inside_x_blocked(const density_bag_t d, const 
 
 	real_t prev = d.template at<'z', 'x', 'y'>(z, x, y - 1);
 
+	// #pragma omp critical
+	// 	std::cout << "f " << z << " " << y << " " << x << " rf: " << rf.template at<'i'>(y) << std::endl;
+
 	return data - rf.template at<'i'>(y) * prev;
 }
 
@@ -1952,17 +2009,6 @@ constexpr static void x_backward(const density_bag_t d, const diag_bag_t b, cons
 
 		d.template at<'z', 'x', 'y'>(z, i + 1, y) = prev;
 
-		// if constexpr (!y_blocked)
-		// 	y_forward_inside_x<false>(d, z, y, i + 1, prev, ay_s, b1y_s, y_data.c_tmp);
-		// else if constexpr (!blocked_alt)
-		// 	y_forward_inside_x_blocked(d, z, y, i + 1, prev, ay_s, b1y_s, y_data.begin, y_data.c);
-		// else if constexpr (!numa)
-		// 	y_forward_inside_x_blocked_alt(d, z, y, i + 1, prev, ay_s, b1y_s, y_data.begin, y_data.end, y_data.a,
-		// 								   y_data.c);
-		// else
-		// 	y_forward_inside_x_blocked_alt_numa(d, z, y, i + 1, prev, ay_s, b1y_s, y_data.begin, y_data.end,
-		// 										y_data.length, y_data.a, y_data.c);
-
 		prev = curr;
 	}
 
@@ -2144,7 +2190,11 @@ constexpr static void y_forward_inside_x_blocked_vectorized(const density_bag_t 
 {
 	const index_t y_begin = std::max(y_offset, 2);
 
-	vec_t prev = hn::Load(t, &(d.template at<'z', 'y', 'x'>(z, y_begin - 1, x)));
+	vec_t prev;
+	if (y_begin == y_offset)
+		prev = hn::Load(t, &(d.template at<'z', 'y', 'x'>(z, y_begin - 1, x)));
+	else
+		prev = rows[1];
 
 	for (index_t y = y_begin; y < y_offset + length; y++)
 	{
@@ -2153,6 +2203,9 @@ constexpr static void y_forward_inside_x_blocked_vectorized(const density_bag_t 
 
 		rows[v] = hn::MulAdd(hn::Set(t, -rf[idx]), prev, rows[v]);
 		prev = rows[v];
+
+		// #pragma omp critical
+		// 		std::cout << "f " << z << " " << y << " " << x << " rf: " << rf[idx] << std::endl;
 	}
 }
 
@@ -2634,9 +2687,8 @@ constexpr static void y_backward_vectorized(const dens_bag_t d, const diag_bag_t
 template <typename simd_t, typename simd_tag, typename index_t, typename density_bag_t, typename diag_bag_t,
 		  typename y_func_t>
 constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t, const index_t simd_length,
-											  const index_t y_begin, const index_t y_end, const index_t z,
-											  const diag_bag_t b, const diag_bag_t c, const diag_bag_t rf,
-											  y_func_t&& y_forward)
+											  const index_t y_len, const index_t z, const diag_bag_t b,
+											  const diag_bag_t c, const diag_bag_t rf, y_func_t&& y_forward)
 {
 	const index_t n = d | noarr::get_length<'x'>();
 
@@ -2645,7 +2697,7 @@ constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 	// vector registers that hold the to be transposed x*y plane
 	simd_t* rows = new simd_t[simd_length];
 
-	for (index_t y = y_begin; y < y_end; y += simd_length)
+	for (index_t y = 0; y < y_len; y += simd_length)
 	{
 		simd_t prev = hn::Zero(t);
 
@@ -2798,7 +2850,7 @@ constexpr static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densi
 					y_forward_inside_x_vectorized(d, rows, t, z, y_offset, x, simd_length, rfy_bag);
 				};
 
-				xy_fused_transpose_part<simd_t>(d, t, simd_length, 0, y_len_body, z, bx_bag, cx_bag, rfx_bag,
+				xy_fused_transpose_part<simd_t>(d, t, simd_length, y_len_body, z, bx_bag, cx_bag, rfx_bag,
 												std::move(y_forward));
 			}
 
@@ -2867,7 +2919,7 @@ constexpr static void solve_slice_xy_fused_transpose(real_t* __restrict__ densit
 				y_forward_inside_x_vectorized(d, rows, t, 0, y_offset, x, simd_length, rfy_bag);
 			};
 
-			xy_fused_transpose_part<simd_t>(d, t, simd_length, 0, y_len_body, 0, bx_bag, cx_bag, rfx_bag,
+			xy_fused_transpose_part<simd_t>(d, t, simd_length, y_len_body, 0, bx_bag, cx_bag, rfx_bag,
 											std::move(y_forward));
 		}
 
@@ -2919,13 +2971,14 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 		auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), cy);
 		auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), rfy);
 
-		auto slice = noarr::slice<'z'>(z_begin, z_end - z_begin);
-		auto az_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slice, az);
-		auto bz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slice, bz);
-		auto cz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slice, cz);
-		auto rfz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slice, rfz);
-		auto rbz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slice, rbz);
+		auto slicei = noarr::slice<'i'>(z_begin, z_end - z_begin);
+		auto az_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, az);
+		auto bz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, bz);
+		auto cz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, cz);
+		auto rfz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, rfz);
+		auto rbz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, rbz);
 
+		auto slice = noarr::slice<'z'>(z_begin, z_end - z_begin);
 		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slice, densities);
 
 		const index_t y_len = dens_l | noarr::get_length<'y'>();
@@ -2943,7 +2996,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 					y_forward_inside_x_vectorized(d, rows, t, z, y_offset, x, simd_length, rfy_bag);
 				};
 
-				xy_fused_transpose_part<simd_t>(d, t, simd_length, 0, y_len_body, z, bx_bag, cx_bag, rfx_bag,
+				xy_fused_transpose_part<simd_t>(d, t, simd_length, y_len_body, z, bx_bag, cx_bag, rfx_bag,
 												std::move(y_forward));
 			}
 
@@ -3202,14 +3255,15 @@ constexpr static void solve_slice_xy_fused_transpose_blocked(
 		auto cx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), cx);
 		auto rfx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), rfx);
 
-		auto slice = noarr::slice<'y'>(y_begin, y_end - y_begin);
-		auto ay_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slice, ay);
-		auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slice, by);
-		auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slice, cy);
-		auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slice, rfy);
-		auto rby_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slice, rby);
+		auto sliceyi = noarr::slice<'i'>(y_begin, y_end - y_begin);
+		auto ay_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, ay);
+		auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, by);
+		auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, cy);
+		auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, rfy);
+		auto rby_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, rby);
 
-		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slice, densities);
+		auto slicey = noarr::slice<'y'>(y_begin, y_end - y_begin);
+		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slicey, densities);
 
 		const index_t y_len = y_end - y_begin;
 
@@ -3223,7 +3277,7 @@ constexpr static void solve_slice_xy_fused_transpose_blocked(
 				y_forward_inside_x_blocked_vectorized(d, rows, t, 0, y_offset, x, simd_length, rfy_bag);
 			};
 
-			xy_fused_transpose_part<simd_t>(d, t, simd_length, 0, y_len_body, 0, bx_bag, cx_bag, rfx_bag,
+			xy_fused_transpose_part<simd_t>(d, t, simd_length, y_len_body, 0, bx_bag, cx_bag, rfx_bag,
 											std::move(y_forward));
 		}
 
@@ -3469,20 +3523,22 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 		auto cx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), cx);
 		auto rfx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), rfx);
 
+		auto sliceyi = noarr::slice<'i'>(y_begin, y_end - y_begin);
+		auto ay_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, ay);
+		auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, by);
+		auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, cy);
+		auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, rfy);
+		auto rby_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, rby);
+
+		auto slicezi = noarr::slice<'i'>(z_begin, z_end - z_begin);
+		auto az_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, az);
+		auto bz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, bz);
+		auto cz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, cz);
+		auto rfz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, rfz);
+		auto rbz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, rbz);
+
 		auto slicey = noarr::slice<'y'>(y_begin, y_end - y_begin);
-		auto ay_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slicey, ay);
-		auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slicey, by);
-		auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slicey, cy);
-		auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slicey, rfy);
-		auto rby_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ slicey, rby);
-
 		auto slicez = noarr::slice<'z'>(z_begin, z_end - z_begin);
-		auto az_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicez, az);
-		auto bz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicez, bz);
-		auto cz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicez, cz);
-		auto rfz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicez, rfz);
-		auto rbz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicez, rbz);
-
 		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slicey ^ slicez, densities);
 
 		const index_t y_len = y_end - y_begin;
@@ -3490,7 +3546,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 
 		auto blocked_dens_l = d.structure() ^ noarr::into_blocks_static<'y', 'b', 'y', 'v'>(simd_length);
 
-		for (index_t z = z_begin; z < z_end; z++)
+		for (index_t z = 0; z < z_len; z++)
 		{
 			{
 				auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
@@ -3500,7 +3556,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 					y_forward_inside_x_blocked_vectorized(d, rows, t, z, y_offset, x, simd_length, rfy_bag);
 				};
 
-				xy_fused_transpose_part<simd_t>(d, t, simd_length, 0, y_len_body, z, bx_bag, cx_bag, rfx_bag,
+				xy_fused_transpose_part<simd_t>(d, t, simd_length, y_len_body, z, bx_bag, cx_bag, rfx_bag,
 												std::move(y_forward));
 			}
 
@@ -3540,7 +3596,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 				return z_forward_inside_y_blocked_vectorized(d, data, t, y, z, rfz_bag);
 			};
 
-			y_blocked_end_vectorized<simd_t>(d, ay_bag, by_bag, cy_bag, t, 0, simd_length, y_len, std::move(z_forward));
+			y_blocked_end_vectorized<simd_t>(d, ay_bag, by_bag, cy_bag, t, z, simd_length, y_len, std::move(z_forward));
 		}
 
 		z_backward_blocked_vectorized<simd_t>(d, rbz_bag, t, simd_length, y_len, z_len);
