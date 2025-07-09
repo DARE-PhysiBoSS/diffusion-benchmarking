@@ -823,6 +823,88 @@ constexpr static void z_backward_blocked(const density_bag_t d, const real_t y_b
 	}
 }
 
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t, typename barrier_t>
+constexpr static void synchronize_z_blocked(real_t* __restrict__ densities, const real_t* __restrict__ rf_data,
+											const real_t* __restrict__ b_data, const real_t* __restrict__ c_data,
+											const density_layout_t dens_l, const diagonal_layout_t diag_l,
+											const index_t tid, const index_t coop_size, barrier_t& barrier)
+{
+	barrier.arrive();
+
+	const auto d = noarr::make_bag(dens_l, densities);
+	const auto rf = noarr::make_bag(diag_l, rf_data);
+	const auto b = noarr::make_bag(diag_l, b_data);
+	const auto c = noarr::make_bag(diag_l, c_data);
+
+	const index_t x_len = d | noarr::get_length<'x'>();
+	const index_t y_len = d | noarr::get_length<'y'>();
+	const index_t n = d | noarr::get_length<'z'>();
+
+	const index_t block_size = n / coop_size;
+
+	const index_t block_size_y = y_len / coop_size;
+	const index_t y_begin = tid * block_size_y + std::min(tid, y_len % coop_size);
+	const index_t y_end = y_begin + block_size_y + ((tid < y_len % coop_size) ? 1 : 0);
+
+	barrier.wait();
+
+	// #pragma omp critical
+	// 	std::cout << "Thread " << tid << " s_begin: " << s << " block_y_begin: " << y_begin << " block_y_end: " << y_end
+	// 			  << " block_size: " << block_size_y << std::endl;
+
+	auto get_i = [block_size, n, coop_size](index_t equation_idx) {
+		const index_t block_idx = equation_idx / 2;
+		const auto block_start = block_idx * block_size + std::min(block_idx, n % coop_size);
+		const auto actual_block_size = (block_idx < n % coop_size) ? block_size + 1 : block_size;
+		const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+		return i;
+	};
+
+	for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+	{
+		const index_t i = get_i(equation_idx);
+		const index_t prev_i = get_i(equation_idx - 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t x = 0; x < x_len; x++)
+			{
+				d.template at<'x', 'y', 'z'>(x, y, i) =
+					d.template at<'x', 'y', 'z'>(x, y, i) - rf[state] * d.template at<'x', 'y', 'z'>(x, y, prev_i);
+			}
+		}
+	}
+
+	for (index_t y = y_begin; y < y_end; y++)
+	{
+		for (index_t x = 0; x < x_len; x++)
+		{
+			d.template at<'x', 'y', 'z'>(x, y, n - 1) *= b.template at<'i'>(n - 1);
+		}
+	}
+
+	for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+	{
+		const index_t i = get_i(equation_idx);
+		const index_t next_i = get_i(equation_idx + 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t x = 0; x < x_len; x++)
+			{
+				d.template at<'x', 'y', 'z'>(x, y, i) =
+					b[state]
+					* (d.template at<'x', 'y', 'z'>(x, y, i) - c[state] * d.template at<'x', 'y', 'z'>(x, y, next_i));
+			}
+		}
+	}
+
+	barrier.arrive_and_wait();
+}
+
+
 template <typename index_t, typename density_bag_t, typename diag_bag_t>
 constexpr static void z_blocked_middle(density_bag_t d, const diag_bag_t rf, const diag_bag_t b, const diag_bag_t c,
 									   const index_t tid, const index_t coop_size, const index_t y_len)
@@ -990,6 +1072,100 @@ constexpr static void z_blocked_middle(density_layout_t thread_density_l, scratc
 	}
 }
 
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename thread_distribution_l, typename barrier_t>
+constexpr static void synchronize_z_blocked_distributed(
+	real_t** __restrict__ densities, const real_t* __restrict__ rf_data, const real_t* __restrict__ b_data,
+	const real_t* __restrict__ c_data, const density_layout_t dens_l, const diagonal_layout_t diag_l,
+	const thread_distribution_l dist_l, const index_t n, const index_t tid, const index_t coop_size, barrier_t& barrier)
+{
+	barrier.arrive();
+
+	const auto rf = noarr::make_bag(diag_l, rf_data);
+	const auto b = noarr::make_bag(diag_l, b_data);
+	const auto c = noarr::make_bag(diag_l, c_data);
+
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
+	const index_t y_len = dens_l | noarr::get_length<'y'>();
+
+	const index_t block_size = n / coop_size;
+
+	const index_t block_size_y = y_len / coop_size;
+	const index_t y_begin = tid * block_size_y + std::min(tid, y_len % coop_size);
+	const index_t y_end = y_begin + block_size_y + ((tid < y_len % coop_size) ? 1 : 0);
+
+	// #pragma omp critical
+	// 	std::cout << "Thread " << tid  << " block_begin: " << y_begin << " block_end: " << y_end
+	// 			  << " block_size: " << block_size_y << std::endl;
+
+	barrier.wait();
+
+	auto get_i = [block_size, n, coop_size, dens_l](index_t equation_idx) {
+		const index_t block_idx = equation_idx / 2;
+		const auto block_start = block_idx * block_size + std::min(block_idx, n % coop_size);
+		const auto actual_block_size = (block_idx < n % coop_size) ? block_size + 1 : block_size;
+		const auto offset = (equation_idx % 2) * (actual_block_size - 1);
+		const auto i = block_start + offset;
+		return std::make_tuple(i, block_idx,
+							   dens_l ^ noarr::set_length<'z'>(actual_block_size) ^ noarr::fix<'z'>(offset));
+	};
+
+	for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+	{
+		const auto [i, block_idx, curr_dens_l] = get_i(equation_idx);
+		const auto [prev_i, prev_block_idx, prev_dens_l] = get_i(equation_idx - 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		const auto d = noarr::make_bag(curr_dens_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
+		const auto prev_d = noarr::make_bag(prev_dens_l, dist_l | noarr::get_at<'z'>(densities, prev_block_idx));
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t x = 0; x < x_len; x++)
+			{
+				d.template at<'x', 'y'>(x, y) =
+					d.template at<'x', 'y'>(x, y) - rf[state] * prev_d.template at<'x', 'y'>(x, y);
+			}
+		}
+	}
+
+	{
+		const auto [i, block_idx, curr_dens_l] = get_i(coop_size * 2 - 1);
+
+		const auto d = noarr::make_bag(curr_dens_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t x = 0; x < x_len; x++)
+			{
+				d.template at<'x', 'y'>(x, y) *= b.template at<'i'>(i);
+			}
+		}
+	}
+
+	for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+	{
+		const auto [i, block_idx, curr_dens_l] = get_i(equation_idx);
+		const auto [next_i, next_block_idx, next_dens_l] = get_i(equation_idx + 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		const auto d = noarr::make_bag(curr_dens_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
+		const auto next_d = noarr::make_bag(next_dens_l, dist_l | noarr::get_at<'z'>(densities, next_block_idx));
+
+		for (index_t y = y_begin; y < y_end; y++)
+		{
+			for (index_t x = 0; x < x_len; x++)
+			{
+				d.template at<'x', 'y'>(x, y) =
+					b[state] * (d.template at<'x', 'y'>(x, y) - c[state] * next_d.template at<'x', 'y'>(x, y));
+			}
+		}
+	}
+
+	barrier.arrive_and_wait();
+}
+
 template <typename vec_t, typename index_t, typename simd_tag, typename dens_bag_t, typename diag_bag_t>
 constexpr static void z_blocked_end_vectorized(const dens_bag_t d, const diag_bag_t a, const diag_bag_t b,
 											   const diag_bag_t c, simd_tag t, const index_t simd_length,
@@ -1138,6 +1314,179 @@ constexpr static void y_backward_blocked_vectorized(const dens_bag_t d, const di
 	}
 }
 
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t, typename barrier_t>
+constexpr static void synchronize_y_blocked(real_t* __restrict__ densities, const real_t* __restrict__ rf_data,
+											const real_t* __restrict__ b_data, const real_t* __restrict__ c_data,
+											const density_layout_t dens_l, const diagonal_layout_t diag_l,
+											const index_t z, const index_t tid, const index_t coop_size,
+											barrier_t& barrier)
+{
+	barrier.arrive();
+
+	const auto d = noarr::make_bag(dens_l, densities);
+	const auto rf = noarr::make_bag(diag_l, rf_data);
+	const auto b = noarr::make_bag(diag_l, b_data);
+	const auto c = noarr::make_bag(diag_l, c_data);
+
+	const index_t x_len = d | noarr::get_length<'x'>();
+	const index_t n = d | noarr::get_length<'y'>();
+
+	const index_t block_size = n / coop_size;
+
+	const index_t block_size_x = x_len / coop_size;
+	const auto x_begin = tid * block_size_x + std::min(tid, x_len % coop_size);
+	const auto x_end = x_begin + block_size_x + ((tid < x_len % coop_size) ? 1 : 0);
+
+	// #pragma omp critical
+	// 	std::cout << "Thread " << tid << " block_begin: " << x_begin << " block_end: " << x_end
+	// 			  << " block_size: " << block_size_x << std::endl;
+
+	barrier.wait();
+
+	auto get_i = [block_size, n, coop_size](index_t equation_idx) {
+		const index_t block_idx = equation_idx / 2;
+		const auto block_start = block_idx * block_size + std::min(block_idx, n % coop_size);
+		const auto actual_block_size = (block_idx < n % coop_size) ? block_size + 1 : block_size;
+		const auto i = block_start + (equation_idx % 2) * (actual_block_size - 1);
+		return i;
+	};
+
+	for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+	{
+		const index_t i = get_i(equation_idx);
+		const index_t prev_i = get_i(equation_idx - 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		for (index_t x = x_begin; x < x_end; x++)
+		{
+			d.template at<'x', 'y', 'z'>(x, i, z) =
+				d.template at<'x', 'y', 'z'>(x, i, z) - rf[state] * d.template at<'x', 'y', 'z'>(x, prev_i, z);
+
+			// #pragma omp critical
+			// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
+		}
+	}
+
+	for (index_t x = x_begin; x < x_end; x++)
+	{
+		d.template at<'x', 'y', 'z'>(x, n - 1, z) *= b.template at<'i'>(n - 1);
+	}
+
+	for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+	{
+		const index_t i = get_i(equation_idx);
+		const index_t next_i = get_i(equation_idx + 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		for (index_t x = x_begin; x < x_end; x++)
+		{
+			d.template at<'x', 'y', 'z'>(x, i, z) =
+				b[state]
+				* (d.template at<'x', 'y', 'z'>(x, i, z) - c[state] * d.template at<'x', 'y', 'z'>(x, next_i, z));
+
+			// #pragma omp critical
+			// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
+		}
+	}
+
+	barrier.arrive_and_wait();
+}
+
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename thread_distribution_l, typename barrier_t>
+constexpr static void synchronize_y_blocked_distributed(
+	real_t** __restrict__ densities, const real_t* __restrict__ rf_data, const real_t* __restrict__ b_data,
+	const real_t* __restrict__ c_data, const density_layout_t dens_l, const diagonal_layout_t diag_l,
+	const thread_distribution_l dist_l, const index_t n, const index_t z, const index_t tid, const index_t coop_size,
+	barrier_t& barrier)
+{
+	barrier.arrive();
+
+	const auto rf = noarr::make_bag(diag_l, rf_data);
+	const auto b = noarr::make_bag(diag_l, b_data);
+	const auto c = noarr::make_bag(diag_l, c_data);
+
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
+
+	const index_t block_size = n / coop_size;
+
+	const index_t block_size_x = x_len / coop_size;
+	const auto x_begin = tid * block_size_x + std::min(tid, x_len % coop_size);
+	const auto x_end = x_begin + block_size_x + ((tid < x_len % coop_size) ? 1 : 0);
+
+	// #pragma omp critical
+	// 	std::cout << "Thread " << tid << " block_begin: " << x_begin << " block_end: " << x_end
+	// 			  << " block_size: " << block_size_x << std::endl;
+
+	barrier.wait();
+
+	auto get_i = [block_size, n, coop_size, dens_l](index_t equation_idx) {
+		const index_t block_idx = equation_idx / 2;
+		const auto block_start = block_idx * block_size + std::min(block_idx, n % coop_size);
+		const auto actual_block_size = (block_idx < n % coop_size) ? block_size + 1 : block_size;
+		const auto offset = (equation_idx % 2) * (actual_block_size - 1);
+		const auto i = block_start + offset;
+		return std::make_tuple(i, block_idx,
+							   dens_l ^ noarr::set_length<'y'>(actual_block_size) ^ noarr::fix<'y'>(offset));
+	};
+
+	for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+	{
+		const auto [i, block_idx, curr_dens_l] = get_i(equation_idx);
+		const auto [prev_i, prev_block_idx, prev_dens_l] = get_i(equation_idx - 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		const auto d = noarr::make_bag(curr_dens_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
+		const auto prev_d = noarr::make_bag(prev_dens_l, dist_l | noarr::get_at<'y'>(densities, prev_block_idx));
+
+		for (index_t x = x_begin; x < x_end; x++)
+		{
+			d.template at<'x', 'z'>(x, z) =
+				d.template at<'x', 'z'>(x, z) - rf[state] * prev_d.template at<'x', 'z'>(x, z);
+
+			// #pragma omp critical
+			// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
+		}
+	}
+
+	{
+		const auto [i, block_idx, curr_dens_l] = get_i(coop_size * 2 - 1);
+
+		const auto d = noarr::make_bag(curr_dens_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
+
+		for (index_t x = x_begin; x < x_end; x++)
+		{
+			d.template at<'x', 'z'>(x, z) *= b.template at<'i'>(i);
+		}
+	}
+
+	for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+	{
+		const auto [i, block_idx, curr_dens_l] = get_i(equation_idx);
+		const auto [next_i, next_block_idx, next_dens_l] = get_i(equation_idx + 1);
+		const auto state = noarr::idx<'i'>(i);
+
+		const auto d = noarr::make_bag(curr_dens_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
+		const auto next_d = noarr::make_bag(next_dens_l, dist_l | noarr::get_at<'y'>(densities, next_block_idx));
+
+		for (index_t x = x_begin; x < x_end; x++)
+		{
+			d.template at<'x', 'z'>(x, z) =
+				b[state] * (d.template at<'x', 'z'>(x, z) - c[state] * next_d.template at<'x', 'z'>(x, z));
+
+			// #pragma omp critical
+			// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
+		}
+	}
+
+	barrier.arrive_and_wait();
+}
 
 template <typename index_t, typename density_bag_t, typename diag_bag_t>
 constexpr static void y_blocked_middle(density_bag_t d, const diag_bag_t rf, const diag_bag_t b, const diag_bag_t c,
@@ -2946,7 +3295,8 @@ constexpr static void solve_slice_xy_fused_transpose(real_t* __restrict__ densit
 }
 
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t, typename barrier_t>
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename sync_func_t>
 constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	real_t* __restrict__ densities, const real_t* __restrict__ bx, const real_t* __restrict__ cx,
 	const real_t* __restrict__ rfx, const real_t* __restrict__ by, const real_t* __restrict__ cy,
@@ -2954,7 +3304,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	const real_t* __restrict__ cz, const real_t* __restrict__ rfz, const real_t* __restrict__ rbz,
 	const density_layout_t dens_l, const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l,
 	const diagonal_layout_t diagz_l, const index_t s_begin, const index_t s_end, const index_t z_begin,
-	const index_t z_end, const index_t tid, const index_t coop_size, barrier_t& barrier)
+	const index_t z_end, sync_func_t&& synchronize_blocked_z)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -2978,8 +3328,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 		auto rfz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, rfz);
 		auto rbz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicei, rbz);
 
-		auto slice = noarr::slice<'z'>(z_begin, z_end - z_begin);
-		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slice, densities);
+		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
 
 		const index_t y_len = dens_l | noarr::get_length<'y'>();
 		const index_t z_len = z_end - z_begin;
@@ -3026,17 +3375,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 
 		z_backward_blocked_vectorized<simd_t>(d, rbz_bag, t, simd_length, y_len, z_len);
 
-		barrier.arrive_and_wait();
-		{
-			const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
-			auto az_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), az);
-			auto bz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), bz);
-			auto cz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), cz);
-
-			z_blocked_middle(d, az_bag, bz_bag, cz_bag, tid, coop_size, y_len);
-		}
-
-		barrier.arrive_and_wait();
+		synchronize_blocked_z(s);
 
 		z_blocked_end_vectorized<simd_t>(d, az_bag, bz_bag, cz_bag, t, simd_length, y_len, z_len);
 	}
@@ -3235,14 +3574,15 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked_alt(
 }
 
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t, typename barrier_t>
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename sync_func_t>
 constexpr static void solve_slice_xy_fused_transpose_blocked(
 	real_t* __restrict__ densities, const real_t* __restrict__ bx, const real_t* __restrict__ cx,
 	const real_t* __restrict__ rfx, const real_t* __restrict__ ay, const real_t* __restrict__ by,
 	const real_t* __restrict__ cy, const real_t* __restrict__ rfy, const real_t* __restrict__ rby,
 	const density_layout_t dens_l, const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l,
-	const index_t s_begin, const index_t s_end, const index_t y_begin, const index_t y_end, const index_t tid,
-	const index_t coop_size, barrier_t& barrier)
+	const index_t s_begin, const index_t s_end, const index_t y_begin, const index_t y_end,
+	sync_func_t&& synchronize_blocked_y)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -3262,8 +3602,7 @@ constexpr static void solve_slice_xy_fused_transpose_blocked(
 		auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, rfy);
 		auto rby_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s) ^ sliceyi, rby);
 
-		auto slicey = noarr::slice<'y'>(y_begin, y_end - y_begin);
-		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slicey, densities);
+		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
 
 		const index_t y_len = y_end - y_begin;
 
@@ -3300,18 +3639,7 @@ constexpr static void solve_slice_xy_fused_transpose_blocked(
 
 		y_backward_blocked_vectorized<simd_t>(d, rby_bag, t, 0, simd_length, y_len);
 
-		barrier.arrive_and_wait();
-
-		{
-			const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
-			auto ay_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), ay);
-			auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), by);
-			auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), cy);
-
-			y_blocked_middle(d, ay_bag, by_bag, cy_bag, 0, tid, coop_size);
-		}
-
-		barrier.arrive_and_wait();
+		synchronize_blocked_y(0, s);
 
 		auto empty_f = [](auto data, auto, auto) { return data; };
 		y_blocked_end_vectorized<simd_t>(d, ay_bag, by_bag, cy_bag, t, 0, simd_length, y_len, std::move(empty_f));
@@ -3500,7 +3828,8 @@ constexpr static void solve_slice_xy_fused_transpose_blocked_alt(
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t, typename barrier_t>
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename sync_func_y_t, typename sync_func_z_t>
 constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	real_t* __restrict__ densities, const real_t* __restrict__ bx, const real_t* __restrict__ cx,
 	const real_t* __restrict__ rfx, const real_t* __restrict__ ay, const real_t* __restrict__ by,
@@ -3509,8 +3838,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 	const real_t* __restrict__ rfz, const real_t* __restrict__ rbz, const density_layout_t dens_l,
 	const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l, const diagonal_layout_t diagz_l,
 	const index_t s_begin, const index_t s_end, const index_t y_begin, const index_t y_end, const index_t z_begin,
-	const index_t z_end, const index_t tid_y, const index_t coop_size_y, const index_t tid_z, const index_t coop_size_z,
-	barrier_t& barrier_y, barrier_t& barrier_z)
+	const index_t z_end, sync_func_y_t&& synchronize_blocked_y, sync_func_z_t&& synchronize_blocked_z)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag t;
@@ -3537,9 +3865,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 		auto rfz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, rfz);
 		auto rbz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s) ^ slicezi, rbz);
 
-		auto slicey = noarr::slice<'y'>(y_begin, y_end - y_begin);
-		auto slicez = noarr::slice<'z'>(z_begin, z_end - z_begin);
-		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slicey ^ slicez, densities);
+		const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
 
 		const index_t y_len = y_end - y_begin;
 		const index_t z_len = z_end - z_begin;
@@ -3579,18 +3905,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 
 			y_backward_blocked_vectorized<simd_t>(d, rby_bag, t, z, simd_length, y_len);
 
-			barrier_y.arrive_and_wait();
-
-			{
-				const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slicez, densities);
-				auto ay_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), ay);
-				auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), by);
-				auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), cy);
-
-				y_blocked_middle(d, ay_bag, by_bag, cy_bag, z, tid_y, coop_size_y);
-			}
-
-			barrier_y.arrive_and_wait();
+			synchronize_blocked_y(z, s);
 
 			auto z_forward = [t, z, rfz_bag](simd_t data, auto d, index_t y) {
 				return z_forward_inside_y_blocked_vectorized(d, data, t, y, z, rfz_bag);
@@ -3601,18 +3916,7 @@ constexpr static void solve_slice_xyz_fused_transpose_blocked(
 
 		z_backward_blocked_vectorized<simd_t>(d, rbz_bag, t, simd_length, y_len, z_len);
 
-		barrier_z.arrive_and_wait();
-
-		{
-			const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ slicey, densities);
-			auto az_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), az);
-			auto bz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), bz);
-			auto cz_bag = noarr::make_bag(diagz_l ^ noarr::fix<'s'>(s), cz);
-
-			z_blocked_middle(d, az_bag, bz_bag, cz_bag, tid_z, coop_size_z, y_len);
-		}
-
-		barrier_z.arrive_and_wait();
+		synchronize_blocked_z(s);
 
 		z_blocked_end_vectorized<simd_t>(d, az_bag, bz_bag, cz_bag, t, simd_length, y_len, z_len);
 	}
@@ -3970,8 +4274,6 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_2d()
 	{
 		perf_counter counter("lstmfpai");
 
-		const auto thread_num = get_thread_num();
-
 		const thread_id_t<index_t> tid = get_thread_id();
 
 		const auto block_y_begin = group_block_offsetsy_[tid.y];
@@ -3984,9 +4286,9 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_2d()
 
 		const index_t group_size = cores_division_[1];
 
-		for (index_t s = block_s_begin; s < block_s_end; s += substrate_step_)
+		for (index_t s = 0; s < group_block_lengthss_[tid.group]; s += substrate_step_)
 		{
-			auto s_end = std::min(s + substrate_step_, this->problem_.substrates_count);
+			auto s_end = std::min(s + substrate_step_, group_block_lengthss_[tid.group]);
 
 			// #pragma omp critical
 			// 			std::cout << "Thread " << get_thread_num() << " s_begin: " << s << " s_end: " << s_end
@@ -3995,33 +4297,60 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_2d()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				// if (use_thread_distributed_allocation_)
-				// {
-				// 	auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout()
-				// 				  ^ noarr::fix<'z', 'g'>(tid.z, tid.group);
+				if (use_thread_distributed_allocation_)
+				{
+					auto s_slice = noarr::slice<'s'>(block_s_begin, block_s_end - block_s_begin);
 
-				// 	auto dens_l = get_blocked_substrate_layout<'y'>(this->problem_.nx, group_block_lengthsy_[tid.y],
-				// 													group_block_lengthsz_[tid.z],
-				// 													group_block_lengthss_[tid.group]);
+					const auto thread_num = get_thread_num();
 
-				// 	auto scratch_l = noarr::scalar<real_t>() ^ noarr::vector<'i'>()
-				// 					 ^ noarr::vector<'s'>(group_block_lengthss_[tid.group]);
+					auto diag_x = get_diagonal_layout(this->problem_, this->problem_.nx) ^ s_slice;
+					auto diag_y = get_diagonal_layout(this->problem_, this->problem_.ny) ^ s_slice;
 
-				// 	solve_slice_xy_fused_transpose_blocked_alt<index_t>(
-				// 		dist_l, thread_substrate_array_.get(), thread_ax_[thread_num], thread_b1x_[thread_num],
-				// 		thread_cx_[thread_num], thread_ay_[thread_num], thread_b1y_[thread_num],
-				// 		thread_a_scratchy_.get(), thread_c_scratchy_.get(), thread_dim_scratch_.get(), dens_l,
-				// 		get_diagonal_layout(this->problem_, this->problem_.nx), scratch_l,
-				// 		get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end, block_y_begin,
-				// 		block_y_end, this->problem_.ny, tid.y, group_size, barrier);
-				// }
-				// else if (!use_alt_blocked_)
-				solve_slice_xy_fused_transpose_blocked(this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0],
-													   thread_ay_[0], thread_by_[0], thread_cy_[0], thread_rf_y_[0],
-													   thread_rb_y_[0], get_substrates_layout<3>(),
-													   get_diagonal_layout(this->problem_, this->problem_.nx),
-													   get_diagonal_layout(this->problem_, this->problem_.ny), s, s_end,
-													   block_y_begin, block_y_end, tid.y, group_size, barrier);
+					auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout()
+								  ^ noarr::fix<'z', 'g'>(tid.z, tid.group);
+
+					auto dens_l = get_blocked_substrate_layout<'y'>(this->problem_.nx, group_block_lengthsy_[tid.y],
+																	group_block_lengthsz_[tid.z],
+																	group_block_lengthss_[tid.group]);
+
+					auto sync_y = [densities = thread_substrate_array_.get(), rf_data = thread_ay_[thread_num],
+								   b_data = thread_by_[thread_num], c_data = thread_cy_[thread_num], dens_l, diag_y,
+								   dist_l, n = this->problem_.ny, tid = tid.y, group_size,
+								   &barrier](index_t z, index_t s) {
+						synchronize_y_blocked_distributed(densities, rf_data, b_data, c_data,
+														  dens_l ^ noarr::fix<'s'>(s), diag_y ^ noarr::fix<'s'>(s),
+														  dist_l, n, z, tid, group_size, barrier);
+					};
+
+					auto current_densities = dist_l | noarr::get_at<'y'>(thread_substrate_array_.get(), tid.y);
+
+					solve_slice_xy_fused_transpose_blocked(
+						current_densities, thread_bx_[thread_num], thread_cx_[thread_num], thread_rf_x_[thread_num],
+						thread_ay_[thread_num], thread_by_[thread_num], thread_cy_[thread_num],
+						thread_rf_y_[thread_num], thread_rb_y_[thread_num],
+						dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin), diag_x, diag_y, s, s_end,
+						block_y_begin, block_y_end, std::move(sync_y));
+				}
+				else
+				{
+					auto diag_x = get_diagonal_layout(this->problem_, this->problem_.nx);
+					auto diag_y = get_diagonal_layout(this->problem_, this->problem_.ny);
+
+					auto dens_l = get_substrates_layout<3>();
+
+					auto sync_y = [densities = this->substrates_, rf_data = thread_ay_[0], b_data = thread_by_[0],
+								   c_data = thread_cy_[0], dens_l, diag_y, tid = tid.y, group_size,
+								   &barrier](index_t z, index_t s) {
+						synchronize_y_blocked(densities, rf_data, b_data, c_data, dens_l ^ noarr::fix<'s'>(s),
+											  diag_y ^ noarr::fix<'s'>(s), z, tid, group_size, barrier);
+					};
+
+					solve_slice_xy_fused_transpose_blocked(
+						this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0], thread_ay_[0], thread_by_[0],
+						thread_cy_[0], thread_rf_y_[0], thread_rb_y_[0],
+						dens_l ^ noarr::slice<'y'>(block_y_begin, block_y_end - block_y_begin), diag_x, diag_y,
+						block_s_begin + s, block_s_begin + s_end, block_y_begin, block_y_end, std::move(sync_y));
+				}
 				// else
 				// solve_slice_xy_fused_transpose_blocked_alt<index_t>(
 				// 	this->substrates_, ax_, b1x_, cx_, ay_, b1y_, a_scratchy_, c_scratchy_, dim_scratch_,
@@ -4045,8 +4374,6 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_z()
 	{
 		perf_counter counter("lstmfpai");
 
-		const auto thread_num = get_thread_num();
-
 		const thread_id_t<index_t> tid = get_thread_id();
 
 		const auto block_z_begin = group_block_offsetsz_[tid.z];
@@ -4059,9 +4386,9 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_z()
 		const auto block_s_begin = group_block_offsetss_[tid.group];
 		const auto block_s_end = block_s_begin + group_block_lengthss_[tid.group];
 
-		for (index_t s = block_s_begin; s < block_s_end; s += substrate_step_)
+		for (index_t s = 0; s < group_block_lengthss_[tid.group]; s += substrate_step_)
 		{
-			auto s_end = std::min(s + substrate_step_, this->problem_.substrates_count);
+			auto s_end = std::min(s + substrate_step_, group_block_lengthss_[tid.group]);
 
 			// #pragma omp critical
 			// 			std::cout << "Thread " << get_thread_num() << " [0, " << tid.y << ", " << tid.z << "]
@@ -4075,38 +4402,63 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_z()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				// if (use_thread_distributed_allocation_)
-				// {
-				// 	auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout()
-				// 				  ^ noarr::fix<'y', 'g'>(tid.y, tid.group);
+				if (use_thread_distributed_allocation_)
+				{
+					auto s_slice = noarr::slice<'s'>(block_s_begin, block_s_end - block_s_begin);
 
-				// 	auto dens_l = get_blocked_substrate_layout<'z'>(this->problem_.nx, group_block_lengthsy_[tid.y],
-				// 													group_block_lengthsz_[tid.z],
-				// 													group_block_lengthss_[tid.group]);
+					const auto thread_num = get_thread_num();
 
-				// 	auto scratch_l = noarr::scalar<real_t>() ^ noarr::vector<'i'>()
-				// 					 ^ noarr::vector<'s'>(group_block_lengthss_[tid.group]);
+					auto diag_x = get_diagonal_layout(this->problem_, this->problem_.nx) ^ s_slice;
+					auto diag_y = get_diagonal_layout(this->problem_, this->problem_.ny) ^ s_slice;
+					auto diag_z = get_diagonal_layout(this->problem_, this->problem_.nz) ^ s_slice;
 
-				// 	solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
-				// 		dist_l, thread_substrate_array_.get(), thread_ax_[thread_num], thread_b1x_[thread_num],
-				// 		thread_cx_[thread_num], thread_ay_[thread_num], thread_b1y_[thread_num], thread_cy_[thread_num],
-				// 		thread_az_[thread_num], thread_b1z_[thread_num], thread_a_scratchz_.get(),
-				// 		thread_c_scratchz_.get(), thread_dim_scratch_.get(), dens_l,
-				// 		get_diagonal_layout(this->problem_, this->problem_.nx),
-				// 		get_diagonal_layout(this->problem_, this->problem_.ny), scratch_l,
-				// 		get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end, block_z_begin,
-				// 		block_z_end, this->problem_.nz, tid.z, cores_division_[2], barrier_z);
-				// }
-				// else
-				// {
-				// 	if (!use_alt_blocked_)
-				solve_slice_xyz_fused_transpose_blocked(
-					this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0], thread_by_[0], thread_cy_[0],
-					thread_rf_y_[0], thread_az_[0], thread_bz_[0], thread_cz_[0], thread_rf_z_[0], thread_rb_z_[0],
-					get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
-					get_diagonal_layout(this->problem_, this->problem_.ny),
-					get_diagonal_layout(this->problem_, this->problem_.nz), s, s_end, block_z_begin, block_z_end, tid.z,
-					cores_division_[2], barrier_z);
+					auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout()
+								  ^ noarr::fix<'y', 'g'>(tid.y, tid.group);
+
+					auto dens_l = get_blocked_substrate_layout<'z'>(this->problem_.nx, group_block_lengthsy_[tid.y],
+																	group_block_lengthsz_[tid.z],
+																	group_block_lengthss_[tid.group]);
+
+					auto sync_z = [densities = thread_substrate_array_.get(), rf_data = thread_az_[thread_num],
+								   b_data = thread_bz_[thread_num], c_data = thread_cz_[thread_num], dens_l,
+								   diag_l = diag_z, dist_l, n = this->problem_.nz, tid = tid.z,
+								   group_size = cores_division_[2], &barrier = barrier_z](index_t s) {
+						synchronize_z_blocked_distributed(densities, rf_data, b_data, c_data,
+														  dens_l ^ noarr::fix<'s'>(s), diag_l ^ noarr::fix<'s'>(s),
+														  dist_l, n, tid, group_size, barrier);
+					};
+
+					auto current_densities = dist_l | noarr::get_at<'z'>(thread_substrate_array_.get(), tid.z);
+
+					solve_slice_xyz_fused_transpose_blocked(
+						current_densities, thread_bx_[thread_num], thread_cx_[thread_num], thread_rf_x_[thread_num],
+						thread_by_[thread_num], thread_cy_[thread_num], thread_rf_y_[thread_num],
+						thread_az_[thread_num], thread_bz_[thread_num], thread_cz_[thread_num],
+						thread_rf_z_[thread_num], thread_rb_z_[thread_num],
+						dens_l ^ noarr::set_length<'z'>(block_z_end - block_z_begin), diag_x, diag_y, diag_z, s, s_end,
+						block_z_begin, block_z_end, std::move(sync_z));
+				}
+				else
+				{
+					auto diag_x = get_diagonal_layout(this->problem_, this->problem_.nx);
+					auto diag_y = get_diagonal_layout(this->problem_, this->problem_.ny);
+					auto diag_z = get_diagonal_layout(this->problem_, this->problem_.nz);
+
+					auto dens_l = get_substrates_layout<3>();
+
+					auto sync_z = [densities = this->substrates_, rf_data = thread_az_[0], b_data = thread_bz_[0],
+								   c_data = thread_cz_[0], dens_l, diag_l = diag_z, tid = tid.z,
+								   group_size = cores_division_[2], &barrier = barrier_z](index_t s) {
+						synchronize_z_blocked(densities, rf_data, b_data, c_data, dens_l ^ noarr::fix<'s'>(s),
+											  diag_l ^ noarr::fix<'s'>(s), tid, group_size, barrier);
+					};
+
+					solve_slice_xyz_fused_transpose_blocked(
+						this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0], thread_by_[0], thread_cy_[0],
+						thread_rf_y_[0], thread_az_[0], thread_bz_[0], thread_cz_[0], thread_rf_z_[0], thread_rb_z_[0],
+						dens_l ^ noarr::slice<'z'>(block_z_begin, block_z_end - block_z_begin), diag_x, diag_y, diag_z,
+						block_s_begin + s, block_s_begin + s_end, block_z_begin, block_z_end, std::move(sync_z));
+				}
 				// 	else
 				// 		solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
 				// 			this->substrates_, ax_, b1x_, cx_, ay_, b1y_, cy_, az_, b1z_, a_scratchz_, c_scratchz_,
@@ -4138,8 +4490,6 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_yz()
 	{
 		perf_counter counter("lstmfpai");
 
-		const auto thread_num = get_thread_num();
-
 		const thread_id_t<index_t> tid = get_thread_id();
 
 		const auto block_y_begin = group_block_offsetsy_[tid.y];
@@ -4161,9 +4511,9 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_yz()
 		const auto block_s_begin = group_block_offsetss_[tid.group];
 		const auto block_s_end = block_s_begin + group_block_lengthss_[tid.group];
 
-		for (index_t s = block_s_begin; s < block_s_end; s += substrate_step_)
+		for (index_t s = 0; s < group_block_lengthss_[tid.group]; s += substrate_step_)
 		{
-			auto s_end = std::min(s + substrate_step_, this->problem_.substrates_count);
+			auto s_end = std::min(s + substrate_step_, group_block_lengthss_[tid.group]);
 
 			// #pragma omp critical
 			// 			std::cout << "Thread " << get_thread_num() << " [0, " << tid.y << ", " << tid.z << "]
@@ -4178,40 +4528,92 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_yz()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				// if (use_thread_distributed_allocation_)
-				// {
-				// 	auto dist_l =
-				// 		noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
+				if (use_thread_distributed_allocation_)
+				{
+					auto s_slice = noarr::slice<'s'>(block_s_begin, block_s_end - block_s_begin);
 
-				// 	auto dens_l = get_blocked_substrate_layout<'*'>(this->problem_.nx, group_block_lengthsy_[tid.y],
-				// 													group_block_lengthsz_[tid.z],
-				// 													group_block_lengthss_[tid.group]);
+					const auto thread_num = get_thread_num();
 
-				// 	auto scratch_l = noarr::scalar<real_t>() ^ noarr::vector<'i'>()
-				// 					 ^ noarr::vector<'s'>(group_block_lengthss_[tid.group]);
+					auto diag_x = get_diagonal_layout(this->problem_, this->problem_.nx) ^ s_slice;
+					auto diag_y = get_diagonal_layout(this->problem_, this->problem_.ny) ^ s_slice;
+					auto diag_z = get_diagonal_layout(this->problem_, this->problem_.nz) ^ s_slice;
 
-				// 	solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
-				// 		dist_l, thread_substrate_array_.get(), thread_ax_[thread_num], thread_b1x_[thread_num],
-				// 		thread_cx_[thread_num], thread_ay_[thread_num], thread_b1y_[thread_num], thread_az_[thread_num],
-				// 		thread_b1z_[thread_num], thread_a_scratchy_.get(), thread_c_scratchy_.get(),
-				// 		thread_a_scratchz_.get(), thread_c_scratchz_.get(), thread_dim_scratch_.get(), dens_l,
-				// 		get_diagonal_layout(this->problem_, this->problem_.nx), scratch_l,
-				// 		get_dim_scratch_layout() ^ noarr::fix<'t'>(0), block_s_begin, s, s_end, block_y_begin,
-				// 		block_y_end, this->problem_.ny, block_z_begin, block_z_end, this->problem_.nz, tid.y,
-				// 		cores_division_[1], tid.z, cores_division_[2], barrier_y, barrier_z);
-				// }
-				// else
-				// {
-				// 	if (!use_alt_blocked_)
-				solve_slice_xyz_fused_transpose_blocked<index_t>(
-					this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0], thread_ay_[0], thread_by_[0],
-					thread_cy_[0], thread_rf_y_[0], thread_rb_y_[0], thread_az_[0], thread_bz_[0], thread_cz_[0],
-					thread_rf_z_[0], thread_rb_z_[0], get_substrates_layout<3>(),
-					get_diagonal_layout(this->problem_, this->problem_.nx),
-					get_diagonal_layout(this->problem_, this->problem_.ny),
-					get_diagonal_layout(this->problem_, this->problem_.nz), s, s_end, block_y_begin, block_y_end,
-					block_z_begin, block_z_end, tid.y, cores_division_[1], tid.z, cores_division_[2], barrier_y,
-					barrier_z);
+					auto dist_l =
+						noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
+
+					auto dens_l = get_blocked_substrate_layout<'*'>(this->problem_.nx, group_block_lengthsy_[tid.y],
+																	group_block_lengthsz_[tid.z],
+																	group_block_lengthss_[tid.group]);
+
+					auto sync_y = [densities = thread_substrate_array_.get(), rf_data = thread_ay_[thread_num],
+								   b_data = thread_by_[thread_num], c_data = thread_cy_[thread_num],
+								   dens_l = dens_l ^ noarr::set_length<'z'>(block_z_end - block_z_begin), diag_y,
+								   dist_l = dist_l ^ noarr::fix<'z'>(tid.z), n = this->problem_.ny, tid = tid.y,
+								   group_size = cores_division_[1], &barrier = barrier_y](index_t z, index_t s) {
+						synchronize_y_blocked_distributed(densities, rf_data, b_data, c_data,
+														  dens_l ^ noarr::fix<'s'>(s), diag_y ^ noarr::fix<'s'>(s),
+														  dist_l, n, z, tid, group_size, barrier);
+					};
+
+					auto sync_z = [densities = thread_substrate_array_.get(), rf_data = thread_az_[thread_num],
+								   b_data = thread_bz_[thread_num], c_data = thread_cz_[thread_num],
+								   dens_l = dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin),
+								   diag_l = diag_z, dist_l = dist_l ^ noarr::fix<'y'>(tid.y), n = this->problem_.nz,
+								   tid = tid.z, group_size = cores_division_[2], &barrier = barrier_z](index_t s) {
+						synchronize_z_blocked_distributed(densities, rf_data, b_data, c_data,
+														  dens_l ^ noarr::fix<'s'>(s), diag_l ^ noarr::fix<'s'>(s),
+														  dist_l, n, tid, group_size, barrier);
+					};
+
+					auto current_densities =
+						dist_l | noarr::get_at<'y', 'z'>(thread_substrate_array_.get(), tid.y, tid.z);
+
+					solve_slice_xyz_fused_transpose_blocked(
+						current_densities, thread_bx_[thread_num], thread_cx_[thread_num], thread_rf_x_[thread_num],
+						thread_ay_[thread_num], thread_by_[thread_num], thread_cy_[thread_num],
+						thread_rf_y_[thread_num], thread_rb_y_[thread_num], thread_az_[thread_num],
+						thread_bz_[thread_num], thread_cz_[thread_num], thread_rf_z_[thread_num],
+						thread_rb_z_[thread_num],
+						dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
+							^ noarr::set_length<'z'>(block_z_end - block_z_begin),
+						diag_x, diag_y, diag_z, s, s_end, block_y_begin, block_y_end, block_z_begin, block_z_end,
+						std::move(sync_y), std::move(sync_z));
+				}
+				else
+				{
+					auto diag_x = get_diagonal_layout(this->problem_, this->problem_.nx);
+					auto diag_y = get_diagonal_layout(this->problem_, this->problem_.ny);
+					auto diag_z = get_diagonal_layout(this->problem_, this->problem_.nz);
+
+					auto dens_l = get_substrates_layout<3>();
+
+					auto sync_y = [densities = this->substrates_, rf_data = thread_ay_[0], b_data = thread_by_[0],
+								   c_data = thread_cy_[0],
+								   dens_l = dens_l ^ noarr::slice<'z'>(block_z_begin, block_z_end - block_z_begin),
+								   diag_y, tid = tid.y, group_size = cores_division_[1],
+								   &barrier = barrier_y](index_t z, index_t s) {
+						synchronize_y_blocked(densities, rf_data, b_data, c_data, dens_l ^ noarr::fix<'s'>(s),
+											  diag_y ^ noarr::fix<'s'>(s), z, tid, group_size, barrier);
+					};
+
+					auto sync_z = [densities = this->substrates_, rf_data = thread_az_[0], b_data = thread_bz_[0],
+								   c_data = thread_cz_[0],
+								   dens_l = dens_l ^ noarr::slice<'y'>(block_y_begin, block_y_end - block_y_begin),
+								   diag_l = diag_z, tid = tid.z, group_size = cores_division_[2],
+								   &barrier = barrier_z](index_t s) {
+						synchronize_z_blocked(densities, rf_data, b_data, c_data, dens_l ^ noarr::fix<'s'>(s),
+											  diag_l ^ noarr::fix<'s'>(s), tid, group_size, barrier);
+					};
+
+					solve_slice_xyz_fused_transpose_blocked<index_t>(
+						this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0], thread_ay_[0], thread_by_[0],
+						thread_cy_[0], thread_rf_y_[0], thread_rb_y_[0], thread_az_[0], thread_bz_[0], thread_cz_[0],
+						thread_rf_z_[0], thread_rb_z_[0],
+						dens_l ^ noarr::slice<'y'>(block_y_begin, block_y_end - block_y_begin)
+							^ noarr::slice<'z'>(block_z_begin, block_z_end - block_z_begin),
+						diag_x, diag_y, diag_z, block_s_begin + s, block_s_begin + s_end, block_y_begin, block_y_end,
+						block_z_begin, block_z_end, std::move(sync_y), std::move(sync_z));
+				}
 				// 	else
 				// 		solve_slice_xyz_fused_transpose_blocked_alt<index_t>(
 				// 			this->substrates_, ax_, b1x_, cx_, ay_, b1y_, az_, b1z_, a_scratchy_, c_scratchy_,
