@@ -66,6 +66,8 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, false); });
 	solvers.emplace("lstmfpabi",
 					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, false); });
+	solvers.emplace("lstmfpani",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, true); });
 	solvers.emplace("lstmfpabni",
 					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, true); });
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
