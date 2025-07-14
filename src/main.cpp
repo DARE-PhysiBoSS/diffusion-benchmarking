@@ -5,9 +5,17 @@
 #include <nlohmann/json.hpp>
 
 #include "algorithms.h"
+#include "perf_utils.h"
+
+// #include <fenv.h>
+// #include <xmmintrin.h>
 
 int main(int argc, char** argv)
 {
+	// 	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+
+	// 	fesetround(FE_TOWARDZERO);
+
 	// #define CSR_FLUSH_TO_ZERO (1 << 15)
 	// 	unsigned csr = __builtin_ia32_stmxcsr();
 	// 	csr |= CSR_FLUSH_TO_ZERO;
@@ -55,10 +63,7 @@ int main(int argc, char** argv)
 		.store_into(benchmark);
 
 	bool profile;
-	group.add_argument("--profile")
-		.help("Algorithm will be profiled using PAPI counters indicated in params")
-		.flag()
-		.store_into(profile);
+	group.add_argument("--profile").help("The run will be profiled using PAPI counters.").flag().store_into(profile);
 
 	try
 	{
@@ -117,7 +122,8 @@ int main(int argc, char** argv)
 		}
 		else if (profile)
 		{
-			algs.profile(alg, problem, params);
+			perf_counter::enable();
+			algs.run(alg, problem, params, output_file);
 		}
 	}
 	catch (const std::exception& err)

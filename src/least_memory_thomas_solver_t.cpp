@@ -2,6 +2,7 @@
 
 #include <cstddef>
 
+#include "perf_utils.h"
 #include "vector_transpose_helper.h"
 
 template <typename real_t, bool aligned_x>
@@ -232,7 +233,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					}
 
 					// transposition back to the original form
-					transpose(rows);
+					// transpose(rows);
 
 					// aligned stores
 					for (index_t v = 0; v < simd_length; v++)
@@ -273,9 +274,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					{
 						auto b_tmp = hn::Load(d, &(diag_l | noarr::get_at<'i', 's'>(b, full_n - simd_length, s)));
 
-						rows[simd_length - 1] =
-							hn::Mul(rows[simd_length - 1], hn::Set(d, hn::ExtractLane(b_tmp, simd_length - 1)));
-						for (index_t v = simd_length - 2; v >= 0; v--)
+						rows[remainder_work - 1] =
+							hn::Mul(rows[remainder_work - 1], hn::Set(d, hn::ExtractLane(b_tmp, remainder_work - 1)));
+						for (index_t v = remainder_work - 2; v >= 0; v--)
 						{
 							rows[v] = hn::Mul(hn::MulAdd(rows[v + 1], hn::Set(d, -a_s), rows[v]),
 											  hn::Set(d, hn::ExtractLane(b_tmp, v)));
@@ -303,7 +304,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 							hn::Load(d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
 
 					// transposition to enable vectorization
-					transpose(rows);
+					// transpose(rows);
 
 					// backward propagation
 					{
@@ -839,64 +840,76 @@ void least_memory_thomas_solver_t<real_t, aligned_x>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		for (index_t i = 0; i < this->problem_.iterations; i++)
-			solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, bx_, get_substrates_layout<1>(),
-									  get_diagonal_layout(this->problem_, this->problem_.nx), 0,
-									  this->problem_.substrates_count);
+		{
+			perf_counter counter("lstmt");
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+				solve_slice_x_1d<index_t>(this->substrates_, ax_, b1x_, bx_, get_substrates_layout<1>(),
+										  get_diagonal_layout(this->problem_, this->problem_.nx), 0,
+										  this->problem_.substrates_count);
+		}
 	}
 	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
 		{
-			for (index_t i = 0; i < this->problem_.iterations; i++)
-			{
-				auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+			perf_counter counter("lstmt");
 
-				if (vectorized_x_)
-					solve_slice_x_2d_and_3d_transpose<index_t>(
-						this->substrates_, ax_, b1x_, bx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-						get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
-				else
-					solve_slice_x_2d_and_3d<index_t>(
-						this->substrates_, ax_, b1x_, bx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-						get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
+			for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
+			{
+				for (index_t i = 0; i < this->problem_.iterations; i++)
+				{
+					auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
+					if (vectorized_x_)
+						solve_slice_x_2d_and_3d_transpose<index_t>(
+							this->substrates_, ax_, b1x_, bx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
+					else
+						solve_slice_x_2d_and_3d<index_t>(
+							this->substrates_, ax_, b1x_, bx_, get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
 #pragma omp barrier
-				solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, by_, get_substrates_layout<2>(),
-										  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_, s,
-										  s + s_step_length);
+					solve_slice_y_2d<index_t>(this->substrates_, ay_, b1y_, by_, get_substrates_layout<2>(),
+											  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_, s,
+											  s + s_step_length);
 #pragma omp barrier
+				}
 			}
 		}
 	}
 	if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
 		{
-			for (index_t i = 0; i < this->problem_.iterations; i++)
-			{
-				auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+			perf_counter counter("lstmt");
 
-				if (vectorized_x_)
-					solve_slice_x_2d_and_3d_transpose<index_t>(
-						this->substrates_, ax_, b1x_, bx_,
-						get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-						get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
-				else
-					solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, b1x_, bx_,
-													 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-													 get_diagonal_layout(this->problem_, this->problem_.nx), s,
-													 s + s_step_length);
+			for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
+			{
+				for (index_t i = 0; i < this->problem_.iterations; i++)
+				{
+					auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
+					if (vectorized_x_)
+						solve_slice_x_2d_and_3d_transpose<index_t>(
+							this->substrates_, ax_, b1x_, bx_,
+							get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
+					else
+						solve_slice_x_2d_and_3d<index_t>(
+							this->substrates_, ax_, b1x_, bx_,
+							get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+							get_diagonal_layout(this->problem_, this->problem_.nx), s, s + s_step_length);
 #pragma omp barrier
-				solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, by_, get_substrates_layout<3>(),
-										  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_, s,
-										  s + s_step_length);
+					solve_slice_y_3d<index_t>(this->substrates_, ay_, b1y_, by_, get_substrates_layout<3>(),
+											  get_diagonal_layout(this->problem_, this->problem_.ny), x_tile_size_, s,
+											  s + s_step_length);
 #pragma omp barrier
-				solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, bz_, get_substrates_layout<3>(),
-										  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_, s,
-										  s + s_step_length);
+					solve_slice_z_3d<index_t>(this->substrates_, az_, b1z_, bz_, get_substrates_layout<3>(),
+											  get_diagonal_layout(this->problem_, this->problem_.nz), x_tile_size_, s,
+											  s + s_step_length);
 #pragma omp barrier
+				}
 			}
 		}
 	}

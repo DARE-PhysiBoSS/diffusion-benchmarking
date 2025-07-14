@@ -41,7 +41,7 @@ public:
 				for (index_t x = 0; x < problem_.nx; x++)
 				{
 					for (index_t s = 0; s < problem_.substrates_count; s++)
-						out << access_internal(s, x, y, z) << " ";
+						out << access(s, x, y, z) << " ";
 					out << std::endl;
 				}
 	}

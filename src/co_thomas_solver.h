@@ -1,9 +1,9 @@
 #pragma once
 
 #include "base_solver.h"
+#include "blocked_thomas_solver.h"
 #include "substrate_layouts.h"
 #include "tridiagonal_solver.h"
-
 /*
 The diffusion is the problem of solving tridiagonal matrix system with these coeficients:
 For dimension x:
@@ -38,8 +38,8 @@ transposed so the vectorization can be utilized
 */
 
 template <typename real_t, bool aligned_x>
-class least_memory_thomas_solver_d_t : public locally_onedimensional_solver,
-									   public base_solver<real_t, least_memory_thomas_solver_d_t<real_t, aligned_x>>
+class co_thomas_solver : public locally_onedimensional_solver,
+						 public base_solver<real_t, co_thomas_solver<real_t, aligned_x>>
 
 {
 	using index_t = std::int32_t;
@@ -48,27 +48,39 @@ class least_memory_thomas_solver_d_t : public locally_onedimensional_solver,
 	real_t *ay_, *b1y_, *cy_;
 	real_t *az_, *b1z_, *cz_;
 
+	real_t *a_scratch_, *c_scratch_;
+
+	std::unique_ptr<aligned_atomic<long>[]> countersx_, countersy_, countersz_;
+	index_t countersx_count_, countersy_count_, countersz_count_;
+
 	bool use_intrinsics_;
-	bool use_fused_;
+	bool use_blocked_;
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
-	std::size_t alignment_multiple_;
 	index_t substrate_step_;
+
+	std::size_t max_cores_groups_;
 
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem_, index_t n);
 
 	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
 
 public:
-	least_memory_thomas_solver_d_t(bool use_intrinsics, bool use_fused);
+	co_thomas_solver(bool use_intrinsics, bool use_blocked);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
 	{
 		if constexpr (aligned_x)
-			return substrate_layouts::get_xyzs_aligned_layout<dims>(this->problem_, alignment_multiple_);
+			return substrate_layouts::get_xyzs_aligned_layout<dims>(this->problem_, alignment_size_);
 		else
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
+	}
+
+	auto get_scratch_layout() const
+	{
+		return noarr::scalar<real_t>()
+			   ^ noarr::vectors<'i', 'l', 's'>(this->problem_.nz, max_cores_groups_, this->problem_.substrates_count);
 	}
 
 	void prepare(const max_problem_t& problem) override;
@@ -86,7 +98,7 @@ public:
 	void solve_1d();
 	void solve_2d();
 	void solve_3d();
-	void solve_3d_fused();
+	void solve_blocked();
 
-	~least_memory_thomas_solver_d_t();
+	~co_thomas_solver();
 };

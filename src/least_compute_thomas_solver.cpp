@@ -1,5 +1,7 @@
 #include "least_compute_thomas_solver.h"
 
+#include "perf_utils.h"
+
 template <typename real_t>
 void least_compute_thomas_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& b, std::unique_ptr<real_t[]>& c,
 															std::unique_ptr<real_t[]>& e, index_t shape, index_t dims,
@@ -389,39 +391,55 @@ void least_compute_thomas_solver<real_t>::solve()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		for (index_t i = 0; i < this->problem_.iterations; i++)
-			solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(), get_substrates_layout<1>(),
-									  get_diagonal_layout(this->problem_, this->problem_.nx));
+		{
+			perf_counter counter("lstc");
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+				solve_slice_x_1d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+										  get_substrates_layout<1>(),
+										  get_diagonal_layout(this->problem_, this->problem_.nx));
+		}
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
-											 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
-											 get_diagonal_layout(this->problem_, this->problem_.nx));
+			perf_counter counter("lstc");
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+												 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
+												 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
-			solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<2>(),
-									  get_diagonal_layout(this->problem_, this->problem_.ny));
+				solve_slice_y_2d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(),
+										  get_substrates_layout<2>(),
+										  get_diagonal_layout(this->problem_, this->problem_.ny));
 #pragma omp barrier
+			}
 		}
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		for (index_t i = 0; i < this->problem_.iterations; i++)
 		{
-			solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
-											 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
-											 get_diagonal_layout(this->problem_, this->problem_.nx));
+			perf_counter counter("lstc");
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, bx_.get(), cx_.get(), ex_.get(),
+												 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
+												 get_diagonal_layout(this->problem_, this->problem_.nx));
 #pragma omp barrier
-			solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(), get_substrates_layout<3>(),
-									  get_diagonal_layout(this->problem_, this->problem_.ny));
+				solve_slice_y_3d<index_t>(this->substrates_, by_.get(), cy_.get(), ey_.get(),
+										  get_substrates_layout<3>(),
+										  get_diagonal_layout(this->problem_, this->problem_.ny));
 #pragma omp barrier
-			solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(), get_substrates_layout<3>(),
-									  get_diagonal_layout(this->problem_, this->problem_.nz));
+				solve_slice_z_3d<index_t>(this->substrates_, bz_.get(), cz_.get(), ez_.get(),
+										  get_substrates_layout<3>(),
+										  get_diagonal_layout(this->problem_, this->problem_.nz));
 #pragma omp barrier
+			}
 		}
 	}
 }

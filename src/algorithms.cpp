@@ -1,12 +1,13 @@
 #include "algorithms.h"
 
+#include <chrono>
 #include <fstream>
 #include <iostream>
-#include <papi.h>
 
 #include "biofvm.h"
 #include "blocked_thomas_solver.h"
 #include "blocked_thomas_solver_t.h"
+#include "cubed_mix_thomas_solver_t.h"
 #include "cubed_thomas_solver_t.h"
 #include "cyclic_reduction_solver.h"
 #include "cyclic_reduction_solver_t.h"
@@ -19,6 +20,8 @@
 #include "least_compute_thomas_solver_s_t.h"
 #include "least_compute_thomas_solver_t.h"
 #include "least_memory_thomas_solver.h"
+#include "least_memory_thomas_solver_d_f.h"
+#include "least_memory_thomas_solver_d_f_p.h"
 #include "least_memory_thomas_solver_d_t.h"
 #include "least_memory_thomas_solver_t.h"
 #include "reference_thomas_solver.h"
@@ -53,6 +56,20 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(false, true); });
 	solvers.emplace("lstmdtfai",
 					[]() { return std::make_unique<least_memory_thomas_solver_d_t<real_t, true>>(true, true); });
+	solvers.emplace("lstmfai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(false, false); });
+	solvers.emplace("lstmfabi",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, false); });
+	solvers.emplace("lstmfabni",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f<real_t, true>>(true, true); });
+	solvers.emplace("lstmfpai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, false); });
+	solvers.emplace("lstmfpabi",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, false); });
+	solvers.emplace("lstmfpani",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, true); });
+	solvers.emplace("lstmfpabni",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, true); });
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("lstmta", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("lstmtai", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(true); });
@@ -67,11 +84,15 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
 	solvers.emplace("blockedt", []() { return std::make_unique<blocked_thomas_solver_t<real_t, false>>(); });
 	solvers.emplace("blockedta", []() { return std::make_unique<blocked_thomas_solver_t<real_t, true>>(); });
-	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(); });
+	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, false>>(false); });
+	solvers.emplace("cubeda", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(false); });
+	solvers.emplace("cubedai", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(true); });
+	solvers.emplace("cubedmai", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(false); });
+	solvers.emplace("cubedmabi", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
 	return solvers;
 }
 
-algorithms::algorithms(bool double_precision, bool verbose) : verbose_(verbose)
+algorithms::algorithms(bool double_precision, bool verbose) : double_precision_(double_precision), verbose_(verbose)
 {
 	if (double_precision)
 		solvers_ = get_solvers_map<double>();
@@ -253,9 +274,9 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 			}
 		}
 
-		std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE:" << rmse_x << std::endl;
-		std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE:" << rmse_y << std::endl;
-		std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE:" << rmse_z << std::endl;
+		std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE: " << rmse_x << std::endl;
+		std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE: " << rmse_y << std::endl;
+		std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE: " << rmse_z << std::endl;
 	}
 	else
 	{
@@ -269,7 +290,7 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 
 		auto [max_absolute_diff, rmse] = common_validate(*solver, *ref_solver, problem);
 
-		std::cout << "Maximal absolute difference: " << max_absolute_diff << ", RMSE:" << rmse << std::endl;
+		std::cout << "Maximal absolute difference: " << max_absolute_diff << ", RMSE: " << rmse << std::endl;
 	}
 }
 
@@ -285,12 +306,14 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 	std::size_t init_time_us;
 
+	std::cout << std::setprecision(10);
+
 	{
-		auto start = std::chrono::high_resolution_clock::now();
+		auto start = std::chrono::steady_clock::now();
 
 		solver->initialize();
 
-		auto end = std::chrono::high_resolution_clock::now();
+		auto end = std::chrono::steady_clock::now();
 
 		init_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
@@ -305,8 +328,8 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		return std::make_pair(mean, std_dev);
 	};
 
-	std::cout << alg << "," << problem.dims << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny
-			  << "," << problem.nz << ",";
+	std::cout << alg << "," << (double_precision_ ? "D" : "S") << "," << problem.dims << "," << problem.iterations
+			  << "," << problem.substrates_count << "," << problem.nx << "," << problem.ny << "," << problem.nz << ",";
 	append_params(std::cout, params, false);
 	std::cout << init_time_us << ",";
 
@@ -318,27 +341,27 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		for (std::size_t i = 0; i < inner_iterations; i++)
 		{
 			{
-				auto start = std::chrono::high_resolution_clock::now();
+				auto start = std::chrono::steady_clock::now();
 				adi_solver->solve_x();
-				auto end = std::chrono::high_resolution_clock::now();
+				auto end = std::chrono::steady_clock::now();
 
 				times_x.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 			}
 
 			if (problem.dims > 1)
 			{
-				auto start = std::chrono::high_resolution_clock::now();
+				auto start = std::chrono::steady_clock::now();
 				adi_solver->solve_y();
-				auto end = std::chrono::high_resolution_clock::now();
+				auto end = std::chrono::steady_clock::now();
 
 				times_y.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 			}
 
 			if (problem.dims > 2)
 			{
-				auto start = std::chrono::high_resolution_clock::now();
+				auto start = std::chrono::steady_clock::now();
 				adi_solver->solve_z();
-				auto end = std::chrono::high_resolution_clock::now();
+				auto end = std::chrono::steady_clock::now();
 
 				times_z.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 			}
@@ -357,17 +380,25 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 		for (std::size_t i = 0; i < inner_iterations; i++)
 		{
-			auto start = std::chrono::high_resolution_clock::now();
+			auto start = std::chrono::steady_clock::now();
 			solver->solve();
-			auto end = std::chrono::high_resolution_clock::now();
+			auto end = std::chrono::steady_clock::now();
 
 			times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 		}
 
 		auto [mean, std_dev] = compute_mean_and_std(times);
 
+		for (auto t : times)
+		{
+			if (verbose_)
+				std::cout << t << " ";
+		}
+
 		std::cout << mean << "," << std_dev << std::endl;
 	}
+
+	std::cout.unsetf(std::ios::floatfield);
 }
 
 void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
@@ -376,7 +407,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 
 	// make header
 	{
-		std::cout << "algorithm,dims,s,nx,ny,nz,";
+		std::cout << "algorithm,precision,dims,iterations,s,nx,ny,nz,";
 		append_params(std::cout, params, true);
 
 		if (try_get_adi_solver(alg) && kind == benchmark_kind::per_dimension)
@@ -388,7 +419,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 	// warmup
 	{
 		auto warmup_time_s = params.contains("warmup_time") ? (double)params["warmup_time"] : 3.0;
-		auto start = std::chrono::high_resolution_clock::now();
+		auto start = std::chrono::steady_clock::now();
 		auto end = start;
 		do
 		{
@@ -397,7 +428,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 			solver->prepare(problem);
 			solver->initialize();
 
-			end = std::chrono::high_resolution_clock::now();
+			end = std::chrono::steady_clock::now();
 		} while ((double)std::chrono::duration_cast<std::chrono::seconds>(end - start).count() < warmup_time_s);
 	}
 
@@ -408,108 +439,6 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 		for (std::size_t i = 0; i < outer_iterations; i++)
 			benchmark_inner(alg, problem, params, kind);
 	}
-}
-
-struct EventData
-{
-	uint32_t Code;
-	std::string Deriv;
-	std::string Description;
-};
-
-void readPapiJson(std::map<std::string, EventData>& events, const std::string& filename)
-{
-	std::ifstream file(filename);
-	if (!file)
-	{
-		throw std::runtime_error("Cannot open file: " + filename + "\n" + "Try running: $./scripts/obtain_counters.sh");
-	}
-
-	nlohmann::json j;
-	file >> j;
-
-	for (auto& [name, data] : j.items())
-	{
-		events[name] = EventData(data["Code"].get<uint32_t>(), data["Deriv"].get<std::string>(),
-								 data["Description"].get<std::string>());
-	}
-}
-
-
-
-void algorithms::profile(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
-{
-	std::string csv_path;
-	if (params.contains("profile_output"))
-	{
-		csv_path = params["profile_output"];
-	}
-	else
-	{
-		csv_path = "./profile.csv";
-	}
-	std::ofstream file(csv_path, std::ios::app);
-
-	auto solver = get_solver(alg);
-
-	solver->tune(params);
-	solver->prepare(problem);
-	solver->initialize();
-
-	std::map<std::string, EventData> counters_info;
-
-	readPapiJson(counters_info, "./example-problems/counters.json");
-
-	if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT)
-	{
-		std::cerr << "PAPI library init error!" << std::endl;
-		return;
-	}
-
-	// Events to monitor
-	int events = PAPI_NULL;
-	std::vector<std::string> counters_names = params["papi_counters"].get<std::vector<std::string>>();
-	const int NUM_EVENTS = counters_names.size();
-	std::vector<long long> counters(NUM_EVENTS);
-
-	// add events
-	PAPI_create_eventset(&events);
-	for (int i = 0; i < NUM_EVENTS; ++i)
-	{
-		PAPI_add_event(events, counters_info[counters_names[i]].Code);
-	}
-
-	file << counters_names[0];
-	for (int i = 1; i < NUM_EVENTS; ++i)
-	{
-		file << "," << counters_names[i];
-	}
-	file << std::endl;
-
-	// Start counters
-	if (PAPI_start(events) != PAPI_OK)
-	{
-		std::cerr << "PAPI failed to start counters." << std::endl;
-		return;
-	}
-	solver->solve();
-
-	// Stop counters
-	if (PAPI_stop(events, counters.data()) != PAPI_OK)
-	{
-		std::cerr << "PAPI failed to stop counters." << std::endl;
-		return;
-	}
-
-	file << counters[0];
-	for (int i = 1; i < NUM_EVENTS; ++i)
-	{
-		file << "," << counters[i];
-	}
-	file << std::endl;
-	PAPI_reset(events);
-
-	file.close();
 }
 
 benchmark_kind algorithms::get_benchmark_kind(const nlohmann::json& params)

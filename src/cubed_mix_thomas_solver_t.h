@@ -17,15 +17,15 @@ Restrictions:
 */
 
 template <typename real_t, bool aligned_x>
-class cubed_thomas_solver_t : public locally_onedimensional_solver,
-							  public base_solver<real_t, cubed_thomas_solver_t<real_t, aligned_x>>
+class cubed_mix_thomas_solver_t : public locally_onedimensional_solver,
+								  public base_solver<real_t, cubed_mix_thomas_solver_t<real_t, aligned_x>>
 {
 protected:
 	using index_t = std::int32_t;
 
-	real_t *ax_, *b1x_;
-	real_t *ay_, *b1y_;
-	real_t *az_, *b1z_;
+	real_t *ax_, *b1x_, *cx_;
+	real_t *ay_, *b1y_, *cy_;
+	real_t *az_, *b1z_, *cz_;
 
 	std::unique_ptr<aligned_atomic<long>[]> countersx_, countersy_, countersz_;
 	index_t countersx_count_, countersy_count_, countersz_count_;
@@ -35,9 +35,11 @@ protected:
 	real_t *a_scratchz_, *c_scratchz_;
 
 	std::size_t alignment_size_;
+	std::size_t alignment_multiple_;
 	std::size_t x_tile_size_;
+	index_t substrate_step_;
 
-	bool vectorized_x_;
+	bool use_alt_blocked_;
 
 	std::array<index_t, 3> cores_division_;
 
@@ -52,6 +54,8 @@ protected:
 
 	index_t aligned_block_size_;
 
+	index_t substrate_groups_;
+
 	using sync_func_t = std::function<void>;
 
 	void precompute_values(real_t*& a, real_t*& b1, index_t shape, index_t dims, index_t n, index_t counters_count,
@@ -59,21 +63,20 @@ protected:
 						   std::vector<index_t>& group_block_lengths, std::vector<index_t>& group_block_offsets,
 						   bool aligned);
 
+	void precompute_values(real_t*& a, real_t*& b1, real_t*& b, index_t shape, index_t dims, index_t n);
+
 	auto get_diagonal_layout(const problem_t<index_t, real_t>& problem, index_t n);
 
 public:
 	static constexpr index_t min_block_size = 2;
 
-	cubed_thomas_solver_t(bool vectorized_x);
+	cubed_mix_thomas_solver_t(bool use_alt_blocked);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
 	{
 		if constexpr (aligned_x)
-			return noarr::scalar<real_t>()
-				   ^ noarr::vectors<'x', 'y', 'z', 's'>(aligned_block_size_ * (this->problem_.ny / cores_division_[0]),
-														this->problem_.ny, this->problem_.nz,
-														this->problem_.substrates_count);
+			return substrate_layouts::get_xyzs_aligned_layout<dims>(this->problem_, alignment_multiple_);
 		else
 			return substrate_layouts::get_xyzs_layout<dims>(this->problem_);
 	}
@@ -107,10 +110,5 @@ public:
 
 	void solve() override;
 
-	virtual double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
-
-	real_t& at(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const;
-
-
-	~cubed_thomas_solver_t();
+	~cubed_mix_thomas_solver_t();
 };
