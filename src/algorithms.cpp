@@ -274,9 +274,9 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 			}
 		}
 
-		std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE:" << rmse_x << std::endl;
-		std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE:" << rmse_y << std::endl;
-		std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE:" << rmse_z << std::endl;
+		std::cout << "X - Maximal absolute difference: " << max_absolute_diff_x << ", RMSE: " << rmse_x << std::endl;
+		std::cout << "Y - Maximal absolute difference: " << max_absolute_diff_y << ", RMSE: " << rmse_y << std::endl;
+		std::cout << "Z - Maximal absolute difference: " << max_absolute_diff_z << ", RMSE: " << rmse_z << std::endl;
 	}
 	else
 	{
@@ -290,7 +290,7 @@ void algorithms::validate(const std::string& alg, const max_problem_t& problem, 
 
 		auto [max_absolute_diff, rmse] = common_validate(*solver, *ref_solver, problem);
 
-		std::cout << "Maximal absolute difference: " << max_absolute_diff << ", RMSE:" << rmse << std::endl;
+		std::cout << "Maximal absolute difference: " << max_absolute_diff << ", RMSE: " << rmse << std::endl;
 	}
 }
 
@@ -306,12 +306,14 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 	std::size_t init_time_us;
 
+	std::cout << std::setprecision(10);
+
 	{
-		auto start = std::chrono::high_resolution_clock::now();
+		auto start = std::chrono::steady_clock::now();
 
 		solver->initialize();
 
-		auto end = std::chrono::high_resolution_clock::now();
+		auto end = std::chrono::steady_clock::now();
 
 		init_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
@@ -339,27 +341,27 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 		for (std::size_t i = 0; i < inner_iterations; i++)
 		{
 			{
-				auto start = std::chrono::high_resolution_clock::now();
+				auto start = std::chrono::steady_clock::now();
 				adi_solver->solve_x();
-				auto end = std::chrono::high_resolution_clock::now();
+				auto end = std::chrono::steady_clock::now();
 
 				times_x.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 			}
 
 			if (problem.dims > 1)
 			{
-				auto start = std::chrono::high_resolution_clock::now();
+				auto start = std::chrono::steady_clock::now();
 				adi_solver->solve_y();
-				auto end = std::chrono::high_resolution_clock::now();
+				auto end = std::chrono::steady_clock::now();
 
 				times_y.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 			}
 
 			if (problem.dims > 2)
 			{
-				auto start = std::chrono::high_resolution_clock::now();
+				auto start = std::chrono::steady_clock::now();
 				adi_solver->solve_z();
-				auto end = std::chrono::high_resolution_clock::now();
+				auto end = std::chrono::steady_clock::now();
 
 				times_z.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 			}
@@ -395,6 +397,8 @@ void algorithms::benchmark_inner(const std::string& alg, const max_problem_t& pr
 
 		std::cout << mean << "," << std_dev << std::endl;
 	}
+
+	std::cout.unsetf(std::ios::floatfield);
 }
 
 void algorithms::benchmark(const std::string& alg, const max_problem_t& problem, const nlohmann::json& params)
@@ -415,7 +419,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 	// warmup
 	{
 		auto warmup_time_s = params.contains("warmup_time") ? (double)params["warmup_time"] : 3.0;
-		auto start = std::chrono::high_resolution_clock::now();
+		auto start = std::chrono::steady_clock::now();
 		auto end = start;
 		do
 		{
@@ -424,7 +428,7 @@ void algorithms::benchmark(const std::string& alg, const max_problem_t& problem,
 			solver->prepare(problem);
 			solver->initialize();
 
-			end = std::chrono::high_resolution_clock::now();
+			end = std::chrono::steady_clock::now();
 		} while ((double)std::chrono::duration_cast<std::chrono::seconds>(end - start).count() < warmup_time_s);
 	}
 
