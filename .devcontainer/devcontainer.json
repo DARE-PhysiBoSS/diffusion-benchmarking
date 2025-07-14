@@ -19,8 +19,7 @@
 				"libopenblas-dev",
 				"cmake",
 				"ninja-build",
-				"gdb",
-				"jq"
+				"gdb"
 			]
 		}
 	},
