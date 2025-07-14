@@ -7,8 +7,15 @@
 #include "algorithms.h"
 #include "perf_utils.h"
 
+// #include <fenv.h>
+// #include <xmmintrin.h>
+
 int main(int argc, char** argv)
 {
+	// 	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+
+	// 	fesetround(FE_TOWARDZERO);
+
 	// #define CSR_FLUSH_TO_ZERO (1 << 15)
 	// 	unsigned csr = __builtin_ia32_stmxcsr();
 	// 	csr |= CSR_FLUSH_TO_ZERO;
