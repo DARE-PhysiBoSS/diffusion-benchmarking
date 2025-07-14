@@ -2882,7 +2882,7 @@ constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 			}
 
 			// transposition back to the original form
-			transpose(rows + 1);
+			// transpose(rows + 1);
 
 			// aligned stores
 			for (index_t v = 0; v < simd_length; v++)
@@ -2952,7 +2952,7 @@ constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 				rows[v] = hn::Load(t, &(d.template at<'z', 'y', 'x'>(z, y + v, i)));
 
 			// transposition to enable vectorization
-			transpose(rows);
+			// transpose(rows);
 
 			// backward propagation
 			{

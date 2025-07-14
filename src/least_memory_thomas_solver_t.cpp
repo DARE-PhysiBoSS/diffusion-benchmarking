@@ -233,7 +233,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					}
 
 					// transposition back to the original form
-					transpose(rows);
+					// transpose(rows);
 
 					// aligned stores
 					for (index_t v = 0; v < simd_length; v++)
@@ -304,7 +304,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 							hn::Load(d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
 
 					// transposition to enable vectorization
-					transpose(rows);
+					// transpose(rows);
 
 					// backward propagation
 					{
