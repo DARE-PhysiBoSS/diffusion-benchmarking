@@ -1,14 +1,15 @@
 #!/bin/bash
 
+binary=$1
+out_dir=$2
+
+mkdir -p ${out_dir}
+
 # Define the list of algorithms to test
 algorithms=("biofvm" "lstcma" "lstcta" "lstcstai" "lstmtai" "lstmdtai" "lstmdtfai")
 
-params_file="example-problems/params.json"
-
-out_dir="output"
-
 # Write the initial problem JSON to a file
-problem_file="build/problem.json"
+problem_file="${out_dir}/problem.json"
 cat > "$problem_file" <<EOF
 {
     "dims": 3,
@@ -19,12 +20,20 @@ cat > "$problem_file" <<EOF
     "ny": 100,
     "nz": 100,
     "substrates_count": 1,
-    "iterations": 100,
+    "iterations": 50,
     "dt": 0.01,
     "diffusion_coefficients": 10000,
     "decay_rates": 0.01,
     "initial_conditions": 1000,
     "gaussian_pulse": false
+}
+EOF
+
+# Write the initial params JSON to a file
+params_file="${out_dir}/params.json"
+cat > "$params_file" <<EOF
+{
+    "benchmark_kind": "full_solve"
 }
 EOF
 
@@ -37,32 +46,28 @@ for alg in "${algorithms[@]}"; do
     for n in "${n_values[@]}"; do
         for substrates in "${substrates_values[@]}"; do
             for counter in "${counters[@]}"; do
-                # Update the JSON file in-place
-                jq \
-                    --argjson nx "$n" \
-                    --argjson ny "$n" \
-                    --argjson nz "$n" \
-                    --argjson substrates "$substrates" \
-                    '.nx=$nx | .ny=$ny | .nz=$nz | .substrates_count=$substrates' \
-                    "$problem_file" > "$problem_file.tmp" && mv "$problem_file.tmp" "$problem_file"
+                # Update the JSON file in-place using Python
+                python3 -c "import json; f='$problem_file'; d=json.load(open(f)); d['nx']=${n}; d['ny']=${n}; d['nz']=${n}; d['substrates_count']=${substrates}; json.dump(d, open(f, 'w'), indent=4)"
 
                 for dtype in "s" "d"; do
-                    logdir="${out_dir}/profile_${alg}_${dtype}_${n}x${substrates}"
+                    logdir="${out_dir}/profile_${alg}_${dtype}_${n}x${substrates}_${counter}"
 
                     if [ -d "$logdir" ]; then
                         echo "Skipping $logdir (already exists)"
                         continue
                     fi
 
-                    mkdir $logdir
+                    mkdir -p $logdir
 
                     export PAPI_EVENTS="${counter}"
                     export PAPI_OUTPUT_DIRECTORY="${logdir}"
 
-                    if [ "$dtype" = "single" ]; then
-                        build/diffuse --problem "$problem_file" --params "$params_file" --alg "$alg" --profile
+                    echo "Running $alg $dtype with ${n}^3 @ ${substrates} and ${counter}"
+
+                    if [ "$dtype" = "s" ]; then
+                        ${binary} --problem "$problem_file" --params "$params_file" --alg "$alg" --profile
                     else
-                        build/diffuse --problem "$problem_file" --params "$params_file" --alg "$alg" --profile --double
+                        ${binary} --problem "$problem_file" --params "$params_file" --alg "$alg" --profile --double
                     fi
                 done
             done
