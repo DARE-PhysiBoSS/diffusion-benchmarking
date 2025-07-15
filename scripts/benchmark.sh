@@ -9,7 +9,7 @@ mkdir -p ${out_dir}
 algorithms=("biofvm" "lstcma" "lstcta" "lstcstai" "lstmtai" "lstmdtai" "lstmdtfai")
 
 # Write the initial problem JSON to a file
-problem_file="${out_dir}/problem.json"
+problem_file="${out_dir}/problem-$(date +%s).json"
 cat > "$problem_file" <<EOF
 {
     "dims": 3,
@@ -30,7 +30,7 @@ cat > "$problem_file" <<EOF
 EOF
 
 # Write the initial params JSON to a file
-params_file="${out_dir}/params.json"
+params_file="${out_dir}/params-$(date +%s).json"
 cat > "$params_file" <<EOF
 {
     "inner_iterations": 50,
