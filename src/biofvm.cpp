@@ -334,7 +334,7 @@ void biofvm<real_t>::save(std::ostream& out) const
 template <typename real_t>
 double biofvm<real_t>::access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const
 {
-	auto dens_l = get_substrates_layout(problem_);
+	// auto dens_l = get_substrates_layout(problem_);
 
 	//return (dens_l | noarr::get_at<'s', 'x', 'y', 'z'>(substrates_.get(), s, x, y, z));
 	return substrates_[z * thomas_k_jump + y * thomas_j_jump + x * thomas_i_jump + s];
