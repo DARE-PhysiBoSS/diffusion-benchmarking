@@ -19,7 +19,8 @@
 				"libopenblas-dev",
 				"cmake",
 				"ninja-build",
-				"gdb"
+				"gdb",
+				"papi-tools"
 			]
 		}
 	},
