@@ -83,38 +83,38 @@ target_link_libraries(diffuse LAPACK::LAPACK)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PAPI IMPORTED_TARGET papi)
 
-if(PAPI_FOUND)
+# if(PAPI_FOUND)
 
-  target_link_libraries(diffuse PkgConfig::PAPI)
+#   target_link_libraries(diffuse PkgConfig::PAPI)
 
-else()
+# else()
 
-  message(STATUS "'papi' will be built from source:")
+#   message(STATUS "'papi' will be built from source:")
 
-  # Fetch papi
-  FetchContent_Declare(
-    papi
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    URL file://${CMAKE_CURRENT_SOURCE_DIR}/submodules/papi)
-  FetchContent_MakeAvailable(papi)
+#   # Fetch papi
+#   FetchContent_Declare(
+#     papi
+#     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+#     URL file://${CMAKE_CURRENT_SOURCE_DIR}/submodules/papi)
+#   FetchContent_MakeAvailable(papi)
 
-  execute_process(COMMAND ./configure --prefix=${papi_BINARY_DIR}
-                  WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
+#   execute_process(COMMAND ./configure --prefix=${papi_BINARY_DIR}
+#                   WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
 
-  add_custom_target(
-    papi_build
-    BYPRODUCTS ${papi_BINARY_DIR}/lib/libpapi.a
-    COMMAND make -j
-    COMMAND make install
-    WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
+#   add_custom_target(
+#     papi_build
+#     BYPRODUCTS ${papi_BINARY_DIR}/lib/libpapi.a
+#     COMMAND make -j
+#     COMMAND make install
+#     WORKING_DIRECTORY ${papi_SOURCE_DIR}/src)
 
-  add_dependencies(diffuse papi_build)
+#   add_dependencies(diffuse papi_build)
 
-  target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
-  target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
+#   target_include_directories(diffuse PRIVATE ${papi_BINARY_DIR}/include)
+#   target_link_libraries(diffuse ${papi_BINARY_DIR}/lib/libpapi.a)
 
-  set(CMAKE_PREFIX_PATH
-      ${papi_BINARY_DIR}
-      CACHE PATH "Path to installed packages" FORCE)
+#   set(CMAKE_PREFIX_PATH
+#       ${papi_BINARY_DIR}
+#       CACHE PATH "Path to installed packages" FORCE)
 
-endif()
+# endif()
