@@ -95,10 +95,5 @@ public:
 
 	void solve() override;
 
-	void solve_1d();
-	void solve_2d();
-	void solve_3d();
-	void solve_blocked();
-
 	~co_thomas_solver();
 };
