@@ -26,7 +26,6 @@
 #include "least_memory_thomas_solver_t.h"
 #include "reference_thomas_solver.h"
 #include "serial_blocked_thomas_solver.h"
-#include "simd.h"
 #include "tridiagonal_solver.h"
 
 
@@ -76,7 +75,6 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("lapack", []() { return std::make_unique<lapack_thomas_solver<real_t>>(); });
 	solvers.emplace("lapack2", []() { return std::make_unique<general_lapack_thomas_solver<real_t>>(); });
 	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
-	solvers.emplace("avx256d", []() { return std::make_unique<simd<double>>(); });
 	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
 	solvers.emplace("cr", []() { return std::make_unique<cyclic_reduction_solver<real_t, false>>(); });
 	solvers.emplace("crt", []() { return std::make_unique<cyclic_reduction_solver_t<real_t, false>>(); });
