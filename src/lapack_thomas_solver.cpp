@@ -24,7 +24,7 @@ void lapack_thomas_solver<float>::pttrf(const int* n, float* d, float* e, int* i
 	(void)d;
 	(void)e;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -38,7 +38,7 @@ void lapack_thomas_solver<double>::pttrf(const int* n, double* d, double* e, int
 	(void)d;
 	(void)e;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -56,7 +56,7 @@ void lapack_thomas_solver<float>::pttrs(const int* n, const int* nrhs, const flo
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -74,7 +74,7 @@ void lapack_thomas_solver<double>::pttrs(const int* n, const int* nrhs, const do
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -92,7 +92,7 @@ void lapack_thomas_solver<float>::ptsv(const int* n, const int* nrhs, float* d, 
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -110,7 +110,7 @@ void lapack_thomas_solver<double>::ptsv(const int* n, const int* nrhs, double* d
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 

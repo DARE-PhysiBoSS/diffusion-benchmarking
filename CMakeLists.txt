@@ -9,17 +9,31 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(USE_ASAN OFF)
+option(RISCV_CROSSCOMPILE OFF)
+option(NO_PAPI OFF)
 
 if(USE_ASAN)
   add_compile_options(-fsanitize=address -g)
   add_link_options(-fsanitize=address)
 endif()
 
+if(RISCV_CROSSCOMPILE)
+  set(NO_PAPI ON CACHE BOOL "Disable PAPI when cross-compiling for RISC-V" FORCE)
+endif()
+
 if(MSVC)
   set(DIFFUSE_CPP_COMPILE_OPTIONS /W4 /bigobj)
 else()
-  set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic
-                                  -Wno-interference-size -march=native)
+  if(RISCV_CROSSCOMPILE)
+    set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic)
+
+    # set(CMAKE_CXX_FLAGS
+    #     "-O3 -ffast-math -mepi -mllvm -combiner-store-merging=0 -Rpass=loop-vectorize -Rpass-analysis=loop-vectorize -mllvm -vectorizer-use-vp-strided-load-store -mcpu=avispado -mllvm -disable-loop-idiom-memcpy -mllvm -disable-loop-idiom-memset -Rpass-missed=loop-vectorize -Xclang -target-feature -Xclang +does-not-implement-vszext -Xclang -target-feature -Xclang +does-not-implement-tu -mllvm -riscv-uleb128-reloc=0 -fno-slp-vectorize"
+    # )
+  else()
+    set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic
+                                    -Wno-interference-size -march=native)
+  endif()
 endif()
 
 include(FetchContent)
@@ -73,8 +87,13 @@ target_link_libraries(diffuse nlohmann_json::nlohmann_json)
 
 target_link_libraries(diffuse hwy)
 
-find_package(OpenMP REQUIRED)
-target_link_libraries(diffuse OpenMP::OpenMP_CXX)
+if(RISCV_CROSSCOMPILE)
+  find_package(OpenMP REQUIRED)
+  link_libraries(${CMAKE_CURRENT_SOURCE_DIR}/.rave/build/parallel/ompt)
+else()
+  find_package(OpenMP REQUIRED)
+  target_link_libraries(diffuse OpenMP::OpenMP_CXX)
+endif()
 
 find_package(LAPACK)
 if(NOT LAPACK_FOUND)
@@ -88,11 +107,15 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PAPI IMPORTED_TARGET papi)
 
+if (NO_PAPI)
+  target_compile_definitions(diffuse PRIVATE NO_PAPI)
+endif()
+
 if(PAPI_FOUND)
 
   target_link_libraries(diffuse PkgConfig::PAPI)
 
-else()
+elseif(NOT NO_PAPI)
 
   message(STATUS "'papi' will be built from source:")
 

@@ -24,7 +24,7 @@ void full_lapack_solver<float>::pbtrf(const char* uplo, const int* n, const int*
 	(void)ab;
 	(void)ldab;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -41,7 +41,7 @@ void full_lapack_solver<double>::pbtrf(const char* uplo, const int* n, const int
 	(void)ab;
 	(void)ldab;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -61,7 +61,7 @@ void full_lapack_solver<float>::pbtrs(const char* uplo, const int* n, const int*
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -81,7 +81,7 @@ void full_lapack_solver<double>::pbtrs(const char* uplo, const int* n, const int
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 

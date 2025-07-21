@@ -25,7 +25,7 @@ void general_lapack_thomas_solver<float>::gttrf(const int* n, float* dl, float* 
 	(void)du2;
 	(void)ipiv;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -43,7 +43,7 @@ void general_lapack_thomas_solver<double>::gttrf(const int* n, double* dl, doubl
 	(void)du2;
 	(void)ipiv;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
@@ -66,7 +66,7 @@ void general_lapack_thomas_solver<float>::gttrs(const char* trans, const int* n,
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 };
 
@@ -89,7 +89,7 @@ void general_lapack_thomas_solver<double>::gttrs(const char* trans, const int* n
 	(void)b;
 	(void)ldb;
 	(void)info;
-	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+	throw std::runtime_error("LAPACK not found. Cannot perform operation.");
 #endif
 }
 
