@@ -36,10 +36,22 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 
 	solvers.emplace("ref", []() { return std::make_unique<reference_thomas_solver<real_t>>(); });
 	solvers.emplace("lstc", []() { return std::make_unique<least_compute_thomas_solver<real_t>>(); });
-	solvers.emplace("lstcm", []() { return std::make_unique<least_compute_thomas_solver_m<real_t, false>>(); });
-	solvers.emplace("lstcma", []() { return std::make_unique<least_compute_thomas_solver_m<real_t, true>>(); });
 	solvers.emplace("lstct", []() { return std::make_unique<least_compute_thomas_solver_t<real_t, false>>(); });
 	solvers.emplace("lstcta", []() { return std::make_unique<least_compute_thomas_solver_t<real_t, true>>(); });
+	solvers.emplace("lapack", []() { return std::make_unique<lapack_thomas_solver<real_t>>(); });
+	solvers.emplace("lapack2", []() { return std::make_unique<general_lapack_thomas_solver<real_t>>(); });
+	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
+	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
+	solvers.emplace("cr", []() { return std::make_unique<cyclic_reduction_solver<real_t, false>>(); });
+	solvers.emplace("crt", []() { return std::make_unique<cyclic_reduction_solver_t<real_t, false>>(); });
+	solvers.emplace("sblocked", []() { return std::make_unique<serial_blocked_thomas_solver<real_t, false>>(); });
+	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
+	solvers.emplace("blockedt", []() { return std::make_unique<blocked_thomas_solver_t<real_t, false>>(); });
+	solvers.emplace("blockedta", []() { return std::make_unique<blocked_thomas_solver_t<real_t, true>>(); });
+
+#ifndef REDUCED_KERNELS_SET
+	solvers.emplace("lstcm", []() { return std::make_unique<least_compute_thomas_solver_m<real_t, false>>(); });
+	solvers.emplace("lstcma", []() { return std::make_unique<least_compute_thomas_solver_m<real_t, true>>(); });
 	solvers.emplace("lstcs", []() { return std::make_unique<least_compute_thomas_solver_s<real_t>>(); });
 	solvers.emplace("lstcst", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, false>>(false); });
 	solvers.emplace("lstcsta", []() { return std::make_unique<least_compute_thomas_solver_s_t<real_t, true>>(false); });
@@ -72,21 +84,13 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("lstmt", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("lstmta", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("lstmtai", []() { return std::make_unique<least_memory_thomas_solver_t<real_t, true>>(true); });
-	solvers.emplace("lapack", []() { return std::make_unique<lapack_thomas_solver<real_t>>(); });
-	solvers.emplace("lapack2", []() { return std::make_unique<general_lapack_thomas_solver<real_t>>(); });
-	solvers.emplace("full_lapack", []() { return std::make_unique<full_lapack_solver<real_t>>(); });
-	solvers.emplace("biofvm", []() { return std::make_unique<biofvm<real_t>>(); });
-	solvers.emplace("cr", []() { return std::make_unique<cyclic_reduction_solver<real_t, false>>(); });
-	solvers.emplace("crt", []() { return std::make_unique<cyclic_reduction_solver_t<real_t, false>>(); });
-	solvers.emplace("sblocked", []() { return std::make_unique<serial_blocked_thomas_solver<real_t, false>>(); });
-	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
-	solvers.emplace("blockedt", []() { return std::make_unique<blocked_thomas_solver_t<real_t, false>>(); });
-	solvers.emplace("blockedta", []() { return std::make_unique<blocked_thomas_solver_t<real_t, true>>(); });
 	solvers.emplace("cubed", []() { return std::make_unique<cubed_thomas_solver_t<real_t, false>>(false); });
 	solvers.emplace("cubeda", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("cubedai", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(true); });
 	solvers.emplace("cubedmai", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("cubedmabi", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
+#endif
+
 	return solvers;
 }
 
@@ -117,7 +121,8 @@ std::unique_ptr<locally_onedimensional_solver> algorithms::try_get_adi_solver(co
 
 void algorithms::append_params(std::ostream& os, const nlohmann::json& params, bool header)
 {
-	std::vector<std::string> keys_to_skip = { "warmup_time", "outer_iterations", "inner_iterations", "benchmark_kind", "papi_counters" };
+	std::vector<std::string> keys_to_skip = { "warmup_time", "outer_iterations", "inner_iterations", "benchmark_kind",
+											  "papi_counters" };
 	if (header)
 	{
 		for (auto it = params.begin(); it != params.end(); ++it)

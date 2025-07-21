@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(USE_ASAN OFF)
 option(RISCV_CROSSCOMPILE OFF)
 option(NO_PAPI OFF)
+option(REDUCED_KERNELS_SET OFF)
 
 if(USE_ASAN)
   add_compile_options(-fsanitize=address -g)
@@ -27,9 +28,10 @@ else()
   if(RISCV_CROSSCOMPILE)
     set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic)
 
-    # set(CMAKE_CXX_FLAGS
-    #     "-O3 -ffast-math -mepi -mllvm -combiner-store-merging=0 -Rpass=loop-vectorize -Rpass-analysis=loop-vectorize -mllvm -vectorizer-use-vp-strided-load-store -mcpu=avispado -mllvm -disable-loop-idiom-memcpy -mllvm -disable-loop-idiom-memset -Rpass-missed=loop-vectorize -Xclang -target-feature -Xclang +does-not-implement-vszext -Xclang -target-feature -Xclang +does-not-implement-tu -mllvm -riscv-uleb128-reloc=0 -fno-slp-vectorize"
-    # )
+    set(CMAKE_CXX_FLAGS
+        "-O3 -ffast-math -mepi -mllvm -combiner-store-merging=0 -mllvm -vectorizer-use-vp-strided-load-store -mcpu=avispado -mllvm -disable-loop-idiom-memcpy -mllvm -disable-loop-idiom-memset -Xclang -target-feature -Xclang +does-not-implement-vszext -Xclang -target-feature -Xclang +does-not-implement-tu -mllvm -riscv-uleb128-reloc=0 -fno-slp-vectorize"
+    )
+    # set(CMAKE_CXX_FLAGS "-Rpass-analysis=loop-vectorize -Rpass-missed=loop-vectorize -Rpass=loop-vectorize ")
   else()
     set(DIFFUSE_CPP_COMPILE_OPTIONS -Wall -Wextra -pedantic
                                     -Wno-interference-size -march=native)
@@ -74,7 +76,23 @@ FetchContent_MakeAvailable(highway)
 
 file(GLOB src_files "src/*")
 
+if(REDUCED_KERNELS_SET)
+  list(REMOVE_ITEM src_files "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f_p.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/cubed_mix_thomas_solver_t.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/cubed_thomas_solver_t.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/least_compute_thomas_solver_s_t.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f_p.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_t.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_t.cpp"
+  )
+endif()
+
 add_executable(diffuse ${src_files})
+
+if(REDUCED_KERNELS_SET)
+  target_compile_definitions(diffuse PRIVATE REDUCED_KERNELS_SET)
+endif()
 
 target_compile_options(
   diffuse PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${DIFFUSE_CPP_COMPILE_OPTIONS}>)
