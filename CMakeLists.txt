@@ -76,8 +76,13 @@ target_link_libraries(diffuse hwy)
 find_package(OpenMP REQUIRED)
 target_link_libraries(diffuse OpenMP::OpenMP_CXX)
 
-find_package(LAPACK REQUIRED)
-target_link_libraries(diffuse LAPACK::LAPACK)
+find_package(LAPACK)
+if(NOT LAPACK_FOUND)
+  message(STATUS "LAPACK not found. LAPACK-based kernels will not run.")
+else()
+  target_link_libraries(diffuse LAPACK::LAPACK)
+  target_compile_definitions(diffuse PRIVATE HAS_LAPACK)
+endif()
 
 # Find and link PAPI
 find_package(PkgConfig REQUIRED)

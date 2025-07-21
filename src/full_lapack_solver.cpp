@@ -15,28 +15,74 @@ template <>
 void full_lapack_solver<float>::pbtrf(const char* uplo, const int* n, const int* kd, float* ab, const int* ldab,
 									  int* info)
 {
+#ifdef HAS_LAPACK
 	spbtrf_(uplo, n, kd, ab, ldab, info);
+#else
+	(void)uplo;
+	(void)n;
+	(void)kd;
+	(void)ab;
+	(void)ldab;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void full_lapack_solver<double>::pbtrf(const char* uplo, const int* n, const int* kd, double* ab, const int* ldab,
 									   int* info)
 {
+#ifdef HAS_LAPACK
 	dpbtrf_(uplo, n, kd, ab, ldab, info);
+#else
+	(void)uplo;
+	(void)n;
+	(void)kd;
+	(void)ab;
+	(void)ldab;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void full_lapack_solver<float>::pbtrs(const char* uplo, const int* n, const int* kd, const int* nrhs, const float* ab,
 									  const int* ldab, float* b, const int* ldb, int* info)
 {
+#ifdef HAS_LAPACK
 	spbtrs_(uplo, n, kd, nrhs, ab, ldab, b, ldb, info);
+#else
+	(void)uplo;
+	(void)n;
+	(void)kd;
+	(void)nrhs;
+	(void)ab;
+	(void)ldab;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void full_lapack_solver<double>::pbtrs(const char* uplo, const int* n, const int* kd, const int* nrhs, const double* ab,
 									   const int* ldab, double* b, const int* ldb, int* info)
 {
+#ifdef HAS_LAPACK
 	dpbtrs_(uplo, n, kd, nrhs, ab, ldab, b, ldb, info);
+#else
+	(void)uplo;
+	(void)n;
+	(void)kd;
+	(void)nrhs;
+	(void)ab;
+	(void)ldab;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <typename real_t>

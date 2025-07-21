@@ -15,14 +15,36 @@ template <>
 void general_lapack_thomas_solver<float>::gttrf(const int* n, float* dl, float* d, float* du, float* du2, int* ipiv,
 												int* info)
 {
+#ifdef HAS_LAPACK
 	sgttrf_(n, dl, d, du, du2, ipiv, info);
+#else
+	(void)n;
+	(void)dl;
+	(void)d;
+	(void)du;
+	(void)du2;
+	(void)ipiv;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void general_lapack_thomas_solver<double>::gttrf(const int* n, double* dl, double* d, double* du, double* du2,
 												 int* ipiv, int* info)
 {
+#ifdef HAS_LAPACK
 	dgttrf_(n, dl, d, du, du2, ipiv, info);
+#else
+	(void)n;
+	(void)dl;
+	(void)d;
+	(void)du;
+	(void)du2;
+	(void)ipiv;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
@@ -30,7 +52,22 @@ void general_lapack_thomas_solver<float>::gttrs(const char* trans, const int* n,
 												const float* d, const float* du, const float* du2, const int* ipiv,
 												float* b, const int* ldb, int* info)
 {
+#ifdef HAS_LAPACK
 	sgttrs_(trans, n, nrhs, dl, d, du, du2, ipiv, b, ldb, info);
+#else
+	(void)trans;
+	(void)n;
+	(void)nrhs;
+	(void)dl;
+	(void)d;
+	(void)du;
+	(void)du2;
+	(void)ipiv;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 };
 
 template <>
@@ -38,7 +75,22 @@ void general_lapack_thomas_solver<double>::gttrs(const char* trans, const int* n
 												 const double* d, const double* du, const double* du2, const int* ipiv,
 												 double* b, const int* ldb, int* info)
 {
+#ifdef HAS_LAPACK
 	dgttrs_(trans, n, nrhs, dl, d, du, du2, ipiv, b, ldb, info);
+#else
+	(void)trans;
+	(void)n;
+	(void)nrhs;
+	(void)dl;
+	(void)d;
+	(void)du;
+	(void)du2;
+	(void)ipiv;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <typename real_t>

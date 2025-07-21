@@ -17,41 +17,101 @@ extern "C"
 template <>
 void lapack_thomas_solver<float>::pttrf(const int* n, float* d, float* e, int* info)
 {
+#ifdef HAS_LAPACK
 	spttrf_(n, d, e, info);
+#else
+	(void)n;
+	(void)d;
+	(void)e;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void lapack_thomas_solver<double>::pttrf(const int* n, double* d, double* e, int* info)
 {
+#ifdef HAS_LAPACK
 	dpttrf_(n, d, e, info);
+#else
+	(void)n;
+	(void)d;
+	(void)e;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void lapack_thomas_solver<float>::pttrs(const int* n, const int* nrhs, const float* d, const float* e, float* b,
 										const int* ldb, int* info)
 {
+#ifdef HAS_LAPACK
 	spttrs_(n, nrhs, d, e, b, ldb, info);
+#else
+	(void)n;
+	(void)nrhs;
+	(void)d;
+	(void)e;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void lapack_thomas_solver<double>::pttrs(const int* n, const int* nrhs, const double* d, const double* e, double* b,
 										 const int* ldb, int* info)
 {
+#ifdef HAS_LAPACK
 	dpttrs_(n, nrhs, d, e, b, ldb, info);
+#else
+	(void)n;
+	(void)nrhs;
+	(void)d;
+	(void)e;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void lapack_thomas_solver<float>::ptsv(const int* n, const int* nrhs, float* d, float* e, float* b, const int* ldb,
 									   int* info)
 {
+#ifdef HAS_LAPACK
 	sptsv_(n, nrhs, d, e, b, ldb, info);
+#else
+	(void)n;
+	(void)nrhs;
+	(void)d;
+	(void)e;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <>
 void lapack_thomas_solver<double>::ptsv(const int* n, const int* nrhs, double* d, double* e, double* b, const int* ldb,
 										int* info)
 {
+#ifdef HAS_LAPACK
 	dptsv_(n, nrhs, d, e, b, ldb, info);
+#else
+	(void)n;
+	(void)nrhs;
+	(void)d;
+	(void)e;
+	(void)b;
+	(void)ldb;
+	(void)info;
+	std::throw std::runtime_error("LAPACK not found. Cannot perform operation.");
+#endif
 }
 
 template <typename real_t>
