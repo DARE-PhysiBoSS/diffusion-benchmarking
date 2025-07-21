@@ -4,3 +4,4 @@ venv
 build
 .cache
 experiments
+.rave

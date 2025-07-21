@@ -1,0 +1,5 @@
+#!/bin/bash
+
+cd $VSCODEDIR/.rave
+RVV=1_0 source environment.sh
+cd -

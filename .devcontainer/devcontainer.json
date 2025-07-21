@@ -5,6 +5,11 @@
 	"mounts": [
 		"source=/home/${localEnv:USER}/.ssh,target=/home/${localEnv:USER}/.ssh,type=bind,readonly"
 	],
+	"onCreateCommand": "/bin/bash .devcontainer/install_rvv_crosscompiler.sh",
+	"remoteEnv": {
+		"PATH": "${containerEnv:PATH}:${containerWorkspaceFolder}/.rave/build/llvm-cross/llvm-EPI-development-toolchain-cross/bin",
+		"VSCODEDIR": "${containerWorkspaceFolder}"
+	},
 	"features": {
 		"ghcr.io/devcontainers/features/python:1": {
 			"toolsToInstall": "flake8,autopep8,black,yapf,mypy,pydocstyle,pycodestyle,bandit,pipenv,virtualenv,pytest,pylint,cmakelang"
@@ -33,7 +38,10 @@
 				"ms-vscode.cmake-tools"
 			],
 			"settings": {
-				"clangd.path": "/usr/bin/clangd"
+				"clangd.path": "/usr/bin/clangd",
+				"git.ignoredRepositories": [
+					".rave"
+				]
 			}
 		}
 	}
