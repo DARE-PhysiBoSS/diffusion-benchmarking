@@ -77,11 +77,10 @@ FetchContent_MakeAvailable(highway)
 file(GLOB src_files "src/*")
 
 if(REDUCED_KERNELS_SET)
-  list(REMOVE_ITEM src_files "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f_p.cpp"
+  list(REMOVE_ITEM src_files 
   "${CMAKE_CURRENT_SOURCE_DIR}/src/cubed_mix_thomas_solver_t.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/cubed_thomas_solver_t.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_compute_thomas_solver_s_t.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f_p.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_t.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_t.cpp"

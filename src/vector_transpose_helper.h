@@ -53,6 +53,91 @@ struct static_rfor<-1, N>
 	{}
 };
 
+// 16xdouble
+template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3, vec_t& row4, vec_t& row5, vec_t& row6,
+						  vec_t& row7, vec_t& row8, vec_t& row9, vec_t& row10, vec_t& row11, vec_t& row12, vec_t& row13,
+						  vec_t& row14, vec_t& row15)
+{
+}
+
+// 16xfloat
+template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3, vec_t& row4, vec_t& row5, vec_t& row6,
+						  vec_t& row7, vec_t& row8, vec_t& row9, vec_t& row10, vec_t& row11, vec_t& row12, vec_t& row13,
+						  vec_t& row14, vec_t& row15)
+{
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::ConcatLowerLower(d, row8, row0);
+	auto t1 = hn::ConcatLowerLower(d, row9, row1);
+	auto t2 = hn::ConcatLowerLower(d, row10, row2);
+	auto t3 = hn::ConcatLowerLower(d, row11, row3);
+	auto t4 = hn::ConcatLowerLower(d, row12, row4);
+	auto t5 = hn::ConcatLowerLower(d, row13, row5);
+	auto t6 = hn::ConcatLowerLower(d, row14, row6);
+	auto t7 = hn::ConcatLowerLower(d, row15, row7);
+	auto t8 = hn::ConcatUpperUpper(d, row8, row0);
+	auto t9 = hn::ConcatUpperUpper(d, row9, row1);
+	auto t10 = hn::ConcatUpperUpper(d, row10, row2);
+	auto t11 = hn::ConcatUpperUpper(d, row11, row3);
+	auto t12 = hn::ConcatUpperUpper(d, row12, row4);
+	auto t13 = hn::ConcatUpperUpper(d, row13, row5);
+	auto t14 = hn::ConcatUpperUpper(d, row14, row6);
+	auto t15 = hn::ConcatUpperUpper(d, row15, row7);
+
+	auto tt0 = hn::InterleaveEvenBlocks(d, t0, t4);
+	auto tt1 = hn::InterleaveEvenBlocks(d, t1, t5);
+	auto tt2 = hn::InterleaveEvenBlocks(d, t2, t6);
+	auto tt3 = hn::InterleaveEvenBlocks(d, t3, t7);
+	auto tt4 = hn::InterleaveOddBlocks(d, t0, t4);
+	auto tt5 = hn::InterleaveOddBlocks(d, t1, t5);
+	auto tt6 = hn::InterleaveOddBlocks(d, t2, t6);
+	auto tt7 = hn::InterleaveOddBlocks(d, t3, t7);
+	auto tt8 = hn::InterleaveEvenBlocks(d, t8, t12);
+	auto tt9 = hn::InterleaveEvenBlocks(d, t9, t13);
+	auto tt10 = hn::InterleaveEvenBlocks(d, t10, t14);
+	auto tt11 = hn::InterleaveEvenBlocks(d, t11, t15);
+	auto tt12 = hn::InterleaveOddBlocks(d, t8, t12);
+	auto tt13 = hn::InterleaveOddBlocks(d, t9, t13);
+	auto tt14 = hn::InterleaveOddBlocks(d, t10, t14);
+	auto tt15 = hn::InterleaveOddBlocks(d, t11, t15);
+
+	auto u0 = hn::InterleaveLower(d, tt0, tt2);
+	auto u1 = hn::InterleaveLower(d, tt1, tt3);
+	auto u2 = hn::InterleaveUpper(d, tt0, tt2);
+	auto u3 = hn::InterleaveUpper(d, tt1, tt3);
+	auto u4 = hn::InterleaveLower(d, tt4, tt6);
+	auto u5 = hn::InterleaveLower(d, tt5, tt7);
+	auto u6 = hn::InterleaveUpper(d, tt4, tt6);
+	auto u7 = hn::InterleaveUpper(d, tt5, tt7);
+	auto u8 = hn::InterleaveLower(d, tt8, tt10);
+	auto u9 = hn::InterleaveLower(d, tt9, tt11);
+	auto u10 = hn::InterleaveUpper(d, tt8, tt10);
+	auto u11 = hn::InterleaveUpper(d, tt9, tt11);
+	auto u12 = hn::InterleaveLower(d, tt12, tt14);
+	auto u13 = hn::InterleaveLower(d, tt13, tt15);
+	auto u14 = hn::InterleaveUpper(d, tt12, tt14);
+	auto u15 = hn::InterleaveUpper(d, tt13, tt15);
+
+	row0 = hn::InterleaveLower(d, u0, u1);
+	row1 = hn::InterleaveUpper(d, u0, u1);
+	row2 = hn::InterleaveLower(d, u2, u3);
+	row3 = hn::InterleaveUpper(d, u2, u3);
+	row4 = hn::InterleaveLower(d, u4, u5);
+	row5 = hn::InterleaveUpper(d, u4, u5);
+	row6 = hn::InterleaveLower(d, u6, u7);
+	row7 = hn::InterleaveUpper(d, u6, u7);
+	row8 = hn::InterleaveLower(d, u8, u9);
+	row9 = hn::InterleaveUpper(d, u8, u9);
+	row10 = hn::InterleaveLower(d, u10, u11);
+	row11 = hn::InterleaveUpper(d, u10, u11);
+	row12 = hn::InterleaveLower(d, u12, u13);
+	row13 = hn::InterleaveUpper(d, u12, u13);
+	row14 = hn::InterleaveLower(d, u14, u15);
+	row15 = hn::InterleaveUpper(d, u14, u15);
+}
+
 // 16xfloat
 template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 16, bool> = true,
 		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
@@ -130,6 +215,41 @@ HWY_INLINE void transpose(vec_t rows[16])
 }
 
 // 8xdouble
+template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3, vec_t& row4, vec_t& row5, vec_t& row6,
+						  vec_t& row7)
+{
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::ConcatLowerLower(d, row4, row0);
+	auto t1 = hn::ConcatLowerLower(d, row5, row1);
+	auto t2 = hn::ConcatLowerLower(d, row6, row2);
+	auto t3 = hn::ConcatLowerLower(d, row7, row3);
+	auto t4 = hn::ConcatUpperUpper(d, row4, row0);
+	auto t5 = hn::ConcatUpperUpper(d, row5, row1);
+	auto t6 = hn::ConcatUpperUpper(d, row6, row2);
+	auto t7 = hn::ConcatUpperUpper(d, row7, row3);
+
+	auto u0 = hn::InterleaveEvenBlocks(d, t0, t2);
+	auto u1 = hn::InterleaveEvenBlocks(d, t1, t3);
+	auto u2 = hn::InterleaveOddBlocks(d, t0, t2);
+	auto u3 = hn::InterleaveOddBlocks(d, t1, t3);
+	auto u4 = hn::InterleaveEvenBlocks(d, t4, t6);
+	auto u5 = hn::InterleaveEvenBlocks(d, t5, t7);
+	auto u6 = hn::InterleaveOddBlocks(d, t4, t6);
+	auto u7 = hn::InterleaveOddBlocks(d, t5, t7);
+
+	row0 = hn::InterleaveLower(d, u0, u1);
+	row1 = hn::InterleaveUpper(d, u0, u1);
+	row2 = hn::InterleaveLower(d, u2, u3);
+	row3 = hn::InterleaveUpper(d, u2, u3);
+	row4 = hn::InterleaveLower(d, u4, u5);
+	row5 = hn::InterleaveUpper(d, u4, u5);
+	row6 = hn::InterleaveLower(d, u6, u7);
+	row7 = hn::InterleaveUpper(d, u6, u7);
+}
+
+// 8xdouble
 template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 8, bool> = true,
 		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
 HWY_INLINE void transpose(vec_t rows[8])
@@ -162,6 +282,41 @@ HWY_INLINE void transpose(vec_t rows[8])
 	rows[5] = hn::InterleaveUpper(d, u4, u5);
 	rows[6] = hn::InterleaveLower(d, u6, u7);
 	rows[7] = hn::InterleaveUpper(d, u6, u7);
+}
+
+// 8xfloat
+template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3, vec_t& row4, vec_t& row5, vec_t& row6,
+						  vec_t& row7)
+{
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::InterleaveEvenBlocks(d, row0, row4);
+	auto t1 = hn::InterleaveEvenBlocks(d, row1, row5);
+	auto t2 = hn::InterleaveEvenBlocks(d, row2, row6);
+	auto t3 = hn::InterleaveEvenBlocks(d, row3, row7);
+	auto t4 = hn::InterleaveOddBlocks(d, row0, row4);
+	auto t5 = hn::InterleaveOddBlocks(d, row1, row5);
+	auto t6 = hn::InterleaveOddBlocks(d, row2, row6);
+	auto t7 = hn::InterleaveOddBlocks(d, row3, row7);
+
+	auto u0 = hn::InterleaveLower(d, t0, t2);
+	auto u1 = hn::InterleaveLower(d, t1, t3);
+	auto u2 = hn::InterleaveUpper(d, t0, t2);
+	auto u3 = hn::InterleaveUpper(d, t1, t3);
+	auto u4 = hn::InterleaveLower(d, t4, t6);
+	auto u5 = hn::InterleaveLower(d, t5, t7);
+	auto u6 = hn::InterleaveUpper(d, t4, t6);
+	auto u7 = hn::InterleaveUpper(d, t5, t7);
+
+	row0 = hn::InterleaveLower(d, u0, u1);
+	row1 = hn::InterleaveUpper(d, u0, u1);
+	row2 = hn::InterleaveLower(d, u2, u3);
+	row3 = hn::InterleaveUpper(d, u2, u3);
+	row4 = hn::InterleaveLower(d, u4, u5);
+	row5 = hn::InterleaveUpper(d, u4, u5);
+	row6 = hn::InterleaveLower(d, u6, u7);
+	row7 = hn::InterleaveUpper(d, u6, u7);
 }
 
 // 8xfloat
@@ -285,6 +440,23 @@ HWY_INLINE void transpose(vec_t rows[8])
 }
 
 // 4xfloat
+template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3)
+{
+	hn::DFromV<vec_t> d;
+
+	auto u0 = hn::InterleaveLower(d, row0, row2);
+	auto u1 = hn::InterleaveLower(d, row1, row3);
+	auto u2 = hn::InterleaveUpper(d, row0, row2);
+	auto u3 = hn::InterleaveUpper(d, row1, row3);
+
+	row0 = hn::InterleaveLower(d, u0, u1);
+	row1 = hn::InterleaveUpper(d, u0, u1);
+	row2 = hn::InterleaveLower(d, u2, u3);
+	row3 = hn::InterleaveUpper(d, u2, u3);
+}
+
+// 4xfloat
 template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 4, bool> = true,
 		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
 HWY_INLINE void transpose(vec_t rows[4])
@@ -303,6 +475,23 @@ HWY_INLINE void transpose(vec_t rows[4])
 }
 
 // 4xdouble
+template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3)
+{
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::InterleaveEvenBlocks(d, row0, row2);
+	auto t1 = hn::InterleaveEvenBlocks(d, row1, row3);
+	auto t2 = hn::InterleaveOddBlocks(d, row0, row2);
+	auto t3 = hn::InterleaveOddBlocks(d, row1, row3);
+
+	row0 = hn::InterleaveLower(d, t0, t1);
+	row1 = hn::InterleaveUpper(d, t0, t1);
+	row2 = hn::InterleaveLower(d, t2, t3);
+	row3 = hn::InterleaveUpper(d, t2, t3);
+}
+
+// 4xdouble
 template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 4, bool> = true,
 		  std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, double>, bool> = true>
 HWY_INLINE void transpose(vec_t rows[4])
@@ -318,6 +507,19 @@ HWY_INLINE void transpose(vec_t rows[4])
 	rows[1] = hn::InterleaveUpper(d, t0, t1);
 	rows[2] = hn::InterleaveLower(d, t2, t3);
 	rows[3] = hn::InterleaveUpper(d, t2, t3);
+}
+
+// 2xfloat & 2xdouble
+template <typename vec_t>
+HWY_INLINE void transpose(vec_t& row0, vec_t& row1)
+{
+	hn::DFromV<vec_t> d;
+
+	auto t0 = hn::InterleaveLower(d, row0, row1);
+	auto t1 = hn::InterleaveUpper(d, row0, row1);
+
+	row0 = t0;
+	row1 = t1;
 }
 
 // 2xfloat & 2xdouble
