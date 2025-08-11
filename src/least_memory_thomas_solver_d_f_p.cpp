@@ -381,6 +381,12 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::prepare(const max_prob
 
 	cores_division_[0] = 1;
 
+	if (partial_blocking_)
+	{
+		cores_division_[1] = 1;
+		cores_division_[2] = 1;
+	}
+
 	set_block_bounds(this->problem_.ny, cores_division_[1], group_blocks_[1], group_block_lengthsy_,
 					 group_block_offsetsy_);
 
