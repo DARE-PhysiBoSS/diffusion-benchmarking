@@ -48,6 +48,7 @@ class least_memory_thomas_solver_d_f_p : public locally_onedimensional_solver,
 
 	bool use_alt_blocked_;
 	bool use_thread_distributed_allocation_;
+	bool partial_blocking_;
 	std::size_t alignment_size_;
 	index_t substrate_step_;
 
@@ -113,7 +114,7 @@ class least_memory_thomas_solver_d_f_p : public locally_onedimensional_solver,
 	thread_id_t<index_t> get_thread_id() const;
 
 public:
-	least_memory_thomas_solver_d_f_p(bool use_alt_blocked, bool use_thread_distributed_allocation);
+	least_memory_thomas_solver_d_f_p(bool use_alt_blocked, bool use_thread_distributed_allocation, bool partial_blocking);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
@@ -137,6 +138,7 @@ public:
 	void solve() override;
 
 	void solve_blocked_2d();
+	void solve_partial_blocked_3d();
 	void solve_blocked_3d_z();
 	void solve_blocked_3d_yz();
 

@@ -48,14 +48,16 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("blocked", []() { return std::make_unique<blocked_thomas_solver<real_t, false>>(); });
 	solvers.emplace("blockedt", []() { return std::make_unique<blocked_thomas_solver_t<real_t, false>>(); });
 	solvers.emplace("blockedta", []() { return std::make_unique<blocked_thomas_solver_t<real_t, true>>(); });
+	solvers.emplace("lstmfppai",
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, false, true); });
 	solvers.emplace("lstmfpai",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, false); });
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, false, false); });
 	solvers.emplace("lstmfpabi",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, false); });
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, false, false); });
 	solvers.emplace("lstmfpani",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, true); });
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(false, true, false); });
 	solvers.emplace("lstmfpabni",
-					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, true); });
+					[]() { return std::make_unique<least_memory_thomas_solver_d_f_p<real_t, true>>(true, true, false); });
 
 #ifndef REDUCED_KERNELS_SET
 	solvers.emplace("lstcm", []() { return std::make_unique<least_compute_thomas_solver_m<real_t, false>>(); });

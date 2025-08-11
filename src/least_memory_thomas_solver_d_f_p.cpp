@@ -1848,6 +1848,117 @@ constexpr void xy_fused_transpose_part_dispatch(const density_bag_t d, const ind
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+static void solve_slice_xy_fused_transpose_partial(real_t* __restrict__ densities, const real_t* __restrict__ bx,
+												   const real_t* __restrict__ cx, const real_t* __restrict__ rfx,
+												   const real_t* __restrict__ by, const real_t* __restrict__ cy,
+												   const real_t* __restrict__ rfy, const density_layout_t dens_l,
+												   const diagonal_layout_t diagx_l, const diagonal_layout_t diagy_l,
+												   const index_t s_begin, const index_t s_end)
+{
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+	const index_t y_len = dens_l | noarr::get_length<'y'>();
+	const index_t z_len = dens_l | noarr::get_length<'z'>();
+
+#pragma omp for schedule(static) nowait collapse(2)
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		for (index_t z = 0; z < z_len; z++)
+		{
+			auto bx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), bx);
+			auto cx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), cx);
+			auto rfx_bag = noarr::make_bag(diagx_l ^ noarr::fix<'s'>(s), rfx);
+
+			auto by_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), by);
+			auto cy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), cy);
+			auto rfy_bag = noarr::make_bag(diagy_l ^ noarr::fix<'s'>(s), rfy);
+
+			const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
+
+			{
+				auto y_forward = [z, d, rfy_bag](index_t y_offset, index_t x, auto tag, auto&&... vec_pack) {
+					y_forward_inside_x_vectorized(d, tag, z, y_offset, x, rfy_bag,
+												  std::forward<decltype(vec_pack)>(vec_pack)...);
+				};
+
+				auto y_forward_scalar = [z, d, rfy_bag](index_t x, index_t y, real_t data) {
+					return y_forward_inside_x(d, z, y, x, data, rfy_bag);
+				};
+
+				xy_fused_transpose_part_dispatch<real_t>(d, z, bx_bag, cx_bag, rfx_bag, std::move(y_forward),
+														 std::move(y_forward_scalar));
+			}
+
+			auto empty_f = [](auto data, auto, auto) { return data; };
+			y_backward_vectorized<simd_t>(d, by_bag, cy_bag, t, z, simd_length, y_len, std::move(empty_f));
+		}
+	}
+}
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+static void solve_slice_z_3d_intrinsics_partial(real_t* __restrict__ densities, const real_t* __restrict__ b,
+												const real_t* __restrict__ c, const real_t* __restrict__ rf,
+												const density_layout_t dens_l, const diagonal_layout_t diag_l,
+												const index_t s_begin, const index_t s_end)
+{
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
+	const index_t y_len = dens_l | noarr::get_length<'y'>();
+	const index_t n = dens_l | noarr::get_length<'z'>();
+
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag t;
+	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
+	using simd_t = hn::Vec<simd_tag>;
+
+#pragma omp for schedule(static) nowait collapse(3)
+	for (index_t s = s_begin; s < s_end; s++)
+	{
+		for (index_t y = 0; y < y_len; y++)
+		{
+			for (index_t x = 0; x < x_len; x += simd_length)
+			{
+				auto b_bag = noarr::make_bag(diag_l ^ noarr::fix<'s'>(s), b);
+				auto c_bag = noarr::make_bag(diag_l ^ noarr::fix<'s'>(s), c);
+				auto rf_bag = noarr::make_bag(diag_l ^ noarr::fix<'s'>(s), rf);
+
+				const auto d = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s), densities);
+
+				simd_t prev = hn::Zero(t);
+
+				for (index_t i = 0; i < n; i++)
+				{
+					auto idx = noarr::idx<'i'>(i);
+
+					simd_t curr = hn::Load(t, &d.template at<'z', 'y', 'x'>(i, y, x));
+					curr = hn::MulAdd(hn::Set(t, -rf_bag[idx]), prev, curr);
+
+					hn::Store(curr, t, &d.template at<'z', 'y', 'x'>(i, y, x));
+
+					prev = curr;
+				}
+
+				prev = hn::Mul(prev, hn::Set(t, b_bag.template at<'i'>(n - 1)));
+				hn::Store(prev, t, &d.template at<'z', 'y', 'x'>(n - 1, y, x));
+
+				for (index_t i = n - 2; i >= 0; i--)
+				{
+					auto idx = noarr::idx<'i'>(i);
+
+					simd_t curr = hn::Load(t, &d.template at<'z', 'y', 'x'>(i, y, x));
+					curr = hn::Mul(hn::MulAdd(prev, hn::Set(t, -c_bag[idx]), curr), hn::Set(t, b_bag[idx]));
+					hn::Store(curr, t, &d.template at<'z', 'y', 'x'>(i, y, x));
+
+					prev = curr;
+				}
+			}
+		}
+	}
+}
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
 constexpr static void solve_slice_xyz_fused_transpose(real_t* __restrict__ densities, const real_t* __restrict__ bx,
 													  const real_t* __restrict__ cx, const real_t* __restrict__ rfx,
 													  const real_t* __restrict__ by, const real_t* __restrict__ cy,
@@ -2242,6 +2353,16 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_z()
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve()
 {
+	if (partial_blocking_)
+	{
+		if (this->problem_.dims == 3)
+		{
+			solve_partial_blocked_3d();
+		}
+
+		return;
+	}
+
 	if (!(cores_division_[0] == 1 && cores_division_[1] == 1 && cores_division_[2] == 1))
 	{
 		if (this->problem_.dims == 2)
@@ -2722,12 +2843,40 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_blocked_3d_yz()
 }
 
 template <typename real_t, bool aligned_x>
+void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_partial_blocked_3d()
+{
+#pragma omp parallel
+	{
+		perf_counter counter("lstmfppai");
+
+		for (index_t s = 0; s < this->problem_.substrates_count; s += substrate_step_)
+		{
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				auto s_step_length = std::min(substrate_step_, this->problem_.substrates_count - s);
+
+				solve_slice_xy_fused_transpose_partial(
+					this->substrates_, thread_bx_[0], thread_cx_[0], thread_rf_x_[0], thread_by_[0], thread_cy_[0],
+					thread_rf_y_[0], get_substrates_layout<3>(), get_diagonal_layout(this->problem_, this->problem_.nx),
+					get_diagonal_layout(this->problem_, this->problem_.ny), s, s + s_step_length);
+#pragma omp barrier
+				solve_slice_z_3d_intrinsics_partial(
+					this->substrates_, thread_bz_[0], thread_cz_[0], thread_rf_z_[0], get_substrates_layout<3>(),
+					get_diagonal_layout(this->problem_, this->problem_.nz), s, s + s_step_length);
+#pragma omp barrier
+			}
+		}
+	}
+}
+
+template <typename real_t, bool aligned_x>
 least_memory_thomas_solver_d_f_p<real_t, aligned_x>::least_memory_thomas_solver_d_f_p(
-	bool use_alt_blocked, bool use_thread_distributed_allocation)
+	bool use_alt_blocked, bool use_thread_distributed_allocation, bool partial_blocking)
 	: countersy_count_(0),
 	  countersz_count_(0),
 	  use_alt_blocked_(use_alt_blocked),
-	  use_thread_distributed_allocation_(use_thread_distributed_allocation)
+	  use_thread_distributed_allocation_(use_thread_distributed_allocation),
+	  partial_blocking_(partial_blocking)
 {}
 
 template <typename real_t, bool aligned_x>
