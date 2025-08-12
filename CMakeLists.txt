@@ -74,7 +74,7 @@ option(HWY_ENABLE_EXAMPLES OFF)
 
 FetchContent_MakeAvailable(highway)
 
-file(GLOB src_files "src/*")
+file(GLOB_RECURSE src_files "src/*")
 
 if(REDUCED_KERNELS_SET)
   list(REMOVE_ITEM src_files 
