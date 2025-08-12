@@ -26,6 +26,7 @@
 #include "least_memory_thomas_solver_t.h"
 #include "reference_thomas_solver.h"
 #include "serial_blocked_thomas_solver.h"
+#include "space-dependent-diffusion/least_compute_thomas_solver_t.h"
 #include "space-dependent-diffusion/reference_thomas_solver.h"
 #include "tridiagonal_solver.h"
 
@@ -66,6 +67,8 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	});
 
 	solvers.emplace("sdd-ref", []() { return std::make_unique<sdd_reference_thomas_solver<real_t>>(); });
+	solvers.emplace("sdd-lstct", []() { return std::make_unique<sdd_least_compute_thomas_solver_t<real_t, false>>(); });
+	solvers.emplace("sdd-lstcta", []() { return std::make_unique<sdd_least_compute_thomas_solver_t<real_t, true>>(); });
 
 
 #ifndef REDUCED_KERNELS_SET

@@ -29,15 +29,15 @@ struct substrate_layouts
 		if constexpr (dims == 1)
 			return noarr::scalar<real_t>() ^ noarr::vectors<'x'>(xs_size_padded)
 				   ^ noarr::into_blocks_static<'x', 'b', 'x', 's'>(problem.substrates_count)
-				   ^ noarr::fix<'b'>(noarr::lit<0>);
+				   ^ noarr::fix<'b'>(noarr::lit<0>) ^ noarr::slice<'x'>(problem.nx);
 		else if constexpr (dims == 2)
 			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 'y'>(xs_size_padded, problem.ny)
 				   ^ noarr::into_blocks_static<'x', 'b', 'x', 's'>(problem.substrates_count)
-				   ^ noarr::fix<'b'>(noarr::lit<0>);
+				   ^ noarr::fix<'b'>(noarr::lit<0>) ^ noarr::slice<'x'>(problem.nx);
 		else if constexpr (dims == 3)
 			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 'y', 'z'>(xs_size_padded, problem.ny, problem.nz)
 				   ^ noarr::into_blocks_static<'x', 'b', 'x', 's'>(problem.substrates_count)
-				   ^ noarr::fix<'b'>(noarr::lit<0>);
+				   ^ noarr::fix<'b'>(noarr::lit<0>) ^ noarr::slice<'x'>(problem.nx);
 	}
 
 	template <std::size_t dims, typename index_t, typename real_t>
