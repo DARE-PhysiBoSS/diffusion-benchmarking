@@ -76,13 +76,12 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::initialize()
 
 	auto diag_l = get_diagonal_layout<'x'>();
 
-	if (aligned_x)
+	for (int i = 0; i < omp_get_max_threads(); i++)
 	{
-		b_scratch_ = (real_t*)std::aligned_alloc(alignment_size_, (diag_l | noarr::get_size()));
-	}
-	else
-	{
-		b_scratch_ = (real_t*)std::malloc((diag_l | noarr::get_size()));
+		if (aligned_x)
+			b_scratch_.push_back((real_t*)std::aligned_alloc(alignment_size_, (diag_l | noarr::get_size())));
+		else
+			b_scratch_.push_back((real_t*)std::malloc((diag_l | noarr::get_size())));
 	}
 }
 
@@ -459,20 +458,20 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve_x()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<1>(),
-								  get_diagonal_layout<'x'>());
+		solve_slice_x_1d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+								  get_substrates_layout<1>(), get_diagonal_layout<'x'>());
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_,
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
 										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 										 get_diagonal_layout<'x'>());
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_,
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
 										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 										 get_diagonal_layout<'x'>());
 	}
@@ -484,14 +483,14 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve_y()
 	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<2>(),
-								  get_diagonal_layout<'y'>(), xs_tile_size_);
+		solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+								  get_substrates_layout<2>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<3>(),
-								  get_diagonal_layout<'y'>(), xs_tile_size_);
+		solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+								  get_substrates_layout<3>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 	}
 }
 
@@ -499,7 +498,7 @@ template <typename real_t, bool aligned_x>
 void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve_z()
 {
 #pragma omp parallel
-	solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<3>(),
+	solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
 							  get_diagonal_layout<'z'>(), xs_tile_size_);
 }
 
@@ -513,8 +512,8 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 			perf_counter counter("lstct");
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
-				solve_slice_x_1d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<1>(),
-										  get_diagonal_layout<'x'>());
+				solve_slice_x_1d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<1>(), get_diagonal_layout<'x'>());
 		}
 	}
 	else if (this->problem_.dims == 2)
@@ -525,12 +524,12 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_,
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
 												 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 												 get_diagonal_layout<'x'>());
 #pragma omp barrier
-				solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<2>(),
-										  get_diagonal_layout<'y'>(), xs_tile_size_);
+				solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<2>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 #pragma omp barrier
 			}
 		}
@@ -543,15 +542,15 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_,
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
 												 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 												 get_diagonal_layout<'x'>());
 #pragma omp barrier
-				solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<3>(),
-										  get_diagonal_layout<'y'>(), xs_tile_size_);
+				solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<3>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 #pragma omp barrier
-				solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_, get_substrates_layout<3>(),
-										  get_diagonal_layout<'z'>(), xs_tile_size_);
+				solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<3>(), get_diagonal_layout<'z'>(), xs_tile_size_);
 #pragma omp barrier
 			}
 		}
@@ -567,7 +566,10 @@ sdd_least_compute_thomas_solver_t<real_t, aligned_x>::~sdd_least_compute_thomas_
 		std::free(a_);
 		std::free(b_);
 		std::free(c_);
-		std::free(b_scratch_);
+		for (auto& b_scratch : b_scratch_)
+		{
+			std::free(b_scratch);
+		}
 	}
 }
 

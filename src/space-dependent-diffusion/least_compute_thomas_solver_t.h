@@ -13,8 +13,8 @@ class sdd_least_compute_thomas_solver_t
 protected:
 	using index_t = std::int32_t;
 
-	real_t *a_, *b_, *c_;
-	real_t* b_scratch_;
+	real_t *a_ = nullptr, *b_ = nullptr, *c_ = nullptr;
+	std::vector<real_t*> b_scratch_;
 
 	std::size_t xs_tile_size_;
 	std::size_t alignment_size_;
