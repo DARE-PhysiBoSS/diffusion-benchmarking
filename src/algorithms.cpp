@@ -27,6 +27,8 @@
 #include "reference_thomas_solver.h"
 #include "serial_blocked_thomas_solver.h"
 #include "space-dependent-diffusion/least_compute_thomas_solver_t.h"
+#include "space-dependent-diffusion/least_memory_thomas_solver_t.h"
+#include "space-dependent-diffusion/partial_blocking.h"
 #include "space-dependent-diffusion/reference_thomas_solver.h"
 #include "tridiagonal_solver.h"
 
@@ -103,6 +105,10 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("cubedai", []() { return std::make_unique<cubed_thomas_solver_t<real_t, true>>(true); });
 	solvers.emplace("cubedmai", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(false); });
 	solvers.emplace("cubedmabi", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
+
+
+	solvers.emplace("sdd-lstmtai", []() { return std::make_unique<sdd_least_memory_thomas_solver_t<real_t, true>>(); });
+	solvers.emplace("sdd-pb", []() { return std::make_unique<sdd_partial_blocking<real_t, true>>(); });
 #endif
 
 
