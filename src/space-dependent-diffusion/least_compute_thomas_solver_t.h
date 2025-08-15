@@ -13,13 +13,15 @@ class sdd_least_compute_thomas_solver_t
 protected:
 	using index_t = std::int32_t;
 
-	real_t *a_ = nullptr, *b_ = nullptr, *c_ = nullptr;
+	real_t *ax_ = nullptr, *bx_ = nullptr, *cx_ = nullptr;
+	real_t *ay_ = nullptr, *by_ = nullptr, *cy_ = nullptr;
+	real_t *az_ = nullptr, *bz_ = nullptr, *cz_ = nullptr;
 	std::vector<real_t*> b_scratch_;
 
 	std::size_t xs_tile_size_;
 	std::size_t alignment_size_;
 
-	void precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape, index_t dims);
+	void precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape, index_t n, index_t dims, char dim);
 
 	template <char dim>
 	auto get_diagonal_layout()

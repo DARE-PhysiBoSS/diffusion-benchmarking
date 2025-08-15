@@ -6,7 +6,8 @@
 
 template <typename real_t, bool aligned_x>
 void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b, real_t*& c,
-																			 index_t shape, index_t dims)
+																			 index_t shape, index_t n, index_t dims,
+																			 char dim)
 {
 	auto substrates_layout = get_substrates_layout();
 
@@ -38,10 +39,29 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::precompute_values(rea
 				{
 					auto idx = noarr::idx<'x', 'y', 'z', 's'>(x, y, z, s);
 
-					a_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
-					b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
-								 + 2 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
-					c_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+					auto dim_idx = dim == 'x' ? x : (dim == 'y' ? y : z);
+
+					if (dim_idx == 0)
+					{
+						a_bag[idx] = 0;
+						b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
+									 + 1 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						c_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+					}
+					else if (dim_idx == n - 1)
+					{
+						a_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
+									 + 1 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						c_bag[idx] = 0;
+					}
+					else
+					{
+						a_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
+									 + 2 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						c_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+					}
 				}
 }
 
@@ -72,7 +92,9 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::
 template <typename real_t, bool aligned_x>
 void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::initialize()
 {
-	precompute_values(a_, b_, c_, this->problem_.dz, this->problem_.dims);
+	precompute_values(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x');
+	precompute_values(ay_, by_, cy_, this->problem_.dy, this->problem_.ny, this->problem_.dims, 'y');
+	precompute_values(az_, bz_, cz_, this->problem_.dz, this->problem_.nz, this->problem_.dims, 'z');
 
 	auto diag_l = get_diagonal_layout<'x'>();
 
@@ -116,9 +138,9 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 			auto idx = noarr::idx<'s', 'x'>(s, i);
 			auto prev_idx = noarr::idx<'s', 'x'>(s, i - 1);
 
-			auto r = a_bag[prev_idx] / scratch[prev_idx];
+			auto r = a_bag[idx] / scratch[prev_idx];
 
-			scratch[idx] = b_bag[idx] - c_bag[idx] * r;
+			scratch[idx] = b_bag[idx] - c_bag[prev_idx] * r;
 
 			d[idx] -= r * d[prev_idx];
 
@@ -143,7 +165,7 @@ static void solve_slice_x_1d(real_t* __restrict__ densities, const real_t* __res
 			auto idx = noarr::idx<'s', 'x'>(s, i);
 			auto next_idx = noarr::idx<'s', 'x'>(s, i + 1);
 
-			d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) / scratch[idx];
+			d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) / scratch[idx];
 
 			// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 		}
@@ -184,9 +206,9 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 				auto idx = noarr::idx<'s', 'm', 'x'>(s, yz, i);
 				auto prev_idx = noarr::idx<'s', 'm', 'x'>(s, yz, i - 1);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -209,7 +231,7 @@ static void solve_slice_x_2d_and_3d(real_t* __restrict__ densities, const real_t
 				auto idx = noarr::idx<'s', 'm', 'x'>(s, yz, i);
 				auto next_idx = noarr::idx<'s', 'm', 'x'>(s, yz, i + 1);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -261,9 +283,9 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'s', 'y', 'x'>(s, i, x);
 				auto prev_idx = noarr::idx<'s', 'y', 'x'>(s, i - 1, x);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -286,7 +308,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'s', 'y', 'x'>(s, i, x);
 				auto next_idx = noarr::idx<'s', 'y', 'x'>(s, i + 1, x);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -340,9 +362,9 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, i, x);
 					auto prev_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, i - 1, x);
 
-					auto r = a_bag[prev_idx] * scratch[prev_idx];
+					auto r = a_bag[idx] * scratch[prev_idx];
 
-					scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+					scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 					d[idx] -= r * d[prev_idx];
 
@@ -365,7 +387,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, i, x);
 					auto next_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, i + 1, x);
 
-					d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+					d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}
@@ -419,9 +441,9 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, i, y, x);
 					auto prev_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, i - 1, y, x);
 
-					auto r = a_bag[prev_idx] * scratch[prev_idx];
+					auto r = a_bag[idx] * scratch[prev_idx];
 
-					scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+					scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 					d[idx] -= r * d[prev_idx];
 
@@ -444,7 +466,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, i, y, x);
 					auto next_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, i + 1, y, x);
 
-					d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+					d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}
@@ -458,20 +480,20 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve_x()
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
-		solve_slice_x_1d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+		solve_slice_x_1d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
 								  get_substrates_layout<1>(), get_diagonal_layout<'x'>());
 	}
 	else if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
 										 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 										 get_diagonal_layout<'x'>());
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+		solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
 										 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 										 get_diagonal_layout<'x'>());
 	}
@@ -483,13 +505,13 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve_y()
 	if (this->problem_.dims == 2)
 	{
 #pragma omp parallel
-		solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+		solve_slice_y_2d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
 								  get_substrates_layout<2>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
-		solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+		solve_slice_y_3d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
 								  get_substrates_layout<3>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 	}
 }
@@ -498,8 +520,8 @@ template <typename real_t, bool aligned_x>
 void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve_z()
 {
 #pragma omp parallel
-	solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-							  get_diagonal_layout<'z'>(), xs_tile_size_);
+	solve_slice_z_3d<index_t>(this->substrates_, az_, bz_, cz_, b_scratch_[get_thread_num()],
+							  get_substrates_layout<3>(), get_diagonal_layout<'z'>(), xs_tile_size_);
 }
 
 template <typename real_t, bool aligned_x>
@@ -512,7 +534,7 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 			perf_counter counter("lstct");
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
-				solve_slice_x_1d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+				solve_slice_x_1d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
 										  get_substrates_layout<1>(), get_diagonal_layout<'x'>());
 		}
 	}
@@ -524,11 +546,11 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
 												 get_substrates_layout<2>() ^ noarr::rename<'y', 'm'>(),
 												 get_diagonal_layout<'x'>());
 #pragma omp barrier
-				solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+				solve_slice_y_2d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
 										  get_substrates_layout<2>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 #pragma omp barrier
 			}
@@ -542,14 +564,14 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				solve_slice_x_2d_and_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+				solve_slice_x_2d_and_3d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
 												 get_substrates_layout<3>() ^ noarr::merge_blocks<'z', 'y', 'm'>(),
 												 get_diagonal_layout<'x'>());
 #pragma omp barrier
-				solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+				solve_slice_y_3d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
 										  get_substrates_layout<3>(), get_diagonal_layout<'y'>(), xs_tile_size_);
 #pragma omp barrier
-				solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
+				solve_slice_z_3d<index_t>(this->substrates_, az_, bz_, cz_, b_scratch_[get_thread_num()],
 										  get_substrates_layout<3>(), get_diagonal_layout<'z'>(), xs_tile_size_);
 #pragma omp barrier
 			}
@@ -561,15 +583,29 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 template <typename real_t, bool aligned_x>
 sdd_least_compute_thomas_solver_t<real_t, aligned_x>::~sdd_least_compute_thomas_solver_t()
 {
-	if (a_)
+	if (ax_)
 	{
-		std::free(a_);
-		std::free(b_);
-		std::free(c_);
+		std::free(ax_);
+		std::free(bx_);
+		std::free(cx_);
 		for (auto& b_scratch : b_scratch_)
 		{
 			std::free(b_scratch);
 		}
+	}
+
+	if (ay_)
+	{
+		std::free(ay_);
+		std::free(by_);
+		std::free(cy_);
+	}
+
+	if (az_)
+	{
+		std::free(az_);
+		std::free(bz_);
+		std::free(cz_);
 	}
 }
 
