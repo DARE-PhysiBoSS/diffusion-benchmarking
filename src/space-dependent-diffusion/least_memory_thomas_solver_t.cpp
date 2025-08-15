@@ -119,7 +119,6 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::initialize()
 	}
 }
 
-
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
 		  typename scratch_layout_t>
 static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, const real_t* __restrict__ a,
@@ -551,9 +550,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, i);
 				auto prev_idx = noarr::idx<'s', 'v', 'x'>(s, yz, i - 1);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -572,7 +571,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, i);
 				auto next_idx = noarr::idx<'s', 'v', 'x'>(s, yz, i + 1);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -616,9 +615,9 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'v', 'y', 'x'>(s, i, x);
 				auto prev_idx = noarr::idx<'v', 'y', 'x'>(s, i - 1, x);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -641,7 +640,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'v', 'y', 'x'>(s, i, x);
 				auto next_idx = noarr::idx<'v', 'y', 'x'>(s, i + 1, x);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -686,9 +685,9 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i, x);
 					auto prev_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i - 1, x);
 
-					auto r = a_bag[prev_idx] * scratch[prev_idx];
+					auto r = a_bag[idx] * scratch[prev_idx];
 
-					scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+					scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 					d[idx] -= r * d[prev_idx];
 
@@ -709,7 +708,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i, x);
 					auto next_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i + 1, x);
 
-					d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+					d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}
@@ -753,9 +752,9 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i, y, x);
 					auto prev_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i - 1, y, x);
 
-					auto r = a_bag[prev_idx] * scratch[prev_idx];
+					auto r = a_bag[idx] * scratch[prev_idx];
 
-					scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+					scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 					d[idx] -= r * d[prev_idx];
 
@@ -776,7 +775,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i, y, x);
 					auto next_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i + 1, y, x);
 
-					d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+					d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}

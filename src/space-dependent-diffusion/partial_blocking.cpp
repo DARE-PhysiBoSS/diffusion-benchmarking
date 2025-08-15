@@ -8,10 +8,9 @@
 
 template <typename real_t, bool aligned_x>
 void sdd_partial_blocking<real_t, aligned_x>::precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape,
-																index_t dims)
+																index_t n, index_t dims, char dim,
+																auto substrates_layout)
 {
-	auto substrates_layout = get_substrates_layout();
-
 	if (aligned_x)
 	{
 		a = (real_t*)std::aligned_alloc(alignment_size_, (substrates_layout | noarr::get_size()));
@@ -40,10 +39,29 @@ void sdd_partial_blocking<real_t, aligned_x>::precompute_values(real_t*& a, real
 				{
 					auto idx = noarr::idx<'x', 'y', 'z', 's'>(x, y, z, s);
 
-					a_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
-					b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
-								 + 2 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
-					c_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+					auto dim_idx = dim == 'x' ? x : (dim == 'y' ? y : z);
+
+					if (dim_idx == 0)
+					{
+						a_bag[idx] = 0;
+						b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
+									 + 1 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						c_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+					}
+					else if (dim_idx == n - 1)
+					{
+						a_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
+									 + 1 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						c_bag[idx] = 0;
+					}
+					else
+					{
+						a_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						b_bag[idx] = 1 + this->problem_.dt * this->problem_.decay_rates[s] / dims
+									 + 2 * this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+						c_bag[idx] = -this->problem_.dt * get_diffusion_coefficients(x, y, z, s) / (shape * shape);
+					}
 				}
 }
 
@@ -78,9 +96,19 @@ void sdd_partial_blocking<real_t, aligned_x>::tune(const nlohmann::json& params)
 template <typename real_t, bool aligned_x>
 void sdd_partial_blocking<real_t, aligned_x>::initialize()
 {
-	precompute_values(a_, b_, c_, this->problem_.dz, this->problem_.dims);
+	if (continuous_x_diagonal_)
+		precompute_values(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x',
+						  get_diag_layout_x());
+	else
+		precompute_values(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x',
+						  get_substrates_layout());
 
-	auto diag_l = get_diagonal_layout<'x'>();
+	precompute_values(ay_, by_, cy_, this->problem_.dy, this->problem_.ny, this->problem_.dims, 'y',
+					  get_substrates_layout());
+	precompute_values(az_, bz_, cz_, this->problem_.dz, this->problem_.nz, this->problem_.dims, 'z',
+					  get_substrates_layout());
+
+	auto diag_l = get_scratch_layout<'x'>();
 
 	for (int i = 0; i < omp_get_max_threads(); i++)
 	{
@@ -89,6 +117,225 @@ void sdd_partial_blocking<real_t, aligned_x>::initialize()
 		else
 			b_scratch_.push_back((real_t*)std::malloc((diag_l | noarr::get_size())));
 	}
+}
+
+
+template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
+		  typename scratch_layout_t>
+static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, const real_t* __restrict__ a,
+												const real_t* __restrict__ b, const real_t* __restrict__ c,
+												real_t* __restrict__ b_scratch, const density_layout_t dens_l,
+												const diagonal_layout_t diag_l, const scratch_layout_t scratch_l,
+												const index_t s, const index_t z, index_t n)
+{
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag d;
+	constexpr index_t simd_length = hn::Lanes(d);
+	using simd_t = hn::Vec<simd_tag>;
+
+	simd_t d_rows[simd_length];
+
+	const index_t y_len = dens_l | noarr::get_length<'y'>();
+
+	const index_t simd_yz_len = y_len / simd_length * simd_length;
+
+	// vectorized body
+	{
+		const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
+
+		for (index_t y = 0; y < simd_yz_len; y += simd_length)
+		{
+			// vector registers that hold the to be transposed x*yz plane
+
+			simd_t c_prev = hn::Zero(d);
+			simd_t d_prev = hn::Zero(d);
+			simd_t scratch_prev = hn::Zero(d);
+
+			// forward substitution until last simd_length elements
+			for (index_t i = 0; i < full_n - simd_length; i += simd_length)
+			{
+				// aligned loads
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					d_rows[v] = hn::Load(d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+				}
+
+				// transposition to enable vectorization
+				transpose(d_rows);
+
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					simd_t a_curr = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(a, z, y, i + v, s)));
+					simd_t b_curr = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(b, z, y, i + v, s)));
+
+					auto r = hn::Mul(a_curr, scratch_prev);
+
+					scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_curr));
+					hn::Store(scratch_prev, d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
+
+					d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
+
+					d_prev = d_rows[v];
+					c_prev = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, i + v, s)));
+				}
+
+				// aligned stores
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					hn::Store(d_rows[v], d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+				}
+			}
+
+			// we are aligned to the vector size, so we can safely continue
+			// here we fuse the end of forward substitution and the beginning of backwards propagation
+			{
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					d_rows[v] = hn::Load(
+						d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, full_n - simd_length, s)));
+				}
+
+				// transposition to enable vectorization
+				transpose(d_rows);
+
+				index_t remainder_work = n % simd_length;
+				remainder_work += remainder_work == 0 ? simd_length : 0;
+
+				// the rest of forward part
+				{
+					for (index_t v = 0; v < remainder_work; v++)
+					{
+						simd_t a_curr = hn::Load(
+							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(a, z, y, full_n - simd_length + v, s)));
+						simd_t b_curr = hn::Load(
+							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(b, z, y, full_n - simd_length + v, s)));
+
+						auto r = hn::Mul(a_curr, scratch_prev);
+
+						scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_curr));
+						hn::Store(scratch_prev, d,
+								  &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
+
+						d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
+
+						d_prev = d_rows[v];
+						c_prev = hn::Load(
+							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, full_n - simd_length + v, s)));
+					}
+				}
+
+				{
+					d_prev = hn::Mul(d_prev, scratch_prev);
+					d_rows[remainder_work - 1] = d_prev;
+				}
+
+				// the begin of backward part
+				{
+					for (index_t v = remainder_work - 2; v >= 0; v--)
+					{
+						simd_t c_curr = hn::Load(
+							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, full_n - simd_length + v, s)));
+
+						auto scratch =
+							hn::Load(d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
+						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_curr, d_rows[v]), scratch);
+
+						d_prev = d_rows[v];
+					}
+				}
+
+				// transposition back to the original form
+				transpose(d_rows);
+
+				// aligned stores
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					hn::Store(
+						d_rows[v], d,
+						&(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, full_n - simd_length, s)));
+				}
+			}
+
+			// we continue with backwards substitution
+			for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
+			{
+				// aligned loads
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					d_rows[v] = hn::Load(d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+				}
+
+				// backward propagation
+				{
+					for (index_t v = simd_length - 1; v >= 0; v--)
+					{
+						simd_t c_curr = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, i + v, s)));
+
+						auto scratch = hn::Load(d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
+						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_curr, d_rows[v]), scratch);
+
+						d_prev = d_rows[v];
+					}
+				}
+
+				// transposition back to the original form
+				transpose(d_rows);
+
+				// aligned stores
+				for (index_t v = 0; v < simd_length; v++)
+				{
+					hn::Store(d_rows[v], d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+				}
+			}
+		}
+	}
+
+	// 	// yz remainder
+	// 	{
+	// 		auto d = noarr::make_bag(dens_l, densities);
+
+	// 		auto scratch = noarr::make_bag(scratch_l, b_scratch);
+
+	// #pragma omp for schedule(static) nowait
+	// 		for (index_t yz = simd_yz_len; yz < m; yz++)
+	// 		{
+	// 			{
+	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, 0);
+	// 				scratch[idx] = 1 / b_bag[idx];
+	// 			}
+
+	// 			for (index_t i = 1; i < n; i++)
+	// 			{
+	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, i);
+	// 				auto prev_idx = noarr::idx<'s', 'v', 'x'>(s, yz, i - 1);
+
+	// 				auto r = a_bag[prev_idx] * scratch[prev_idx];
+
+	// 				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+
+	// 				d[idx] -= r * d[prev_idx];
+
+	// 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+	// 			}
+
+	// 			{
+	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, n - 1);
+	// 				d[idx] *= scratch[idx];
+
+	// 				// std::cout << "n-1: " << (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) << std::endl;
+	// 			}
+
+	// 			for (index_t i = n - 2; i >= 0; i--)
+	// 			{
+	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, i);
+	// 				auto next_idx = noarr::idx<'s', 'v', 'x'>(s, yz, i + 1);
+
+	// 				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+
+	// 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+	// 			}
+	// 		}
+	// 	}
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
@@ -102,7 +349,6 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 	simd_tag d;
 	constexpr index_t simd_length = hn::Lanes(d);
 	using simd_t = hn::Vec<simd_tag>;
-
 
 	simd_t a_rows[simd_length];
 	simd_t b_rows[simd_length];
@@ -266,8 +512,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				{
 					for (index_t v = simd_length - 1; v >= 0; v--)
 					{
-						auto scratch =
-							hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
+						auto scratch = hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
 						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_prev, d_rows[v]), scratch);
 
 						d_prev = d_rows[v];
@@ -313,9 +558,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				auto idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i);
 				auto prev_idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i - 1);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -334,7 +579,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				auto idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i);
 				auto next_idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i + 1);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -377,9 +622,9 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'v', 'y', 'x'>(s, i, x);
 				auto prev_idx = noarr::idx<'v', 'y', 'x'>(s, i - 1, x);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -402,7 +647,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'v', 'y', 'x'>(s, i, x);
 				auto next_idx = noarr::idx<'v', 'y', 'x'>(s, i + 1, x);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -445,9 +690,9 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i, x);
 				auto prev_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i - 1, x);
 
-				auto r = a_bag[prev_idx] * scratch[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 				d[idx] -= r * d[prev_idx];
 
@@ -468,7 +713,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 				auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i, x);
 				auto next_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i + 1, x);
 
-				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 			}
@@ -512,9 +757,9 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i, y, x);
 					auto prev_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i - 1, y, x);
 
-					auto r = a_bag[prev_idx] * scratch[prev_idx];
+					auto r = a_bag[idx] * scratch[prev_idx];
 
-					scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+					scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
 					d[idx] -= r * d[prev_idx];
 
@@ -535,7 +780,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i, y, x);
 					auto next_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i + 1, y, x);
 
-					d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+					d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}
@@ -550,9 +795,14 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_x()
 	{
 #pragma omp parallel for schedule(static)
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-			solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-													   get_substrates_layout<3>(), get_diagonal_layout<'x'>(), s, 0,
-													   this->problem_.nx);
+			if (continuous_x_diagonal_)
+				solve_slice_x_2d_and_3d_transpose_l<index_t>(
+					this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+					get_diag_layout_x(), get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
+			else
+				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
+														   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+														   get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
 	}
 	else if (this->problem_.dims == 3)
 	{
@@ -560,9 +810,9 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_x()
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
 #pragma omp for schedule(static) nowait
 			for (index_t z = 0; z < this->problem_.nz; z++)
-				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-														   get_substrates_layout<3>(), get_diagonal_layout<'x'>(), s, z,
-														   this->problem_.nx);
+				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
+														   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+														   get_scratch_layout<'x'>(), s, z, this->problem_.nx);
 	}
 }
 
@@ -573,8 +823,8 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_y()
 	{
 #pragma omp parallel for schedule(static)
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-			solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-									  get_substrates_layout<2>(), get_diagonal_layout<'y'>(), s, x_tile_size_);
+			solve_slice_y_2d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
+									  get_substrates_layout<2>(), get_scratch_layout<'y'>(), s, x_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
@@ -582,8 +832,8 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_y()
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
 #pragma omp for schedule(static) nowait
 			for (index_t z = 0; z < this->problem_.nz; z++)
-				solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-										  get_substrates_layout<3>(), get_diagonal_layout<'y'>(), s, z, x_tile_size_);
+				solve_slice_y_3d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<3>(), get_scratch_layout<'y'>(), s, z, x_tile_size_);
 	}
 }
 
@@ -593,8 +843,8 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_z()
 #pragma omp parallel
 	{
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-			solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-									  get_substrates_layout<3>(), get_diagonal_layout<'z'>(), s, x_tile_size_);
+			solve_slice_z_3d<index_t>(this->substrates_, az_, bz_, cz_, b_scratch_[get_thread_num()],
+									  get_substrates_layout<3>(), get_scratch_layout<'z'>(), s, x_tile_size_);
 	}
 }
 
@@ -613,11 +863,17 @@ void sdd_partial_blocking<real_t, aligned_x>::solve()
 			{
 				for (index_t i = 0; i < this->problem_.iterations; i++)
 				{
-					solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, a_, b_, c_,
-															   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-															   get_diagonal_layout<'x'>(), s, 0, this->problem_.nx);
-					solve_slice_y_2d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-											  get_substrates_layout<2>(), get_diagonal_layout<'y'>(), s, x_tile_size_);
+					if (continuous_x_diagonal_)
+						solve_slice_x_2d_and_3d_transpose_l<index_t>(
+							this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+							get_diag_layout_x(), get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
+					else
+						solve_slice_x_2d_and_3d_transpose<index_t>(
+							this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+							get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
+
+					solve_slice_y_2d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
+											  get_substrates_layout<2>(), get_scratch_layout<'y'>(), s, x_tile_size_);
 				}
 			}
 		}
@@ -635,17 +891,23 @@ void sdd_partial_blocking<real_t, aligned_x>::solve()
 #pragma omp for schedule(static) nowait
 					for (index_t z = 0; z < this->problem_.nz; z++)
 					{
-						solve_slice_x_2d_and_3d_transpose<index_t>(
-							this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-							get_diagonal_layout<'x'>(), s, z, this->problem_.nx);
+						if (continuous_x_diagonal_)
+							solve_slice_x_2d_and_3d_transpose_l<index_t>(
+								this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
+								get_substrates_layout<3>(), get_diag_layout_x(), get_scratch_layout<'x'>(), s, z,
+								this->problem_.nx);
+						else
+							solve_slice_x_2d_and_3d_transpose<index_t>(
+								this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
+								get_substrates_layout<3>(), get_scratch_layout<'x'>(), s, z, this->problem_.nx);
 
-						solve_slice_y_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-												  get_substrates_layout<3>(), get_diagonal_layout<'y'>(), s, z,
+						solve_slice_y_3d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
+												  get_substrates_layout<3>(), get_scratch_layout<'y'>(), s, z,
 												  x_tile_size_);
 					}
 #pragma omp barrier
-					solve_slice_z_3d<index_t>(this->substrates_, a_, b_, c_, b_scratch_[get_thread_num()],
-											  get_substrates_layout<3>(), get_diagonal_layout<'z'>(), s, x_tile_size_);
+					solve_slice_z_3d<index_t>(this->substrates_, az_, bz_, cz_, b_scratch_[get_thread_num()],
+											  get_substrates_layout<3>(), get_scratch_layout<'z'>(), s, x_tile_size_);
 #pragma omp barrier
 				}
 			}
@@ -654,21 +916,36 @@ void sdd_partial_blocking<real_t, aligned_x>::solve()
 }
 
 template <typename real_t, bool aligned_x>
-sdd_partial_blocking<real_t, aligned_x>::sdd_partial_blocking() : a_(nullptr), b_(nullptr), c_(nullptr)
+sdd_partial_blocking<real_t, aligned_x>::sdd_partial_blocking(bool continuous_x_diagonal)
+	: continuous_x_diagonal_(continuous_x_diagonal)
 {}
 
 template <typename real_t, bool aligned_x>
 sdd_partial_blocking<real_t, aligned_x>::~sdd_partial_blocking()
 {
-	if (a_)
+	if (ax_)
 	{
-		std::free(a_);
-		std::free(b_);
-		std::free(c_);
+		std::free(ax_);
+		std::free(bx_);
+		std::free(cx_);
 		for (auto& b_scratch : b_scratch_)
 		{
 			std::free(b_scratch);
 		}
+	}
+
+	if (ay_)
+	{
+		std::free(ay_);
+		std::free(by_);
+		std::free(cy_);
+	}
+
+	if (az_)
+	{
+		std::free(az_);
+		std::free(bz_);
+		std::free(cz_);
 	}
 }
 
