@@ -108,7 +108,8 @@ std::map<std::string, std::function<std::unique_ptr<diffusion_solver>()>> get_so
 	solvers.emplace("cubedmabi", []() { return std::make_unique<cubed_mix_thomas_solver_t<real_t, true>>(true); });
 
 
-	solvers.emplace("sdd-lstmtai", []() { return std::make_unique<sdd_least_memory_thomas_solver_t<real_t, true>>(); });
+	solvers.emplace("sdd-lstmtai", []() { return std::make_unique<sdd_least_memory_thomas_solver_t<real_t, true>>(false); });
+	solvers.emplace("sdd-lstmtaic", []() { return std::make_unique<sdd_least_memory_thomas_solver_t<real_t, true>>(true); });
 	solvers.emplace("sdd-pb", []() { return std::make_unique<sdd_partial_blocking<real_t, true>>(); });
 	solvers.emplace("sdd-fb", []() { return std::make_unique<sdd_full_blocking<real_t, true>>(); });
 #endif

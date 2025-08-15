@@ -14,14 +14,18 @@ class sdd_least_memory_thomas_solver_t : public locally_onedimensional_solver,
 {
 	using index_t = std::int32_t;
 
-	real_t *a_, *b_, *c_;
+	real_t *ax_ = nullptr, *bx_ = nullptr, *cx_ = nullptr;
+	real_t *ay_ = nullptr, *by_ = nullptr, *cy_ = nullptr;
+	real_t *az_ = nullptr, *bz_ = nullptr, *cz_ = nullptr;
 	std::vector<real_t*> b_scratch_;
 
 	std::size_t x_tile_size_;
 	std::size_t alignment_size_;
 
+	bool continuous_x_diagonal_ = false;
+
 	template <char dim>
-	auto get_diagonal_layout()
+	auto get_scratch_layout()
 	{
 		const auto n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
 		const auto s = std::max(alignment_size_ / sizeof(real_t), x_tile_size_);
@@ -38,10 +42,10 @@ class sdd_least_memory_thomas_solver_t : public locally_onedimensional_solver,
 		return noarr::scalar<real_t>() ^ noarr::vectors<'v', dim>(ssize_padded, size_padded);
 	}
 
-	void precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape, index_t dims);
+	void precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape, index_t n, index_t dims, char dim, auto substrates_layout);
 
 public:
-	sdd_least_memory_thomas_solver_t();
+	sdd_least_memory_thomas_solver_t(bool continuous_x_diagonal);
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
@@ -58,6 +62,22 @@ public:
 		else if constexpr (dims == 3)
 			return noarr::scalar<real_t>()
 				   ^ noarr::vectors<'x', 'y', 'z', 's'>(x_size_padded, this->problem_.ny, this->problem_.nz,
+														this->problem_.substrates_count);
+	}
+
+	template <std::size_t dims = 3>
+	auto get_diag_layout_x() const
+	{
+		std::size_t y_size = this->problem_.ny * sizeof(real_t);
+		std::size_t y_size_padded = (y_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		y_size_padded /= sizeof(real_t);
+
+		if constexpr (dims == 2)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'y', 'x', 's'>(y_size_padded, this->problem_.nx, this->problem_.substrates_count);
+		else if constexpr (dims == 3)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'y', 'x', 'z', 's'>(y_size_padded, this->problem_.nx, this->problem_.nz,
 														this->problem_.substrates_count);
 	}
 
