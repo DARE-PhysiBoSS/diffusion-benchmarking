@@ -28,7 +28,7 @@ void sdd_partial_blocking<real_t, aligned_x>::precompute_values(real_t*& a, real
 	auto b_bag = noarr::make_bag(substrates_layout, b);
 	auto c_bag = noarr::make_bag(substrates_layout, c);
 
-	auto get_diffusion_coefficients = [&](index_t x, index_t y, index_t z, index_t s) {
+	auto get_diffusion_coefficients = [&](index_t , index_t , index_t , index_t s) {
 		return this->problem_.diffusion_coefficients[s];
 	};
 
@@ -662,7 +662,6 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 							 const index_t z, index_t x_tile_size)
 {
 	const index_t n = dens_l | noarr::get_length<'y'>();
-	const index_t z_len = dens_l | noarr::get_length<'z'>();
 
 	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks<'x', 'x', 'v'>(x_tile_size);
 

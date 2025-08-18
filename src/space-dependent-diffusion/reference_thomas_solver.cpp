@@ -15,7 +15,7 @@ void sdd_reference_thomas_solver<real_t>::precompute_values(std::unique_ptr<real
 	auto b_bag = noarr::make_bag(substrates_layout, b.get());
 	auto c_bag = noarr::make_bag(substrates_layout, c.get());
 
-	auto get_diffusion_coefficients = [&](index_t x, index_t y, index_t z, index_t s) {
+	auto get_diffusion_coefficients = [&](index_t , index_t , index_t , index_t s) {
 		return this->problem_.diffusion_coefficients[s];
 	};
 

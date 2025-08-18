@@ -28,7 +28,7 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::precompute_values(rea
 	auto b_bag = noarr::make_bag(substrates_layout, b);
 	auto c_bag = noarr::make_bag(substrates_layout, c);
 
-	auto get_diffusion_coefficients = [&](index_t x, index_t y, index_t z, index_t s) {
+	auto get_diffusion_coefficients = [&](index_t , index_t , index_t , index_t s) {
 		return this->problem_.diffusion_coefficients[s];
 	};
 
