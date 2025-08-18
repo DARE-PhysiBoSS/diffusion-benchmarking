@@ -25,7 +25,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	std::unique_ptr<real_t*[]> thread_substrate_array_;
 	std::unique_ptr<real_t*[]> a_scratch_, c_scratch_;
 
-	std::size_t x_tile_size_;
+	index_t x_tile_size_;
 	std::size_t alignment_size_;
 
 	std::array<index_t, 3> cores_division_;
@@ -65,7 +65,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	auto get_diagonal_layout()
 	{
 		const auto n = std::max({ this->problem_.nx, group_blocks_[1] + 1, group_blocks_[2] + 1 });
-		const auto s = std::max(alignment_size_ / sizeof(real_t), x_tile_size_);
+		const auto s = std::max<std::size_t>(alignment_size_ / sizeof(real_t), x_tile_size_);
 
 		std::size_t size = n * sizeof(real_t);
 		std::size_t size_padded = (size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
