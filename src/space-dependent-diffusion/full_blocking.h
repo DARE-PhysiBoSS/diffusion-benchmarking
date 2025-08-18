@@ -19,7 +19,10 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	std::unique_ptr<std::unique_ptr<std::barrier<>>[]> barriersy_, barriersz_;
 	index_t countersy_count_, countersz_count_;
 
-	std::unique_ptr<real_t*[]> a_, b_, c_, thread_substrate_array_;
+	std::unique_ptr<real_t*[]> ax_, bx_, cx_;
+	std::unique_ptr<real_t*[]> ay_, by_, cy_;
+	std::unique_ptr<real_t*[]> az_, bz_, cz_;
+	std::unique_ptr<real_t*[]> thread_substrate_array_;
 	std::unique_ptr<real_t*[]> a_scratch_, c_scratch_;
 
 	std::size_t x_tile_size_;
@@ -61,7 +64,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	template <char dim>
 	auto get_diagonal_layout()
 	{
-		const auto n = std::max({ this->problem_.nx, group_blocks_[1], group_blocks_[2] });
+		const auto n = std::max({ this->problem_.nx, group_blocks_[1] + 1, group_blocks_[2] + 1 });
 		const auto s = std::max(alignment_size_ / sizeof(real_t), x_tile_size_);
 
 		std::size_t size = n * sizeof(real_t);
@@ -81,8 +84,23 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 		return noarr::vectors<'y', 'z', 'g'>(cores_division_[1], cores_division_[2], substrate_groups_);
 	}
 
+	template <std::size_t dims = 3>
+	auto get_diag_layout_x(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
+	{
+		std::size_t y_size = ny * sizeof(real_t);
+		std::size_t y_size_padded = (y_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		y_size_padded /= sizeof(real_t);
+
+		if constexpr (dims == 2)
+			return noarr::scalar<real_t>() ^ noarr::vectors<'y', 'x', 's'>(y_size_padded, nx, substrates_count);
+		else if constexpr (dims == 3)
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'y', 'x', 'z', 's'>(y_size_padded, nx, nz, substrates_count);
+	}
+
+	template <bool dim_x>
 	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b, std::unique_ptr<real_t*[]>& c,
-						   index_t shape, index_t dims);
+						   index_t shape, index_t n, index_t dims, char dim);
 
 	void precompute_values(index_t counters_count,
 						   std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]>& counters,
@@ -113,6 +131,8 @@ public:
 				   ^ noarr::vectors<'x', 'y', 'z', 's'>(x_size_padded, this->problem_.ny, this->problem_.nz,
 														this->problem_.substrates_count);
 	}
+
+	double access(std::size_t s, std::size_t x, std::size_t y, std::size_t z) const override;
 
 	void prepare(const max_problem_t& problem) override;
 
