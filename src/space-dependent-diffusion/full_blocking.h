@@ -62,7 +62,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	}
 
 	template <char dim>
-	auto get_diagonal_layout()
+	auto get_scratch_layout()
 	{
 		const auto n = std::max({ this->problem_.nx, group_blocks_[1] + 1, group_blocks_[2] + 1 });
 		const auto s = std::max<std::size_t>(alignment_size_ / sizeof(real_t), x_tile_size_);

@@ -232,7 +232,7 @@ void sdd_full_blocking<real_t, aligned_x>::initialize()
 		precompute_values(countersz_count_, countersz_, barriersz_, cores_division_[2], 'z');
 	}
 
-	auto diag_l = get_diagonal_layout<'x'>();
+	auto scratch_l = get_scratch_layout<'x'>();
 
 	a_scratch_ = std::make_unique<real_t*[]>(omp_get_max_threads());
 	c_scratch_ = std::make_unique<real_t*[]>(omp_get_max_threads());
@@ -240,8 +240,8 @@ void sdd_full_blocking<real_t, aligned_x>::initialize()
 #pragma omp parallel
 	{
 		auto tid = get_thread_num();
-		a_scratch_[tid] = (real_t*)std::aligned_alloc(alignment_size_, (diag_l | noarr::get_size()));
-		c_scratch_[tid] = (real_t*)std::aligned_alloc(alignment_size_, (diag_l | noarr::get_size()));
+		a_scratch_[tid] = (real_t*)std::aligned_alloc(alignment_size_, (scratch_l | noarr::get_size()));
+		c_scratch_[tid] = (real_t*)std::aligned_alloc(alignment_size_, (scratch_l | noarr::get_size()));
 	}
 }
 template <typename real_t, bool aligned_x>
@@ -1004,10 +1004,10 @@ static void solve_block_z(real_t* __restrict__ densities, const real_t* __restri
 }
 
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __restrict__ a, const real_t* __restrict__ b,
 							 const real_t* __restrict__ c, real_t* __restrict__ b_scratch,
-							 const density_layout_t dens_l, const diagonal_layout_t diag_l, const index_t s_idx,
+							 const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t s_idx,
 							 const index_t z, index_t x_tile_size)
 {
 	const index_t n = dens_l | noarr::get_length<'y'>();
@@ -1022,7 +1022,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 
 	auto d = noarr::make_bag(blocked_dens_l, densities);
 
-	auto scratch = noarr::make_bag(diag_l, b_scratch);
+	auto scratch = noarr::make_bag(scratch_l, b_scratch);
 
 	for (index_t x = 0; x < x_block_len; x++)
 	{
@@ -1068,10 +1068,10 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 	}
 }
 
-template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
+template <typename index_t, typename real_t, typename density_layout_t, typename scratch_layout_t>
 static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __restrict__ a, const real_t* __restrict__ b,
 							 const real_t* __restrict__ c, real_t* __restrict__ b_scratch,
-							 const density_layout_t dens_l, const diagonal_layout_t diag_l, const index_t s_idx,
+							 const density_layout_t dens_l, const scratch_layout_t scratch_l, const index_t s_idx,
 							 index_t x_tile_size)
 {
 	const index_t n = dens_l | noarr::get_length<'z'>();
@@ -1087,7 +1087,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 
 	auto d = noarr::make_bag(blocked_dens_l, densities);
 
-	auto scratch = noarr::make_bag(diag_l, b_scratch);
+	auto scratch = noarr::make_bag(scratch_l, b_scratch);
 
 	for (index_t y = 0; y < y_len; y++)
 		for (index_t x = 0; x < x_block_len; x++)
@@ -1182,7 +1182,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x()
 						current_densities, current_ax, current_bx, current_cx, current_a_scratch,
 						dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
 							^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-						diag_x, get_diagonal_layout<'x'>(), s, z - block_z_begin, this->problem_.nx);
+						diag_x, get_scratch_layout<'x'>(), s, z - block_z_begin, this->problem_.nx);
 				}
 			}
 		}
@@ -1228,7 +1228,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve_y()
 			{
 				auto s_slice = noarr::slice<'s'>(block_s_begin, block_s_end - block_s_begin);
 
-				auto diag_y = get_diagonal_layout<'y'>() ^ s_slice;
+				auto scratch_y = get_scratch_layout<'y'>() ^ s_slice;
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -1247,7 +1247,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve_y()
 				for (index_t z = block_z_begin; z < block_z_end; z++)
 				{
 					auto sync_y = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
-								   c = c_scratch_.get(), dens_l, diag_y, dist_l, n = this->problem_.ny, tid = tid.y,
+								   c = c_scratch_.get(), dens_l, scratch_y, dist_l, n = this->problem_.ny, tid = tid.y,
 								   group_size, s, &barrier = barriery](index_t z) {
 						// synchronize_y_blocked_distributed(densities, a, c, dens_l ^ noarr::fix<'s'>(s),
 						// 								  diag_y ^ noarr::fix<'s'>(s), dist_l, n, z, tid, group_size,
@@ -1257,14 +1257,14 @@ void sdd_full_blocking<real_t, aligned_x>::solve_y()
 					if (cores_division_[1] != 1)
 						solve_block_y(current_densities, current_ay, current_by, current_cy, current_a_scratch,
 									  current_c_scratch, dens_l ^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-									  diag_y, block_y_begin, block_y_end, z - block_z_begin, s, x_tile_size_,
+									  scratch_y, block_y_begin, block_y_end, z - block_z_begin, s, x_tile_size_,
 									  std::move(sync_y));
 					else
 						solve_slice_y_3d<index_t>(current_densities, current_ay, current_by, current_cy,
 												  current_a_scratch,
 												  dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
 													  ^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-												  diag_y, s, z - block_z_begin, x_tile_size_);
+												  scratch_y, s, z - block_z_begin, x_tile_size_);
 				}
 			}
 		}
@@ -1310,7 +1310,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve_z()
 			{
 				auto s_slice = noarr::slice<'s'>(block_s_begin, block_s_end - block_s_begin);
 
-				auto diag_z = get_diagonal_layout<'z'>() ^ s_slice;
+				auto scratch_z = get_scratch_layout<'z'>() ^ s_slice;
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -1328,7 +1328,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve_z()
 
 
 				auto sync_z = [densities = thread_substrate_array_.get(), a = a_scratch_.get(), c = c_scratch_.get(),
-							   dens_l, diag_z, dist_l, n = this->problem_.nz, tid = tid.z, group_size, s,
+							   dens_l, scratch_z, dist_l, n = this->problem_.nz, tid = tid.z, group_size, s,
 							   &barrier = barrierz](index_t z) {
 					// synchronize_z_blocked_distributed(densities, a, c, dens_l ^ noarr::fix<'s'>(s),
 					// 								  diag_z ^ noarr::fix<'s'>(s), dist_l, n, z, tid, group_size,
@@ -1338,12 +1338,12 @@ void sdd_full_blocking<real_t, aligned_x>::solve_z()
 				if (cores_division_[2] != 1)
 					solve_block_z(current_densities, current_az, current_bz, current_cz, current_a_scratch,
 								  current_c_scratch, dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin),
-								  diag_z, block_z_begin, block_z_end, s, x_tile_size_, std::move(sync_z));
+								  scratch_z, block_z_begin, block_z_end, s, x_tile_size_, std::move(sync_z));
 				else
 					solve_slice_z_3d<index_t>(current_densities, current_az, current_bz, current_cz, current_a_scratch,
 											  dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
 												  ^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-											  diag_z, s, x_tile_size_);
+											  scratch_z, s, x_tile_size_);
 			}
 		}
 	}
@@ -1393,8 +1393,8 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 			{
 				auto s_slice = noarr::slice<'s'>(block_s_begin, block_s_end - block_s_begin);
 
-				auto diag_y = get_diagonal_layout<'y'>() ^ s_slice;
-				auto diag_z = get_diagonal_layout<'z'>() ^ s_slice;
+				auto scratch_y = get_scratch_layout<'y'>() ^ s_slice;
+				auto scratch_z = get_scratch_layout<'z'>() ^ s_slice;
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -1427,11 +1427,11 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 						current_densities, current_ax, current_bx, current_cx, current_a_scratch,
 						dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
 							^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-						diag_x, get_diagonal_layout<'x'>(), s, z - block_z_begin, this->problem_.nx);
+						diag_x, get_scratch_layout<'x'>(), s, z - block_z_begin, this->problem_.nx);
 
 
 					auto sync_y = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
-								   c = c_scratch_.get(), dens_l, diag_y, dist_l, n = this->problem_.ny, tid = tid.y,
+								   c = c_scratch_.get(), dens_l, scratch_y, dist_l, n = this->problem_.ny, tid = tid.y,
 								   group_size, s, &barrier = barriery](index_t z) {
 						// synchronize_y_blocked_distributed(densities, a, c, dens_l ^ noarr::fix<'s'>(s),
 						// 								  diag_y ^ noarr::fix<'s'>(s), dist_l, n, z, tid, group_size,
@@ -1441,20 +1441,20 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 					if (cores_division_[1] != 1)
 						solve_block_y(current_densities, current_ay, current_by, current_cy, current_a_scratch,
 									  current_c_scratch, dens_l ^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-									  diag_y, block_y_begin, block_y_end, z - block_z_begin, s, x_tile_size_,
+									  scratch_y, block_y_begin, block_y_end, z - block_z_begin, s, x_tile_size_,
 									  std::move(sync_y));
 					else
 						solve_slice_y_3d<index_t>(current_densities, current_ay, current_by, current_cy,
 												  current_a_scratch,
 												  dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
 													  ^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-												  diag_y, s, z - block_z_begin, x_tile_size_);
+												  scratch_y, s, z - block_z_begin, x_tile_size_);
 				}
 
 				if (this->problem_.dims == 3)
 				{
 					auto sync_z = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
-								   c = c_scratch_.get(), dens_l, diag_z, dist_l, n = this->problem_.nz, tid = tid.z,
+								   c = c_scratch_.get(), dens_l, scratch_z, dist_l, n = this->problem_.nz, tid = tid.z,
 								   group_size, s, &barrier = barrierz](index_t z) {
 						// synchronize_z_blocked_distributed(densities, a, c, dens_l ^ noarr::fix<'s'>(s),
 						// 								  diag_z ^ noarr::fix<'s'>(s), dist_l, n, z, tid, group_size,
@@ -1464,13 +1464,13 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 					if (cores_division_[2] != 1)
 						solve_block_z(current_densities, current_az, current_bz, current_cz, current_a_scratch,
 									  current_c_scratch, dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin),
-									  diag_z, block_z_begin, block_z_end, s, x_tile_size_, std::move(sync_z));
+									  scratch_z, block_z_begin, block_z_end, s, x_tile_size_, std::move(sync_z));
 					else
 						solve_slice_z_3d<index_t>(current_densities, current_az, current_bz, current_cz,
 												  current_a_scratch,
 												  dens_l ^ noarr::set_length<'y'>(block_y_end - block_y_begin)
 													  ^ noarr::set_length<'z'>(block_z_end - block_z_begin),
-												  diag_z, s, x_tile_size_);
+												  scratch_z, s, x_tile_size_);
 				}
 			}
 		}
