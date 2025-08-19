@@ -15,9 +15,9 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 {
 	using index_t = std::int32_t;
 
-	std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]> countersy_, countersz_;
-	std::unique_ptr<std::unique_ptr<std::barrier<>>[]> barriersy_, barriersz_;
-	index_t countersy_count_, countersz_count_;
+	std::unique_ptr<std::unique_ptr<aligned_atomic<index_t>>[]> countersx_, countersy_, countersz_;
+	std::unique_ptr<std::unique_ptr<std::barrier<>>[]> barriersx_, barriersy_, barriersz_;
+	index_t countersx_count_, countersy_count_, countersz_count_;
 
 	std::unique_ptr<real_t*[]> ax_, bx_, cx_;
 	std::unique_ptr<real_t*[]> ay_, by_, cy_;
@@ -33,10 +33,12 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	index_t x_sync_step_ = 1, y_sync_step_ = 1, z_sync_step_ = 1;
 
 	std::array<index_t, 3> group_blocks_;
+	std::vector<index_t> group_block_lengthsx_;
 	std::vector<index_t> group_block_lengthsy_;
 	std::vector<index_t> group_block_lengthsz_;
 	std::vector<index_t> group_block_lengthss_;
 
+	std::vector<index_t> group_block_offsetsx_;
 	std::vector<index_t> group_block_offsetsy_;
 	std::vector<index_t> group_block_offsetsz_;
 	std::vector<index_t> group_block_offsetss_;
@@ -46,21 +48,19 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	template <char dim_to_skip = ' '>
 	auto get_blocked_substrate_layout(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
 	{
-		std::size_t x_size = nx * sizeof(real_t);
-		std::size_t x_size_padded = (x_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
-		x_size_padded /= sizeof(real_t);
+		auto layout = noarr::scalar<real_t>() ^ noarr::vector<'x'>() ^ noarr::vector<'y'>() ^ noarr::vector<'z'>()
+					  ^ noarr::vector<'s'>();
 
-		auto layout = noarr::scalar<real_t>() ^ noarr::vector<'x'>(x_size_padded) ^ noarr::vector<'y'>()
-					  ^ noarr::vector<'z'>() ^ noarr::vector<'s'>() ^ noarr::slice<'x'>(nx);
-
-		if constexpr (dim_to_skip == 'y')
-			return layout ^ noarr::set_length<'z', 's'>(nz, substrates_count);
+		if constexpr (dim_to_skip == 'x')
+			return layout ^ noarr::set_length<'y', 'z', 's'>(ny, nz, substrates_count);
+		else if constexpr (dim_to_skip == 'y')
+			return layout ^ noarr::set_length<'x', 'z', 's'>(nx, nz, substrates_count);
 		else if constexpr (dim_to_skip == 'z')
-			return layout ^ noarr::set_length<'y', 's'>(ny, substrates_count);
+			return layout ^ noarr::set_length<'x', 'y', 's'>(nx, ny, substrates_count);
 		else if constexpr (dim_to_skip == '*')
 			return layout ^ noarr::set_length<'s'>(substrates_count);
 		else
-			return layout ^ noarr::set_length<'y', 'z', 's'>(ny, nz, substrates_count);
+			return layout ^ noarr::set_length<'x', 'y', 'z', 's'>(nx, ny, nz, substrates_count);
 	}
 
 	template <char dim>
@@ -68,10 +68,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	{
 		if constexpr (dim == 'x')
 		{
-			const auto n = nx;
-			const auto s = alignment_size_ / sizeof(real_t);
-
-			return noarr::scalar<real_t>() ^ noarr::vectors<'v', dim>(s, n);
+			return noarr::scalar<real_t>() ^ noarr::vectors<'y', 'x', 'z'>(ny, nx, nz);
 		}
 		else if constexpr (dim == 'y')
 		{
@@ -103,7 +100,8 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 
 	auto get_thread_distribution_layout() const
 	{
-		return noarr::vectors<'y', 'z', 'g'>(cores_division_[1], cores_division_[2], substrate_groups_);
+		return noarr::vectors<'x', 'y', 'z', 'g'>(cores_division_[0], cores_division_[1], cores_division_[2],
+												  substrate_groups_);
 	}
 
 	template <std::size_t dims = 3>
@@ -132,6 +130,18 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 						  std::vector<index_t>& group_block_offsets);
 
 	thread_id_t<index_t> get_thread_id() const;
+
+	index_t get_lane_id(char dim) const
+	{
+		const auto tid = get_thread_id();
+
+		if (dim == 'x')
+			return tid.y * cores_division_[2] + tid.group * cores_division_[1] * cores_division_[2] + tid.z;
+		else if (dim == 'y')
+			return tid.x * cores_division_[2] + tid.group * cores_division_[0] * cores_division_[2] + tid.z;
+		else
+			return tid.x * cores_division_[1] + tid.group * cores_division_[0] * cores_division_[1] + tid.y;
+	}
 
 public:
 	sdd_full_blocking();
