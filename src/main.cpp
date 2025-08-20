@@ -1,8 +1,16 @@
 #include <fstream>
 #include <iostream>
 
+#if defined(__clang__)
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wnan-infinity-disabled"
+	#include <nlohmann/json.hpp>
+	#pragma clang diagnostic pop
+#else
+	#include <nlohmann/json.hpp>
+#endif
+
 #include <argparse/argparse.hpp>
-#include <nlohmann/json.hpp>
 
 #include "algorithms.h"
 #include "perf_utils.h"

@@ -2,7 +2,14 @@
 
 #include <fstream>
 
-#include <nlohmann/json.hpp>
+#if defined(__clang__)
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wnan-infinity-disabled"
+	#include <nlohmann/json.hpp>
+	#pragma clang diagnostic pop
+#else
+	#include <nlohmann/json.hpp>
+#endif
 
 max_problem_t problems::read_problem(const std::string& file)
 {

@@ -41,7 +41,8 @@
 				"clangd.path": "/usr/bin/clangd",
 				"git.ignoredRepositories": [
 					".rave"
-				]
+				],
+				"cmake.copyCompileCommands": "${containerWorkspaceFolder}/build/compile_commands.json"
 			}
 		}
 	}

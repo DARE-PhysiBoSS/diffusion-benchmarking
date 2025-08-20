@@ -1,6 +1,14 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
+#if defined(__clang__)
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wnan-infinity-disabled"
+	#include <nlohmann/json.hpp>
+	#pragma clang diagnostic pop
+#else
+	#include <nlohmann/json.hpp>
+#endif
+
 
 #include "problem.h"
 

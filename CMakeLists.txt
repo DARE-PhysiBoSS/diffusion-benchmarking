@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 project(
   diffuse
   VERSION 0.1
@@ -84,6 +86,9 @@ if(REDUCED_KERNELS_SET)
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_f.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_d_t.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/least_memory_thomas_solver_t.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/space-dependent-diffusion/least_memory_thomas_solver_t.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/space-dependent-diffusion/partial_blocking.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/space-dependent-diffusion/full_blocking.cpp"
   )
 endif()
 
