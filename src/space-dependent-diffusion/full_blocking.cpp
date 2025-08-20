@@ -1665,8 +1665,6 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x()
 
 #pragma omp parallel
 	{
-		perf_counter counter("lstmfpai");
-
 		const thread_id_t<index_t> tid = get_thread_id();
 
 		const auto block_x_begin = group_block_offsetsx_[tid.x];
@@ -1757,8 +1755,6 @@ void sdd_full_blocking<real_t, aligned_x>::solve_y()
 
 #pragma omp parallel
 	{
-		perf_counter counter("lstmfpai");
-
 		const thread_id_t<index_t> tid = get_thread_id();
 
 		const auto block_y_begin = group_block_offsetsy_[tid.y];
@@ -1844,8 +1840,6 @@ void sdd_full_blocking<real_t, aligned_x>::solve_z()
 
 #pragma omp parallel
 	{
-		perf_counter counter("lstmfpai");
-
 		const thread_id_t<index_t> tid = get_thread_id();
 
 		const auto block_z_begin = group_block_offsetsz_[tid.z];
@@ -1933,7 +1927,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 
 #pragma omp parallel
 	{
-		perf_counter counter("lstmfpai");
+		perf_counter counter("sdd-fb");
 
 		const thread_id_t<index_t> tid = get_thread_id();
 

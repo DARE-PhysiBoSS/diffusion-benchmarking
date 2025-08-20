@@ -28,7 +28,7 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::precompute_values(real
 	auto b_bag = noarr::make_bag(substrates_layout, b);
 	auto c_bag = noarr::make_bag(substrates_layout, c);
 
-	auto get_diffusion_coefficients = [&](index_t , index_t , index_t , index_t s) {
+	auto get_diffusion_coefficients = [&](index_t, index_t, index_t, index_t s) {
 		return this->problem_.diffusion_coefficients[s];
 	};
 
@@ -110,7 +110,7 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::initialize()
 
 	auto diag_l = get_scratch_layout<'x'>();
 
-	for (int i = 0; i < omp_get_max_threads(); i++)
+	for (int i = 0; i < get_max_threads(); i++)
 	{
 		if (aligned_x)
 			b_scratch_.push_back((real_t*)std::aligned_alloc(alignment_size_, (diag_l | noarr::get_size())));
@@ -853,7 +853,7 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			perf_counter counter("lstmt");
+			perf_counter counter("sdd-lstmt");
 
 			for (index_t s = 0; s < this->problem_.substrates_count; s++)
 			{
@@ -882,7 +882,7 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			perf_counter counter("lstmt");
+			perf_counter counter("sdd-lstmt");
 
 			for (index_t s = 0; s < this->problem_.substrates_count; s++)
 			{

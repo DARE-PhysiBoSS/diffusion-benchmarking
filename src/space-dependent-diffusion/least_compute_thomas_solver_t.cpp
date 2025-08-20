@@ -531,7 +531,7 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			perf_counter counter("lstct");
+			perf_counter counter("sdd-lstct");
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 				solve_slice_x_1d<index_t>(this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()],
@@ -542,7 +542,7 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			perf_counter counter("lstct");
+			perf_counter counter("sdd-lstct");
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
@@ -560,7 +560,7 @@ void sdd_least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 	{
 #pragma omp parallel
 		{
-			perf_counter counter("lstct");
+			perf_counter counter("sdd-lstct");
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
