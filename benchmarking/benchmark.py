@@ -251,10 +251,13 @@ if __name__ == "__main__":
     parser.add_argument("executable_path", help="Path to executable")
     parser.add_argument(
         "-g", "--group", required=False, action='store', help="Group name to benchmark")
+    parser.add_argument(
+        "--prefix", required=False, action='store', default="", help="Benchmarking prefix. Useful when running the same benchmark file on various machines.")
 
     args = parser.parse_args()
     json_path = args.benchmark_path
     exe_path = args.executable_path
+    prefix = args.prefix
 
     selected_group_name = args.group
 
@@ -265,26 +268,27 @@ if __name__ == "__main__":
         print(f"Error parsing JSON file: {e}", file=sys.stderr)
         sys.exit(1)
 
-    name = data["name"]
+    benchmarking_name = prefix + data["name"]
     groups = data["groups"]
 
     print("Generating data...")
 
     if selected_group_name is None:
         for group_name, group in groups.items():
-            generate_data(name, group_name, group)
+            generate_data(benchmarking_name, group_name, group)
     else:
-        if selected_group_name in groups.keys():
+        if not selected_group_name in groups.keys():
             print(
                 f"Error: Group '{selected_group_name}' not found.", file=sys.stderr)
             sys.exit(1)
-        generate_data(name, selected_group_name, groups[selected_group_name])
+        generate_data(benchmarking_name, selected_group_name,
+                      groups[selected_group_name])
 
     print("Running...")
 
     if selected_group_name is None:
         for group_name, group in groups.items():
-            run_single_group(exe_path, name, group_name, group)
+            run_single_group(exe_path, benchmarking_name, group_name, group)
     else:
-        run_single_group(exe_path, name, selected_group_name,
+        run_single_group(exe_path, benchmarking_name, selected_group_name,
                          groups[selected_group_name])
