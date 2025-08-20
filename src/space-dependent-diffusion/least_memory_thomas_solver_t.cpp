@@ -586,8 +586,10 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 							 index_t x_tile_size)
 {
 	const index_t n = dens_l | noarr::get_length<'y'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks<'x', 'x', 'v'>(x_tile_size);
+	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks_dynamic<'x', 'x', 'v', 'b'>(x_tile_size)
+						  ^ noarr::fix<'b'>(noarr::lit<0>);
 
 	const index_t x_block_len = blocked_dens_l | noarr::get_length<'x'>();
 
@@ -599,10 +601,13 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 
 	auto scratch = noarr::make_bag(diag_l, b_scratch);
 
-#pragma omp for schedule(static) nowait
 	for (index_t x = 0; x < x_block_len; x++)
 	{
-		for (index_t s = 0; s < x_tile_size; s++)
+		const auto remainder = x_len % x_tile_size;
+		const auto x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+		const auto tile_size = x == x_block_len - 1 ? x_len_remainder : x_tile_size;
+
+		for (index_t s = 0; s < tile_size; s++)
 		{
 			auto idx = noarr::idx<'v', 'y', 'x'>(s, 0, x);
 			scratch[idx] = 1 / b_bag[idx];
@@ -610,7 +615,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 
 		for (index_t i = 1; i < n; i++)
 		{
-			for (index_t s = 0; s < x_tile_size; s++)
+			for (index_t s = 0; s < tile_size; s++)
 			{
 				auto idx = noarr::idx<'v', 'y', 'x'>(s, i, x);
 				auto prev_idx = noarr::idx<'v', 'y', 'x'>(s, i - 1, x);
@@ -625,7 +630,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 			}
 		}
 
-		for (index_t s = 0; s < x_tile_size; s++)
+		for (index_t s = 0; s < tile_size; s++)
 		{
 			auto idx = noarr::idx<'v', 'y', 'x'>(s, n - 1, x);
 			d[idx] *= scratch[idx];
@@ -635,7 +640,7 @@ static void solve_slice_y_2d(real_t* __restrict__ densities, const real_t* __res
 
 		for (index_t i = n - 2; i >= 0; i--)
 		{
-			for (index_t s = 0; s < x_tile_size; s++)
+			for (index_t s = 0; s < tile_size; s++)
 			{
 				auto idx = noarr::idx<'v', 'y', 'x'>(s, i, x);
 				auto next_idx = noarr::idx<'v', 'y', 'x'>(s, i + 1, x);
@@ -656,8 +661,10 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 {
 	const index_t n = dens_l | noarr::get_length<'y'>();
 	const index_t z_len = dens_l | noarr::get_length<'z'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
 
-	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks<'x', 'x', 'v'>(x_tile_size);
+	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks_dynamic<'x', 'x', 'v', 'b'>(x_tile_size)
+						  ^ noarr::fix<'b'>(noarr::lit<0>);
 
 	const index_t x_block_len = blocked_dens_l | noarr::get_length<'x'>();
 
@@ -673,14 +680,18 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 	for (index_t z = 0; z < z_len; z++)
 		for (index_t x = 0; x < x_block_len; x++)
 		{
-			for (index_t s = 0; s < x_tile_size; s++)
+			const auto remainder = x_len % x_tile_size;
+			const auto x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+			const auto tile_size = x == x_block_len - 1 ? x_len_remainder : x_tile_size;
+
+			for (index_t s = 0; s < tile_size; s++)
 			{
 				auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, 0, x);
 				scratch[idx] = 1 / b_bag[idx];
 			}
 
 			for (index_t i = 1; i < n; i++)
-				for (index_t s = 0; s < x_tile_size; s++)
+				for (index_t s = 0; s < tile_size; s++)
 				{
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i, x);
 					auto prev_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i - 1, x);
@@ -694,7 +705,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}
 
-			for (index_t s = 0; s < x_tile_size; s++)
+			for (index_t s = 0; s < tile_size; s++)
 			{
 				auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, n - 1, x);
 				d[idx] *= scratch[idx];
@@ -703,7 +714,7 @@ static void solve_slice_y_3d(real_t* __restrict__ densities, const real_t* __res
 			}
 
 			for (index_t i = n - 2; i >= 0; i--)
-				for (index_t s = 0; s < x_tile_size; s++)
+				for (index_t s = 0; s < tile_size; s++)
 				{
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i, x);
 					auto next_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, z, i + 1, x);
@@ -722,9 +733,11 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 							 index_t x_tile_size)
 {
 	const index_t n = dens_l | noarr::get_length<'z'>();
+	const index_t x_len = dens_l | noarr::get_length<'x'>();
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 
-	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks<'x', 'x', 'v'>(x_tile_size);
+	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s_idx) ^ noarr::into_blocks_dynamic<'x', 'x', 'v', 'b'>(x_tile_size)
+						  ^ noarr::fix<'b'>(noarr::lit<0>);
 
 	const index_t x_block_len = blocked_dens_l | noarr::get_length<'x'>();
 
@@ -740,14 +753,18 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 	for (index_t y = 0; y < y_len; y++)
 		for (index_t x = 0; x < x_block_len; x++)
 		{
-			for (index_t s = 0; s < x_tile_size; s++)
+			const auto remainder = x_len % x_tile_size;
+			const auto x_len_remainder = remainder == 0 ? x_tile_size : remainder;
+			const auto tile_size = x == x_block_len - 1 ? x_len_remainder : x_tile_size;
+
+			for (index_t s = 0; s < tile_size; s++)
 			{
 				auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, 0, y, x);
 				scratch[idx] = 1 / b_bag[idx];
 			}
 
 			for (index_t i = 1; i < n; i++)
-				for (index_t s = 0; s < x_tile_size; s++)
+				for (index_t s = 0; s < tile_size; s++)
 				{
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i, y, x);
 					auto prev_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i - 1, y, x);
@@ -761,7 +778,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 					// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
 				}
 
-			for (index_t s = 0; s < x_tile_size; s++)
+			for (index_t s = 0; s < tile_size; s++)
 			{
 				auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, n - 1, y, x);
 				d[idx] *= scratch[idx];
@@ -770,7 +787,7 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 			}
 
 			for (index_t i = n - 2; i >= 0; i--)
-				for (index_t s = 0; s < x_tile_size; s++)
+				for (index_t s = 0; s < tile_size; s++)
 				{
 					auto idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i, y, x);
 					auto next_idx = noarr::idx<'v', 'z', 'y', 'x'>(s, i + 1, y, x);
