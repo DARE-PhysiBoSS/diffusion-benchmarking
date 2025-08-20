@@ -46,7 +46,7 @@ class sdd_partial_blocking : public locally_onedimensional_solver,
 						   auto substrates_layout);
 
 public:
-	sdd_partial_blocking(bool continuous_x_diagonal);
+	sdd_partial_blocking();
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const

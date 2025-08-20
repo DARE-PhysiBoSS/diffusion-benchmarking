@@ -86,6 +86,7 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::tune(const nlohmann::j
 {
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
 	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
+	continuous_x_diagonal_ = params.contains("continuous_x_diagonal") ? (bool)params["continuous_x_diagonal"] : false;
 
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;
@@ -930,8 +931,7 @@ void sdd_least_memory_thomas_solver_t<real_t, aligned_x>::solve()
 }
 
 template <typename real_t, bool aligned_x>
-sdd_least_memory_thomas_solver_t<real_t, aligned_x>::sdd_least_memory_thomas_solver_t(bool continuous_x_diagonal)
-	: continuous_x_diagonal_(continuous_x_diagonal)
+sdd_least_memory_thomas_solver_t<real_t, aligned_x>::sdd_least_memory_thomas_solver_t()
 {}
 
 template <typename real_t, bool aligned_x>

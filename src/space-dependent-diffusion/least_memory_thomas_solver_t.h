@@ -45,7 +45,7 @@ class sdd_least_memory_thomas_solver_t : public locally_onedimensional_solver,
 	void precompute_values(real_t*& a, real_t*& b, real_t*& c, index_t shape, index_t n, index_t dims, char dim, auto substrates_layout);
 
 public:
-	sdd_least_memory_thomas_solver_t(bool continuous_x_diagonal);
+	sdd_least_memory_thomas_solver_t();
 
 	template <std::size_t dims = 3>
 	auto get_substrates_layout() const
