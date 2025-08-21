@@ -52,78 +52,6 @@ import argparse
 import subprocess
 
 
-def create_problems_for_group(group_directory: str, sizes: list[str]):
-    """
-    Generate problem JSON files for each specified size in a group.
-
-    Args:
-        group_directory (str): Directory to store problem files.
-        sizes (list[str]): List of problem size strings (e.g., "32x32x32x1").
-    """
-    for problem_size in sizes:
-        parts = [int(x) for x in problem_size.split('x')]
-        dims = len(parts) - 2
-        if (dims < 2):
-            print(
-                f"Error: Incorrect problem size: {problem_size}", file=sys.stderr)
-            sys.exit(1)
-        iterations: int = int(parts[-1])
-        substrate_count: int = int(parts[-2])
-        nx = int(parts[0])
-        ny = int(parts[1])
-        nz = int(parts[2]) if dims == 3 else 1
-
-        template: dict[str, object] = {
-            "dims": dims,
-            "dx": 20,
-            "dy": 20,
-            "dz": 20,
-            "nx": nx,
-            "ny": ny,
-            "nz": nz,
-            "substrates_count": substrate_count,
-            "iterations": iterations,
-            "dt": 0.01,
-            "diffusion_coefficients": 10000,
-            "decay_rates": 0.01,
-            "initial_conditions": 1000,
-            "gaussian_pulse": False
-        }
-
-        input_dir = f"{group_directory}/data"
-        os.makedirs(input_dir, exist_ok=True)
-
-        output_path = f"{input_dir}/{problem_size}.json"
-        with open(output_path, "w") as outfile:
-            json.dump(template, outfile, indent=2)
-
-
-def create_param_file_for_alg(algorithm_directory: str, default_params: dict[str, object],  params: dict[str, list[int]]):
-    """
-    Generate parameter JSON files for each combination of algorithm parameters.
-
-    Args:
-        algorithm_directory (str): Directory to store parameter files.
-        default_params (dict): Default parameters to include in each file.
-        params (dict): Dictionary of parameter lists to sweep over.
-    """
-    keys = list(params.keys())
-    values = [params[k] for k in keys]
-
-    for combination in itertools.product(*values):
-        combo_dict = dict(zip(keys, combination))
-        combo_dict: dict[str, object] = {**default_params, **combo_dict}
-
-        args = "_".join(str(x) for x in combination)
-
-        param_dir = f"{algorithm_directory}/{args}"
-        os.makedirs(param_dir, exist_ok=True)
-
-        output_path = f"{algorithm_directory}/{args}/params.json"
-        with open(output_path, "w") as outfile:
-            json.dump(combo_dict, outfile, indent=2)
-
-
 class RunDict(TypedDict):
     """
     TypedDict for a single run configuration.
@@ -150,99 +78,241 @@ class GroupDict(TypedDict):
     runs: Dict[str, RunDict]
 
 
-def generate_data(bench_name: str, group_name: str, group: GroupDict):
-    """
-    Generate all problem and parameter files for a benchmark group.
+class Benchmarking:
+    def __init__(self, executable_path: str, groups: list[GroupDict], benchmarking_name: str, selected_group: str | None):
+        self.executable_path = executable_path
+        self.groups = groups
+        self.benchmarking_name = benchmarking_name
+        self.selected_group_name = selected_group
+        self.benchmarking_cases: int = 0
+        self.progress: int = 0
 
-    Args:
-        bench_name (str): Benchmark name.
-        group_name (str): Group name.
-        group (GroupDict): Group configuration dictionary.
-    """
-    group_dir = f"{bench_name}/{group_name}"
-    os.makedirs(group_dir, exist_ok=True)
+        print("Printing OMP env vars:")
+        for k, v in os.environ.items():
+            if k.startswith("OMP"):
+                print(f"{k}={v}")
 
-    create_problems_for_group(group_dir, group["sizes"])
+    def group_dir(self, group_name: str):
+        return f"{self.benchmarking_name}/{group_name}"
 
-    for run_name, run in group["runs"].items():
-        if run_name == "data":
-            print("Run name can not be named 'data'.",  file=sys.stderr)
-            sys.exit(1)
-        alg_dir = f'{group_dir}/{run_name}'
-        os.makedirs(alg_dir, exist_ok=True)
+    def data_dir(self, group_name: str):
+        return f"{self.group_dir(group_name)}/data"
 
-        create_param_file_for_alg(
-            alg_dir, group["default_params"], run["params"])
+    def run_dir(self, group_name: str, alg_name: str):
+        return f"{self.group_dir(group_name)}/{alg_name}"
 
+    def params_dir(self, group_name: str, alg_name: str, param_name: str):
+        return f"{self.group_dir(group_name)}/{alg_name}/{param_name}"
 
-def diffuse(executable_path: str, problem_path: str, params_path: str, alg: str, double: bool):
-    """
-    Run the benchmark executable for a given problem and parameter set.
+    def benchmark(self):
+        self.generate_data()
+        self.run()
 
-    Args:
-        executable_path (str): Path to the benchmark executable.
-        problem_path (str): Path to the problem JSON file.
-        params_path (str): Path to the parameter JSON file.
-        alg (str): Algorithm name.
-        double (bool): Whether to use double precision.
-    """
-    problems_descriptor = os.path.basename(problem_path)
-    params_descriptor = os.path.basename(os.path.dirname(params_path))
-    out_csv_path = os.path.join(os.path.dirname(
-        params_path), f"{os.path.splitext(problems_descriptor)[0]}.csv")
+    def generate_data(self):
+        print("Generating data...")
 
-    cmd = [
-        executable_path,
-        "--alg", alg,
-        "--problem", problem_path,
-        "--params", params_path,
-        "--benchmark"
-    ]
+        if self.selected_group_name is None:
+            for group_name, group in groups.items():
+                self.generate_group_data(group_name, group)
+        else:
+            if not self.selected_group_name in groups.keys():
+                print(
+                    f"Error: Group '{selected_group_name}' not found.", file=sys.stderr)
+                sys.exit(1)
+            self.generate_group_data(self.selected_group_name,
+                                     groups[self.selected_group_name])
 
-    if double:
-        cmd.append("--double")
+    def run(self):
+        print("Running...")
 
-    if os.path.exists(out_csv_path):
-        print(f"{alg} {problems_descriptor} {params_descriptor} skipped.")
-        return
+        if self.selected_group_name is None:
+            for group_name, group in groups.items():
+                self.run_single_group(group_name, group)
+        else:
+            self.run_single_group(self.selected_group_name,
+                                  groups[self.selected_group_name])
 
-    try:
-        with open(out_csv_path, "w") as outfile:
-            subprocess.run(cmd, stdout=outfile,
-                           stderr=subprocess.STDOUT, check=True)
-    except subprocess.CalledProcessError:
-        os.remove(out_csv_path)
-        print(f"{alg} {problems_descriptor} {params_descriptor} Failed.")
+    def create_problems_for_group(self, group_name: str, sizes: list[str]):
+        """
+        Generate problem JSON files for each specified size in a group.
 
+        Args:
+            group_name (str): Group name.
+            sizes (list[str]): List of problem size strings (e.g., "32x32x32x1x1").
+        """
+        for problem_size in sizes:
+            parts = [int(x) for x in problem_size.split('x')]
+            dims = len(parts) - 2
+            if (dims < 2):
+                print(
+                    f"Error: Incorrect problem size: {problem_size}", file=sys.stderr)
+                sys.exit(1)
+            iterations: int = int(parts[-1])
+            substrate_count: int = int(parts[-2])
+            nx = int(parts[0])
+            ny = int(parts[1])
+            nz = int(parts[2]) if dims == 3 else 1
 
-def run_single_group(executable: str, bench_name: str, group_name: str, group: GroupDict):
-    """
-    Run all benchmarks for a single group, iterating over problems and parameter sets.
+            template: dict[str, object] = {
+                "dims": dims,
+                "dx": 20,
+                "dy": 20,
+                "dz": 20,
+                "nx": nx,
+                "ny": ny,
+                "nz": nz,
+                "substrates_count": substrate_count,
+                "iterations": iterations,
+                "dt": 0.01,
+                "diffusion_coefficients": 10000,
+                "decay_rates": 0.01,
+                "initial_conditions": 1000,
+                "gaussian_pulse": False
+            }
 
-    Args:
-        executable (str): Path to the benchmark executable.
-        bench_name (str): Benchmark name.
-        group_name (str): Group name.
-        group (GroupDict): Group configuration dictionary.
-    """
-    group_dir = f"{bench_name}/{group_name}"
-    double: bool = group["data_type"] == "double"
+            data_dir = self.data_dir(group_name)
+            os.makedirs(data_dir, exist_ok=True)
 
-    for problem_file in os.listdir(os.path.join(group_dir, "data")):
-        problem_path = os.path.join(group_dir, "data", problem_file)
+            output_path = f"{data_dir}/{problem_size}.json"
+            with open(output_path, "w") as outfile:
+                json.dump(template, outfile, indent=2)
+
+    def create_param_file_for_alg(self, run_directory: str, default_params: dict[str, object],  params: dict[str, list[int]]):
+        """
+        Generate parameter JSON files for each combination of algorithm parameters.
+
+        Args:
+            run_directory (str): Directory to store parameter files.
+            default_params (dict): Default parameters to include in each file.
+            params (dict): Dictionary of parameter lists to sweep over.
+        """
+        keys = list(params.keys())
+        values = [params[k] for k in keys]
+
+        run_cases = 0
+
+        for combination in itertools.product(*values):
+            run_cases += 1
+            combo_dict = dict(zip(keys, combination))
+            combo_dict: dict[str, object] = {**default_params, **combo_dict}
+
+            args = "_".join(str(x) for x in combination)
+
+            param_dir = f"{run_directory}/{args}"
+            os.makedirs(param_dir, exist_ok=True)
+
+            output_path = f"{run_directory}/{args}/params.json"
+            with open(output_path, "w") as outfile:
+                json.dump(combo_dict, outfile, indent=2)
+
+        return run_cases
+
+    def generate_group_data(self, group_name: str, group: GroupDict):
+        """
+        Generate all problem and parameter files for a benchmark group.
+
+        Args:
+            bench_name (str): Benchmark name.
+            group_name (str): Group name.
+            group (GroupDict): Group configuration dictionary.
+        """
+        group_dir = self.group_dir(group_name)
+        os.makedirs(group_dir, exist_ok=True)
+
+        self.create_problems_for_group(group_name, group["sizes"])
+
+        group_cases = 0
+
+        for run_name, run in group["runs"].items():
+            if run_name == "data":
+                print("Run name can not be named 'data'.",  file=sys.stderr)
+                sys.exit(1)
+            run_dir = self.run_dir(group_name, run_name)
+            os.makedirs(run_dir, exist_ok=True)
+
+            group_cases += self.create_param_file_for_alg(
+                run_dir, group["default_params"], run["params"])
+
+        self.benchmarking_cases += group_cases * len(group["sizes"])
+
+    def diffuse(self, problem_path: str, params_path: str, alg: str, double: bool):
+        """
+        Run the benchmark executable for a given problem and parameter set.
+
+        Args:
+            executable_path (str): Path to the benchmark executable.
+            problem_path (str): Path to the problem JSON file.
+            params_path (str): Path to the parameter JSON file.
+            alg (str): Algorithm name.
+            double (bool): Whether to use double precision.
+        """
+        problems_descriptor = os.path.basename(problem_path)
+        params_descriptor = os.path.basename(os.path.dirname(params_path))
+        out_csv_path = os.path.join(os.path.dirname(
+            params_path), f"{os.path.splitext(problems_descriptor)[0]}.csv")
+
+        cmd = [
+            self.executable_path,
+            "--alg", alg,
+            "--problem", problem_path,
+            "--params", params_path,
+            "--benchmark"
+        ]
+
+        if double:
+            cmd.append("--double")
+
+        self.progress += 1
+        status = f"[{self.progress} / {self.benchmarking_cases}]"
+        run_descriptor = f"{alg} {problems_descriptor} {params_descriptor}"
+
+        if os.path.exists(out_csv_path):
+            print(f"{status} {run_descriptor} skipped")
+            return
+
+        try:
+            with open(out_csv_path, "w") as outfile:
+                subprocess.run(cmd, stdout=outfile,
+                               stderr=subprocess.STDOUT, check=True)
+            print(f"{status} {run_descriptor} finished")
+        except subprocess.CalledProcessError:
+            os.remove(out_csv_path)
+            print(f"{status} {run_descriptor} failed")
+        except KeyboardInterrupt:
+            if os.path.exists(out_csv_path):
+                os.remove(out_csv_path)
+                print(f"{status} {run_descriptor} interrupted by user")
+                sys.exit(1)
+
+    def run_single_group(self, group_name: str, group: GroupDict):
+        """
+        Run all benchmarks for a single group, iterating over problems and parameter sets.
+
+        Args:
+            executable (str): Path to the benchmark executable.
+            bench_name (str): Benchmark name.
+            group_name (str): Group name.
+            group (GroupDict): Group configuration dictionary.
+        """
+        group_dir = self.group_dir(group_name)
+        double: bool = group["data_type"] == "double"
 
         for run_name in os.listdir(group_dir):
             if run_name == "data":
                 continue
 
-            alg_dir = os.path.join(group_dir, run_name)
+            run_dir = self.run_dir(group_name, run_name)
             alg = group["runs"][run_name]["alg"]
 
-            for param_name in os.listdir(alg_dir):
+            for param_name in os.listdir(run_dir):
                 params_path = os.path.join(
                     group_dir, run_name, param_name, "params.json")
 
-                diffuse(executable, problem_path, params_path, alg, double)
+                for problem_file in os.listdir(os.path.join(group_dir, "data")):
+                    problem_path = os.path.join(
+                        group_dir, "data", problem_file)
+
+                    self.diffuse(problem_path, params_path, alg, double)
 
 
 if __name__ == "__main__":
@@ -271,24 +341,5 @@ if __name__ == "__main__":
     benchmarking_name = prefix + data["name"]
     groups = data["groups"]
 
-    print("Generating data...")
-
-    if selected_group_name is None:
-        for group_name, group in groups.items():
-            generate_data(benchmarking_name, group_name, group)
-    else:
-        if not selected_group_name in groups.keys():
-            print(
-                f"Error: Group '{selected_group_name}' not found.", file=sys.stderr)
-            sys.exit(1)
-        generate_data(benchmarking_name, selected_group_name,
-                      groups[selected_group_name])
-
-    print("Running...")
-
-    if selected_group_name is None:
-        for group_name, group in groups.items():
-            run_single_group(exe_path, benchmarking_name, group_name, group)
-    else:
-        run_single_group(exe_path, benchmarking_name, selected_group_name,
-                         groups[selected_group_name])
+    Benchmarking(exe_path, groups, benchmarking_name,
+                 selected_group_name).benchmark()
