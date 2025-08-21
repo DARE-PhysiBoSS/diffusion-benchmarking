@@ -1,0 +1,405 @@
+{
+    "name": "general",
+    "groups": {
+        "s1-f": {
+            "sizes": [
+                "32x32x32x1x20",
+                "64x64x64x1x20",
+                "96x96x96x1x20",
+                "112x112x112x1x20",
+                "128x128x128x1x20",
+                "160x160x160x1x20",
+                "192x192x192x1x20",
+                "224x224x224x1x20",
+                "256x256x256x1x20",
+                "288x288x288x1x20",
+                "320x320x320x1x20"
+            ],
+            "data_type": "float",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s1-d": {
+            "sizes": [
+                "32x32x32x1x20",
+                "64x64x64x1x20",
+                "96x96x96x1x20",
+                "112x112x112x1x20",
+                "128x128x128x1x20",
+                "160x160x160x1x20",
+                "192x192x192x1x20",
+                "224x224x224x1x20",
+                "256x256x256x1x20",
+                "288x288x288x1x20",
+                "320x320x320x1x20"
+            ],
+            "data_type": "double",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s2-f": {
+            "sizes": [
+                "32x32x32x2x20",
+                "64x64x64x2x20",
+                "96x96x96x2x20",
+                "112x112x112x2x20",
+                "128x128x128x2x20",
+                "160x160x160x2x20",
+                "192x192x192x2x20",
+                "224x224x224x2x20",
+                "256x256x256x2x20",
+                "288x288x288x2x20",
+                "320x320x320x2x20"
+            ],
+            "data_type": "float",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s2-d": {
+            "sizes": [
+                "32x32x32x2x20",
+                "64x64x64x2x20",
+                "96x96x96x2x20",
+                "112x112x112x2x20",
+                "128x128x128x2x20",
+                "160x160x160x2x20",
+                "192x192x192x2x20",
+                "224x224x224x2x20",
+                "256x256x256x2x20",
+                "288x288x288x2x20",
+                "320x320x320x2x20"
+            ],
+            "data_type": "double",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s4-f": {
+            "sizes": [
+                "32x32x32x4x20",
+                "64x64x64x4x20",
+                "96x96x96x4x20",
+                "112x112x112x4x20",
+                "128x128x128x4x20",
+                "160x160x160x4x20",
+                "192x192x192x4x20",
+                "224x224x224x4x20",
+                "256x256x256x4x20",
+                "288x288x288x4x20",
+                "320x320x320x4x20"
+            ],
+            "data_type": "float",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s4-d": {
+            "sizes": [
+                "32x32x32x4x20",
+                "64x64x64x4x20",
+                "96x96x96x4x20",
+                "112x112x112x4x20",
+                "128x128x128x4x20",
+                "160x160x160x4x20",
+                "192x192x192x4x20",
+                "224x224x224x4x20",
+                "256x256x256x4x20",
+                "288x288x288x4x20",
+                "320x320x320x4x20"
+            ],
+            "data_type": "double",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s8-f": {
+            "sizes": [
+                "32x32x32x8x20",
+                "64x64x64x8x20",
+                "96x96x96x8x20",
+                "112x112x112x8x20",
+                "128x128x128x8x20",
+                "160x160x160x8x20",
+                "192x192x192x8x20",
+                "224x224x224x8x20",
+                "256x256x256x8x20",
+                "288x288x288x8x20",
+                "320x320x320x8x20"
+            ],
+            "data_type": "float",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        },
+        "s8-d": {
+            "sizes": [
+                "32x32x32x8x20",
+                "64x64x64x8x20",
+                "96x96x96x8x20",
+                "112x112x112x8x20",
+                "128x128x128x8x20",
+                "160x160x160x8x20",
+                "192x192x192x8x20",
+                "224x224x224x8x20",
+                "256x256x256x8x20",
+                "288x288x288x8x20",
+                "320x320x320x8x20"
+            ],
+            "data_type": "double",
+            "default_params": {
+                "inner_iterations": 50,
+                "outer_iterations": 5,
+                "benchmark_kind": "full_solve",
+                "warmup_time": 1
+            },
+            "runs": {
+                "baseline": {
+                    "alg": "sdd-lstct",
+                    "params": {
+                        "xs_tile_size": [
+                            100000
+                        ]
+                    }
+                },
+                "transpose-temporal": {
+                    "alg": "sdd-lstmtai",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                },
+                "partial-blocking": {
+                    "alg": "sdd-pb",
+                    "params": {
+                        "x_tile_size": [
+                            16, 32, 48, 64, 10000
+                        ],
+                        "continuous_x_diagonal": [true, false]
+                    }
+                }
+            }
+        }
+    }
+}

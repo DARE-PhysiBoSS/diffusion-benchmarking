@@ -10,7 +10,9 @@
 #SBATCH --exclusive
 # #SBATCH --constraint=perfparanoid 
 
+module load cmake/3.30.5
+module load gcc/14.1.0_binutils241
 
-cd benchmarking
-export PYTHONUNBUFFERED=1
-python3 benchmark.py $1 ../build/hbm/diffuse --prefix hbm- -g $2
+
+cmake -S . -B build/hbm -DCMAKE_CXX_FLAGS="-Ofast -DNDEBUG"
+cmake --build build/hbm --parallel 112
