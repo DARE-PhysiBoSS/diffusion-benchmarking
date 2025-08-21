@@ -43,6 +43,7 @@ Outputs:
 - Results are saved as CSV files for each run/parameter/problem combination.
 """
 
+import csv
 import sys
 import json
 import itertools
@@ -79,7 +80,7 @@ class GroupDict(TypedDict):
 
 
 class Benchmarking:
-    def __init__(self, executable_path: str, groups: list[GroupDict], benchmarking_name: str, selected_group: str):
+    def __init__(self, executable_path: str, groups: dict[str, GroupDict], benchmarking_name: str, selected_group: str):
         self.executable_path = executable_path
         self.groups = groups
         self.benchmarking_name = benchmarking_name
@@ -131,6 +132,67 @@ class Benchmarking:
         else:
             self.run_single_group(self.selected_group_name,
                                   groups[self.selected_group_name])
+
+    def merge_run(self, run_name: str, run_paths: list[str]):
+        """
+        Merge csv files from all groups and parameters into single file for each run.
+
+        Args:
+            run_name (str): Run name.
+            run_paths (list[str]): List of all csv files related to the run.
+        """
+        merged_rows: list[list[str]] = []
+        expected_header: list[str] | None = None
+
+        for file_path in run_paths:
+            with open(file_path, newline="", encoding="utf-8") as csvfile:
+                reader = csv.reader(csvfile)
+                try:
+                    header = next(reader)
+                except StopIteration:
+                    print(f"Warning: {file_path} is empty.")
+                    continue
+
+                if expected_header is None:
+                    expected_header = header
+                elif header != expected_header:
+                    print(f"Header mismatch in file {file_path}:")
+                    print(f"Expected: {expected_header}")
+                    print(f"Found   : {header}")
+                    return
+
+                merged_rows.extend(list(reader))
+
+        if expected_header is None:
+            print(f"No data for run {run_name}")
+            return
+
+        # Write merged CSV
+        with open(f"{run_name}.csv", "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(expected_header)
+            writer.writerows(merged_rows)
+
+    def merge_groups(self):
+        all_runs: set[str] = set()
+        for group in self.groups.values():
+            all_runs.update(group["runs"].keys())
+
+        runs_csvs: dict[str, list[str]] = dict()
+
+        for run in all_runs:
+            for group in self.groups:
+                run_dir = self.run_dir(group, run)
+                for param in os.listdir(run_dir):
+                    param_dir = os.path.join(run_dir, param)
+                    csv_files = [os.path.join(param_dir, f) for f in os.listdir(
+                        param_dir) if f.endswith(".csv")]
+                    if run not in runs_csvs:
+                        runs_csvs[run] = []
+                    runs_csvs[run].extend(csv_files)
+
+        for run, run_data in runs_csvs.items():
+            self.merge_run(run, run_data)
 
     def create_problems_for_group(self, group_name: str, sizes: list[str]):
         """
@@ -251,7 +313,6 @@ class Benchmarking:
             double (bool): Whether to use double precision.
         """
         problems_descriptor = os.path.basename(problem_path)
-        params_descriptor = os.path.basename(os.path.dirname(params_path))
         out_csv_path = os.path.join(os.path.dirname(
             params_path), f"{os.path.splitext(problems_descriptor)[0]}.csv")
 
@@ -268,20 +329,20 @@ class Benchmarking:
 
         self.progress += 1
         status = f"[{self.progress} / {self.benchmarking_cases}]"
-        run_descriptor = f"{alg} {problems_descriptor} {params_descriptor}"
+        run_descriptor = " ".join(cmd)
 
         if os.path.exists(out_csv_path):
-            print(f"{status} {run_descriptor} skipped")
+            print(f"{status} Skipped! {run_descriptor}")
             return
 
         try:
             with open(out_csv_path, "w") as outfile:
                 subprocess.run(cmd, stdout=outfile,
                                stderr=subprocess.STDOUT, check=True)
-            print(f"{status} {run_descriptor} finished")
+            print(f"{status} Finished! {run_descriptor}")
         except subprocess.CalledProcessError:
             os.remove(out_csv_path)
-            print(f"{status} {run_descriptor} failed")
+            print(f"{status} Failed! {run_descriptor}")
         except KeyboardInterrupt:
             if os.path.exists(out_csv_path):
                 os.remove(out_csv_path)
@@ -327,6 +388,13 @@ if __name__ == "__main__":
         "-g", "--group", required=False, action='store', default="", help="Group name to benchmark")
     parser.add_argument(
         "--prefix", required=False, action='store', default="", help="Benchmarking prefix. Useful when running the same benchmark file on various machines.")
+    parser.add_argument(
+        "--merge", required=False, action='store_true', help="Merge results across all groups (incompatible with --group)")
+
+    args = parser.parse_args()
+
+    if args.merge and args.group:
+        parser.error("--merge and --group cannot be used together.")
 
     args = parser.parse_args()
     json_path = args.benchmark_path
@@ -345,5 +413,9 @@ if __name__ == "__main__":
     benchmarking_name = prefix + data["name"]
     groups = data["groups"]
 
-    Benchmarking(exe_path, groups, benchmarking_name,
-                 selected_group_name).benchmark()
+    b = Benchmarking(exe_path, groups, benchmarking_name, selected_group_name)
+
+    if not args.merge:
+        b.benchmark()
+    else:
+        b.merge_groups()
