@@ -1,31 +1,32 @@
 {
 	"name": "diffuse-dev",
-	"image": "gcc:latest",
+	"image": "gcc:15.2.0",
 	"remoteUser": "${localEnv:USER}",
 	"mounts": [
 		"source=/home/${localEnv:USER}/.ssh,target=/home/${localEnv:USER}/.ssh,type=bind,readonly"
 	],
-	"onCreateCommand": "/bin/bash .devcontainer/install_rvv_crosscompiler.sh",
+	"onCreateCommand": "/bin/bash .devcontainer/configure.sh",
 	"remoteEnv": {
 		"PATH": "${containerEnv:PATH}:${containerWorkspaceFolder}/.rave/build/llvm-cross/llvm-EPI-development-toolchain-cross/bin",
 		"VSCODEDIR": "${containerWorkspaceFolder}"
 	},
 	"features": {
 		"ghcr.io/devcontainers/features/python:1": {
-			"toolsToInstall": "flake8,autopep8,black,yapf,mypy,pydocstyle,pycodestyle,bandit,pipenv,virtualenv,pytest,pylint,cmakelang"
+			"toolsToInstall": "cmakelang"
 		},
 		"ghcr.io/devcontainers/features/common-utils:2": {
 			"configureZshAsDefaultShell": true
 		},
 		"ghcr.io/devcontainers/features/git:1": {},
-		"ghcr.io/devcontainers-community/features/llvm:3": {},
 		"ghcr.io/devcontainers-extra/features/apt-get-packages:1": {
 			"packages": [
 				"libopenblas-dev",
 				"cmake",
 				"ninja-build",
 				"gdb",
-				"papi-tools"
+				"papi-tools",
+				"r-base",
+				"r-recommended"
 			]
 		}
 	},
@@ -38,7 +39,7 @@
 				"ms-vscode.cmake-tools"
 			],
 			"settings": {
-				"clangd.path": "/usr/bin/clangd",
+				"clangd.path": "/usr/bin/clangd-20",
 				"git.ignoredRepositories": [
 					".rave"
 				],
