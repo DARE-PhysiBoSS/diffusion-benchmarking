@@ -209,8 +209,8 @@ void sdd_full_blocking<real_t, aligned_x>::tune(const nlohmann::json& params)
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
 														: std::array<index_t, 3> { 1, 2, 2 };
 
-	y_sync_step_ = params.contains("y_sync_step") ? (index_t)params["y_sync_step"] : 1;
-	z_sync_step_ = params.contains("z_sync_step") ? (index_t)params["z_sync_step"] : 1;
+	y_sync_step_ = params.contains("sync_step") ? (index_t)params["sync_step"] : 1;
+	z_sync_step_ = params.contains("sync_step") ? (index_t)params["sync_step"] : 1;
 
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;

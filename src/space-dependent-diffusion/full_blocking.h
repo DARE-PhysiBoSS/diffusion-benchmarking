@@ -8,6 +8,14 @@
 #include "../tridiagonal_solver.h"
 
 
+/*
+Restrictions:
+- (nx / cores_division[0]) should be at least 8 for doubles and 16 for floats 
+- (ny / cores_division[1]) should be at least 8 for doubles and 16 for floats 
+- nx, ny, nz should be divisible by respective cores_division
+*/
+
+
 template <typename real_t, bool aligned_x>
 class sdd_full_blocking : public locally_onedimensional_solver,
 						  public base_solver<real_t, sdd_full_blocking<real_t, aligned_x>>
