@@ -197,6 +197,10 @@ class Benchmarking:
             combo_dict: dict[str, object] = {**default_params, **combo_dict}
 
             args = "_".join(str(x) for x in combination)
+            args = args.replace(' ', '')
+            args = args.replace('[', '')
+            args = args.replace(']', '')
+            args = args.replace(',', '-')
 
             param_dir = f"{run_directory}/{args}"
             os.makedirs(param_dir, exist_ok=True)
