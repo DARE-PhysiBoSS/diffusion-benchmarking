@@ -79,7 +79,7 @@ class GroupDict(TypedDict):
 
 
 class Benchmarking:
-    def __init__(self, executable_path: str, groups: list[GroupDict], benchmarking_name: str, selected_group: str | None):
+    def __init__(self, executable_path: str, groups: list[GroupDict], benchmarking_name: str, selected_group: str):
         self.executable_path = executable_path
         self.groups = groups
         self.benchmarking_name = benchmarking_name
@@ -111,7 +111,7 @@ class Benchmarking:
     def generate_data(self):
         print("Generating data...")
 
-        if self.selected_group_name is None:
+        if self.selected_group_name == "":
             for group_name, group in groups.items():
                 self.generate_group_data(group_name, group)
         else:
@@ -125,7 +125,7 @@ class Benchmarking:
     def run(self):
         print("Running...")
 
-        if self.selected_group_name is None:
+        if self.selected_group_name == "":
             for group_name, group in groups.items():
                 self.run_single_group(group_name, group)
         else:
@@ -320,7 +320,7 @@ if __name__ == "__main__":
     parser.add_argument("benchmark_path", help="Path to JSON file")
     parser.add_argument("executable_path", help="Path to executable")
     parser.add_argument(
-        "-g", "--group", required=False, action='store', help="Group name to benchmark")
+        "-g", "--group", required=False, action='store', default="", help="Group name to benchmark")
     parser.add_argument(
         "--prefix", required=False, action='store', default="", help="Benchmarking prefix. Useful when running the same benchmark file on various machines.")
 
