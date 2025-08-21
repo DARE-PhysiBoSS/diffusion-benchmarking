@@ -183,6 +183,8 @@ class Benchmarking:
         for run in all_runs:
             for group in self.groups:
                 run_dir = self.run_dir(group, run)
+                if not os.path.exists(run_dir):
+                    continue
                 for param in os.listdir(run_dir):
                     param_dir = os.path.join(run_dir, param)
                     csv_files = [os.path.join(param_dir, f) for f in os.listdir(
