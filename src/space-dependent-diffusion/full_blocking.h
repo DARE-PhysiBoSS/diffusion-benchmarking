@@ -151,6 +151,8 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 			return tid.x * cores_division_[1] + tid.group * cores_division_[0] * cores_division_[1] + tid.y;
 	}
 
+	void validate_restrictions();
+
 public:
 	sdd_full_blocking();
 

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <iostream>
+#include <stdexcept>
 
 #include "../barrier.h"
 #include "../perf_utils.h"
@@ -123,6 +124,21 @@ void sdd_full_blocking<real_t, aligned_x>::precompute_values(std::unique_ptr<rea
 }
 
 template <typename real_t, bool aligned_x>
+void sdd_full_blocking<real_t, aligned_x>::validate_restrictions()
+{
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag d;
+
+	bool ok = this->problem_.nx % cores_division_[0] == 0 && this->problem_.ny % cores_division_[1] == 0
+			  && this->problem_.nz % cores_division_[2] == 0;
+	ok &= (this->problem_.nx / cores_division_[0]) % hn::Lanes(d) == 0
+		  && (this->problem_.ny / cores_division_[1]) % hn::Lanes(d) == 0;
+
+	if (!ok)
+		throw std::runtime_error("Bad tunable params for this problem!");
+}
+
+template <typename real_t, bool aligned_x>
 void sdd_full_blocking<real_t, aligned_x>::prepare(const max_problem_t& problem)
 {
 	this->problem_ = problems::cast<std::int32_t, real_t>(problem);
@@ -155,6 +171,8 @@ void sdd_full_blocking<real_t, aligned_x>::prepare(const max_problem_t& problem)
 			group_block_offsetss_.push_back(s_begin);
 		}
 	}
+
+	validate_restrictions();
 
 	thread_substrate_array_ = std::make_unique<real_t*[]>(get_max_threads());
 
