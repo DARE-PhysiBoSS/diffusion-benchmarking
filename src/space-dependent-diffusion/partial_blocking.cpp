@@ -138,13 +138,13 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 
-	const index_t simd_yz_len = y_len / simd_length * simd_length;
+	const index_t simd_y_len = y_len / simd_length * simd_length;
 
 	// vectorized body
 	{
 		const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
 
-		for (index_t y = 0; y < simd_yz_len; y += simd_length)
+		for (index_t y = 0; y < simd_y_len; y += simd_length)
 		{
 			// vector registers that hold the to be transposed x*yz plane
 
@@ -370,7 +370,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 		{
 			// vector registers that hold the to be transposed x*yz plane
 
-			simd_t a_prev = hn::Zero(d);
+			simd_t c_prev = hn::Zero(d);
 			simd_t d_prev = hn::Zero(d);
 			simd_t scratch_prev = hn::Zero(d);
 
@@ -395,14 +395,15 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					auto r = hn::Mul(a_prev, scratch_prev);
-					a_prev = a_rows[v];
+					auto r = hn::Mul(a_rows[v], scratch_prev);
 
-					scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_rows[v], r, b_rows[v]));
+					scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_rows[v]));
 					hn::Store(scratch_prev, d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
 
 					d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
+
 					d_prev = d_rows[v];
+					c_prev = c_rows[v];
 				}
 
 				// aligned stores
@@ -412,8 +413,6 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 							  &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, i, s)));
 				}
 			}
-
-			simd_t c_prev;
 
 			// we are aligned to the vector size, so we can safely continue
 			// here we fuse the end of forward substitution and the beginning of backwards propagation
@@ -448,15 +447,16 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				{
 					for (index_t v = 0; v < remainder_work; v++)
 					{
-						auto r = hn::Mul(a_prev, scratch_prev);
-						a_prev = a_rows[v];
+						auto r = hn::Mul(a_rows[v], scratch_prev);
 
-						scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_rows[v], r, b_rows[v]));
+						scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_rows[v]));
 						hn::Store(scratch_prev, d,
 								  &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
 
 						d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
+
 						d_prev = d_rows[v];
+						c_prev = c_rows[v];
 					}
 				}
 
@@ -471,12 +471,10 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					{
 						auto scratch =
 							hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
-						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v + 1], d_rows[v]), scratch);
+						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v], d_rows[v]), scratch);
 
 						d_prev = d_rows[v];
 					}
-
-					c_prev = c_rows[0];
 				}
 
 				// transposition back to the original form
@@ -497,16 +495,12 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				// aligned loads
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					a_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(a, z, y, v, i, s)));
-					b_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(b, z, y, v, i, s)));
 					c_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(c, z, y, v, i, s)));
 					d_rows[v] =
 						hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, i, s)));
 				}
 
 				// transposition back to the original form
-				transpose(a_rows);
-				transpose(b_rows);
 				transpose(c_rows);
 
 				// backward propagation
@@ -514,10 +508,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					for (index_t v = simd_length - 1; v >= 0; v--)
 					{
 						auto scratch = hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
-						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_prev, d_rows[v]), scratch);
+						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v], d_rows[v]), scratch);
 
 						d_prev = d_rows[v];
-						c_prev = c_rows[v];
 					}
 				}
 
@@ -828,9 +821,14 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_x()
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
 #pragma omp for schedule(static) nowait
 			for (index_t z = 0; z < this->problem_.nz; z++)
-				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
-														   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-														   get_scratch_layout<'x'>(), s, z, this->problem_.nx);
+				if (continuous_x_diagonal_)
+					solve_slice_x_2d_and_3d_transpose_l<index_t>(
+						this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+						get_diag_layout_x(), get_scratch_layout<'x'>(), s, z, this->problem_.nx);
+				else
+					solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
+															   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+															   get_scratch_layout<'x'>(), s, z, this->problem_.nx);
 	}
 }
 

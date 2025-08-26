@@ -368,7 +368,7 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 		{
 			// vector registers that hold the to be transposed x*yz plane
 
-			simd_t a_prev = hn::Zero(d);
+			simd_t c_prev = hn::Zero(d);
 			simd_t d_prev = hn::Zero(d);
 			simd_t scratch_prev = hn::Zero(d);
 
@@ -392,14 +392,15 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					auto r = hn::Mul(a_prev, scratch_prev);
-					a_prev = a_rows[v];
+					auto r = hn::Mul(a_rows[v], scratch_prev);
 
-					scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_rows[v], r, b_rows[v]));
+					scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_rows[v]));
 					hn::Store(scratch_prev, d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
 
 					d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
+
 					d_prev = d_rows[v];
+					c_prev = c_rows[v];
 				}
 
 				// aligned stores
@@ -408,8 +409,6 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					hn::Store(d_rows[v], d, &(body_dens_l | noarr::get_at<'m', 'v', 'x', 's'>(densities, yz, v, i, s)));
 				}
 			}
-
-			simd_t c_prev;
 
 			// we are aligned to the vector size, so we can safely continue
 			// here we fuse the end of forward substitution and the beginning of backwards propagation
@@ -441,15 +440,16 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 				{
 					for (index_t v = 0; v < remainder_work; v++)
 					{
-						auto r = hn::Mul(a_prev, scratch_prev);
-						a_prev = a_rows[v];
+						auto r = hn::Mul(a_rows[v], scratch_prev);
 
-						scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_rows[v], r, b_rows[v]));
+						scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_rows[v]));
 						hn::Store(scratch_prev, d,
 								  &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
 
 						d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
+
 						d_prev = d_rows[v];
+						c_prev = c_rows[v];
 					}
 				}
 
@@ -464,12 +464,10 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					{
 						auto scratch =
 							hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
-						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v + 1], d_rows[v]), scratch);
+						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v], d_rows[v]), scratch);
 
 						d_prev = d_rows[v];
 					}
-
-					c_prev = c_rows[0];
 				}
 
 				// transposition back to the original form
@@ -506,10 +504,9 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 					for (index_t v = simd_length - 1; v >= 0; v--)
 					{
 						auto scratch = hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
-						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_prev, d_rows[v]), scratch);
+						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v], d_rows[v]), scratch);
 
 						d_prev = d_rows[v];
-						c_prev = c_rows[v];
 					}
 				}
 
