@@ -28,7 +28,12 @@ class sdd_partial_blocking : public locally_onedimensional_solver,
 	auto get_scratch_layout()
 	{
 		const auto n = std::max({ this->problem_.nx, this->problem_.ny, this->problem_.nz });
-		const auto s = std::max(alignment_size_ / sizeof(real_t), x_tile_size_);
+
+		index_t s;
+		if (dim == 'x')
+			s = alignment_size_ / sizeof(real_t);
+		else
+			s = std::max<std::size_t>(x_tile_size_, this->problem_.nx);
 
 		std::size_t size = n * sizeof(real_t);
 		std::size_t size_padded = (size + alignment_size_ - 1) / alignment_size_ * alignment_size_;

@@ -85,13 +85,13 @@ template <typename real_t, bool aligned_x>
 void sdd_partial_blocking<real_t, aligned_x>::tune(const nlohmann::json& params)
 {
 	x_tile_size_ = params.contains("x_tile_size") ? (std::size_t)params["x_tile_size"] : 48;
-	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : 64;
 	continuous_x_diagonal_ = params.contains("continuous_x_diagonal") ? (bool)params["continuous_x_diagonal"] : false;
 
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;
 	std::size_t vector_length = hn::Lanes(d) * sizeof(real_t);
-	alignment_size_ = std::max(alignment_size_, vector_length);
+
+	alignment_size_ = params.contains("alignment_size") ? (std::size_t)params["alignment_size"] : vector_length;
 }
 
 template <typename real_t, bool aligned_x>
@@ -109,14 +109,19 @@ void sdd_partial_blocking<real_t, aligned_x>::initialize()
 	precompute_values(az_, bz_, cz_, this->problem_.dz, this->problem_.nz, this->problem_.dims, 'z',
 					  get_substrates_layout());
 
-	auto diag_l = get_scratch_layout<'x'>();
+
+	auto diag_lx = get_scratch_layout<'x'>();
+	auto diag_ly = get_scratch_layout<'y'>();
+	auto diag_lz = get_scratch_layout<'z'>();
+	auto max_size =
+		std::max({ (diag_lx | noarr::get_size()), (diag_ly | noarr::get_size()), (diag_lz | noarr::get_size()) });
 
 	for (int i = 0; i < get_max_threads(); i++)
 	{
 		if (aligned_x)
-			b_scratch_.push_back((real_t*)std::aligned_alloc(alignment_size_, (diag_l | noarr::get_size())));
+			b_scratch_.push_back((real_t*)std::aligned_alloc(alignment_size_, (max_size)));
 		else
-			b_scratch_.push_back((real_t*)std::malloc((diag_l | noarr::get_size())));
+			b_scratch_.push_back((real_t*)std::malloc((max_size)));
 	}
 }
 
