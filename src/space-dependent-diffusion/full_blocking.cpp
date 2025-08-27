@@ -6,6 +6,7 @@
 
 #include "../barrier.h"
 #include "../perf_utils.h"
+#include "full_blocking_x.h"
 #include "noarr/structures/structs/blocks.hpp"
 
 template <typename real_t, bool aligned_x>
@@ -34,7 +35,7 @@ void sdd_full_blocking<real_t, aligned_x>::precompute_values(
 }
 
 template <typename real_t, bool aligned_x>
-template <bool dim_x>
+template <bool dim_x, bool fused_z>
 void sdd_full_blocking<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t*[]>& a,
 															 std::unique_ptr<real_t*[]>& b,
 															 std::unique_ptr<real_t*[]>& c, index_t shape, index_t n,
@@ -56,9 +57,20 @@ void sdd_full_blocking<real_t, aligned_x>::precompute_values(std::unique_ptr<rea
 
 		auto get_layout = [&]() {
 			if constexpr (dim_x)
-				return get_diag_layout_x(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
-										 group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group])
-					   ^ noarr::merge_blocks<'Y', 'y'>();
+			{
+				if constexpr (fused_z)
+					return get_diag_layout_x(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+											 group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group],
+											 y_sync_step_)
+						   ^ noarr::merge_blocks<'Y', 'y'>()
+						   ^ noarr::into_blocks_static<'y', 'b', 'z', 'y'>(group_block_lengthsy_[tid.y])
+						   ^ noarr::fix<'b'>(noarr::lit<0>) ^ noarr::merge_blocks<'Z', 'z'>();
+				else
+					return get_diag_layout_x<3, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													   group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group],
+													   y_sync_step_)
+						   ^ noarr::merge_blocks<'Y', 'y'>();
+			}
 			else
 				return get_blocked_substrate_layout(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
 													group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
@@ -222,6 +234,8 @@ void sdd_full_blocking<real_t, aligned_x>::tune(const nlohmann::json& params)
 	cores_division_ = params.contains("cores_division") ? (std::array<index_t, 3>)params["cores_division"]
 														: std::array<index_t, 3> { 1, 2, 2 };
 
+	fuse_z_ = params.contains("fuse_z") ? (bool)params["fuse_z"] : true;
+
 	y_sync_step_ = params.contains("sync_step") ? (index_t)params["sync_step"] : 1;
 	z_sync_step_ = params.contains("sync_step") ? (index_t)params["sync_step"] : 1;
 
@@ -235,7 +249,11 @@ void sdd_full_blocking<real_t, aligned_x>::tune(const nlohmann::json& params)
 template <typename real_t, bool aligned_x>
 void sdd_full_blocking<real_t, aligned_x>::initialize()
 {
-	precompute_values<true>(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x');
+	if (!fuse_z_)
+		precompute_values<true, false>(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x');
+	else
+		precompute_values<true>(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x');
+
 	precompute_values<false>(ay_, by_, cy_, this->problem_.dy, this->problem_.ny, this->problem_.dims, 'y');
 	precompute_values<false>(az_, bz_, cz_, this->problem_.dz, this->problem_.nz, this->problem_.dims, 'z');
 
@@ -278,15 +296,32 @@ void sdd_full_blocking<real_t, aligned_x>::initialize()
 			std::max({ non_blocked_scratch_lx | noarr::get_size(), non_blocked_scratch_ly | noarr::get_size(),
 					   non_blocked_scratch_lz | noarr::get_size() });
 
-		auto scratch_lx =
-			get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y], y_sync_step_);
-		auto scratch_ly =
-			get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y], y_sync_step_);
-		auto scratch_lz =
-			get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_, group_block_lengthsz_[tid.z]);
+		std::size_t max_size_blocked = 0;
+		{
+			auto scratch_lx =
+				get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y], y_sync_step_);
+			auto scratch_ly =
+				get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y], y_sync_step_);
+			auto scratch_lz =
+				get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_, group_block_lengthsz_[tid.z]);
 
-		auto max_size_blocked = std::max(
-			{ scratch_lx | noarr::get_size(), scratch_ly | noarr::get_size(), scratch_lz | noarr::get_size() });
+			auto max = std::max(
+				{ scratch_lx | noarr::get_size(), scratch_ly | noarr::get_size(), scratch_lz | noarr::get_size() });
+			max_size_blocked = std::max(max, max_size_blocked);
+		}
+
+		{
+			auto scratch_lx = get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x],
+																   group_block_lengthsy_[tid.y], y_sync_step_);
+			auto scratch_ly = get_scratch_layout<'y', true, false>(group_block_lengthsx_[tid.x],
+																   group_block_lengthsy_[tid.y], y_sync_step_);
+			auto scratch_lz = get_scratch_layout<'z', true, false>(group_block_lengthsx_[tid.x], z_sync_step_,
+																   group_block_lengthsz_[tid.z]);
+
+			auto max = std::max(
+				{ scratch_lx | noarr::get_size(), scratch_ly | noarr::get_size(), scratch_lz | noarr::get_size() });
+			max_size_blocked = std::max(max, max_size_blocked);
+		}
 
 		auto linear_tid = get_thread_num();
 		a_scratch_[linear_tid] =
@@ -357,12 +392,16 @@ template <typename index_t, typename real_t, typename density_layout_t, typename
 constexpr static void synchronize_x_blocked_distributed_remainder(
 	real_t** __restrict__ densities, real_t** __restrict__ a_data, real_t** __restrict__ c_data,
 	const density_layout_t dens_l, const diagonal_layout_t diag_l, const thread_distribution_l dist_l, const index_t n,
-	const index_t n_alignment, const index_t y_begin, const index_t y_end, const index_t z, const index_t coop_size)
+	const index_t n_alignment, const index_t y_begin, const index_t y_end, const index_t coop_size)
 {
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag d;
+	constexpr index_t simd_length = hn::Lanes(d);
+
 	const index_t block_size = n / coop_size;
 
-	const auto ddiag_l = diag_l ^ noarr::merge_blocks<'Y', 'y'>() ^ noarr::fix<'z'>(z);
-	const auto ddesn_l = dens_l ^ noarr::fix<'z'>(z);
+	const auto ddiag_l = diag_l ^ noarr::fix<'Y'>(y_begin / simd_length);
+	const auto ddesn_l = dens_l ^ noarr::slice<'y'>(y_begin, y_end - y_begin);
 
 	// #pragma omp critical
 	// 	std::cout << "Thread " << tid << " block_begin: " << x_simd_begin << " block_end: " << x_simd_end
@@ -378,7 +417,7 @@ constexpr static void synchronize_x_blocked_distributed_remainder(
 							   noarr::set_length<'x'>(actual_block_size) ^ noarr::fix<'x'>(offset));
 	};
 
-	for (index_t y = y_begin; y < y_end; y++)
+	for (index_t y = 0; y < y_end - y_begin; y++)
 	{
 		real_t prev_c;
 		real_t prev_d;
@@ -460,8 +499,8 @@ constexpr static void synchronize_x_blocked_distributed(real_t** __restrict__ de
 														const diagonal_layout_t diag_l,
 														const thread_distribution_l dist_l, const index_t n,
 														const index_t n_alignment, const index_t z_begin,
-														const index_t z_end, const index_t tid, const index_t coop_size,
-														barrier_t& barrier)
+														const index_t z_end, const index_t sync_step, const index_t tid,
+														const index_t coop_size, barrier_t& barrier)
 {
 	barrier.arrive();
 
@@ -470,15 +509,18 @@ constexpr static void synchronize_x_blocked_distributed(real_t** __restrict__ de
 	HWY_LANES_CONSTEXPR index_t simd_length = hn::Lanes(t);
 	using simd_t = hn::Vec<simd_tag>;
 
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
+	auto ddens_l = dens_l ^ noarr::slice<'z'>(z_begin, z_end - z_begin) ^ noarr::merge_blocks<'z', 'y'>();
+	auto ddiag_l = diag_l ^ noarr::fix<'Z'>(z_begin / sync_step);
+
+	const index_t y_len = ddens_l | noarr::get_length<'y'>();
 	const index_t simd_y_len = y_len / simd_length;
 
 	const index_t block_size = n / coop_size;
 
-	const index_t z_len = z_end - z_begin;
-	const index_t block_size_z = z_len / coop_size;
-	const index_t t_z_begin = z_begin + tid * block_size_z + std::min(tid, z_len % coop_size);
-	const index_t t_z_end = t_z_begin + block_size_z + ((tid < z_len % coop_size) ? 1 : 0);
+	const index_t y_work = simd_y_len + 1;
+	const index_t block_size_y = y_work / coop_size;
+	const index_t t_y_begin = tid * block_size_y + std::min(tid, y_work % coop_size);
+	const index_t t_y_end = t_y_begin + block_size_y + ((tid < y_work % coop_size) ? 1 : 0);
 
 	// #pragma omp critical
 	// 	std::cout << "Thread " << tid << " block_begin: " << x_simd_begin << " block_end: " << x_simd_end
@@ -503,86 +545,84 @@ constexpr static void synchronize_x_blocked_distributed(real_t** __restrict__ de
 								   ^ noarr::fix<'x', 'Y', 'y'>(offset, y, noarr::lit<0>));
 	};
 
-	for (index_t z = t_z_begin; z < t_z_end; z++)
+	for (index_t y = t_y_begin; y < std::min(t_y_end, simd_y_len); y++)
 	{
-		for (index_t y = 0; y < simd_y_len; y++)
+		simd_t prev_c;
+		simd_t prev_d;
+
 		{
-			simd_t prev_c;
-			simd_t prev_d;
+			const auto [prev_block_idx, fix_dens, fix_diag] = get_i(0, y);
+			const auto prev_c_bag =
+				noarr::make_bag(ddiag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(c_data, prev_block_idx));
+			const auto prev_d_bag =
+				noarr::make_bag(ddens_l ^ fix_dens, dist_l | noarr::get_at<'x'>(densities, prev_block_idx));
 
-			{
-				const auto [prev_block_idx, fix_dens, fix_diag] = get_i(0, y);
-				const auto prev_c_bag =
-					noarr::make_bag(diag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(c_data, prev_block_idx));
-				const auto prev_d_bag =
-					noarr::make_bag(dens_l ^ fix_dens, dist_l | noarr::get_at<'x'>(densities, prev_block_idx));
-
-				prev_c = hn::Load(t, &prev_c_bag.template at<'z'>(z - z_begin));
-				prev_d = hn::Load(t, &prev_d_bag.template at<'z'>(z));
-			}
-
-			for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
-			{
-				const auto [block_idx, fix_dens, fix_diag] = get_i(equation_idx, y);
-
-				const auto a = noarr::make_bag(diag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(a_data, block_idx));
-				const auto c = noarr::make_bag(diag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(c_data, block_idx));
-				const auto d = noarr::make_bag(dens_l ^ fix_dens, dist_l | noarr::get_at<'x'>(densities, block_idx));
-
-				simd_t curr_a = hn::Load(t, &a.template at<'z'>(z - z_begin));
-				simd_t curr_c = hn::Load(t, &c.template at<'z'>(z - z_begin));
-				simd_t curr_d = hn::Load(t, &d.template at<'z'>(z));
-
-				simd_t r = hn::Div(hn::Set(t, 1), hn::NegMulAdd(prev_c, curr_a, hn::Set(t, 1)));
-
-				curr_d = hn::Mul(r, hn::NegMulAdd(prev_d, curr_a, curr_d));
-				curr_c = hn::Mul(r, curr_c);
-
-				hn::Store(curr_c, t, &c.template at<'z'>(z - z_begin));
-				hn::Store(curr_d, t, &d.template at<'z'>(z));
-
-				prev_c = curr_c;
-				prev_d = curr_d;
-
-				// #pragma omp critical
-				// 				{
-				// 					for (index_t l = 0; l < simd_length; l++)
-				// 						std::cout << "mb " << z << " " << y + l << " " << equation_idx << " "
-				// 								  << hn::ExtractLane(curr_a, l) << " " << hn::ExtractLane(r, l) << " "
-				// 								  << hn::ExtractLane(curr_d, l) << std::endl;
-				// 				}
-			}
-
-			for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
-			{
-				const auto [block_idx, fix_dens, fix_diag] = get_i(equation_idx, y);
-
-				const auto c = noarr::make_bag(diag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(c_data, block_idx));
-				const auto d = noarr::make_bag(dens_l ^ fix_dens, dist_l | noarr::get_at<'x'>(densities, block_idx));
-
-				simd_t curr_c = hn::Load(t, &c.template at<'z'>(z - z_begin));
-				simd_t curr_d = hn::Load(t, &d.template at<'z'>(z));
-
-				curr_d = hn::NegMulAdd(prev_d, curr_c, curr_d);
-
-				hn::Store(curr_d, t, &d.template at<'z'>(z));
-
-				prev_d = curr_d;
-
-				// #pragma omp critical
-				// 				{
-				// 					for (index_t l = 0; l < simd_length; l++)
-				// 						std::cout << "mf " << z << " " << y + l << " " << equation_idx << " "
-				// 								  << hn::ExtractLane(curr_c, l) << " " << hn::ExtractLane(curr_d, l) <<
-				// std::endl;
-				// 				}
-			}
+			prev_c = hn::Load(t, &prev_c_bag.template at<>());
+			prev_d = hn::Load(t, &prev_d_bag.template at<>());
 		}
 
-		synchronize_x_blocked_distributed_remainder(
-			densities, a_data, c_data, dens_l ^ noarr::slice<'z'>(z_begin, z_len), diag_l, dist_l, n, n_alignment,
-			simd_y_len * simd_length, y_len, z - z_begin, coop_size);
+		for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+		{
+			const auto [block_idx, fix_dens, fix_diag] = get_i(equation_idx, y);
+
+			const auto a = noarr::make_bag(ddiag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(a_data, block_idx));
+			const auto c = noarr::make_bag(ddiag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(c_data, block_idx));
+			const auto d = noarr::make_bag(ddens_l ^ fix_dens, dist_l | noarr::get_at<'x'>(densities, block_idx));
+
+			simd_t curr_a = hn::Load(t, &a.template at<>());
+			simd_t curr_c = hn::Load(t, &c.template at<>());
+			simd_t curr_d = hn::Load(t, &d.template at<>());
+
+			simd_t r = hn::Div(hn::Set(t, 1), hn::NegMulAdd(prev_c, curr_a, hn::Set(t, 1)));
+
+			curr_d = hn::Mul(r, hn::NegMulAdd(prev_d, curr_a, curr_d));
+			curr_c = hn::Mul(r, curr_c);
+
+			hn::Store(curr_c, t, &c.template at<>());
+			hn::Store(curr_d, t, &d.template at<>());
+
+			prev_c = curr_c;
+			prev_d = curr_d;
+
+			// #pragma omp critical
+			// 				{
+			// 					for (index_t l = 0; l < simd_length; l++)
+			// 						std::cout << "mb " << z << " " << y + l << " " << equation_idx << " "
+			// 								  << hn::ExtractLane(curr_a, l) << " " << hn::ExtractLane(r, l) << " "
+			// 								  << hn::ExtractLane(curr_d, l) << std::endl;
+			// 				}
+		}
+
+		for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+		{
+			const auto [block_idx, fix_dens, fix_diag] = get_i(equation_idx, y);
+
+			const auto c = noarr::make_bag(ddiag_l ^ fix_diag, dist_l | noarr::get_at<'x'>(c_data, block_idx));
+			const auto d = noarr::make_bag(ddens_l ^ fix_dens, dist_l | noarr::get_at<'x'>(densities, block_idx));
+
+			simd_t curr_c = hn::Load(t, &c.template at<>());
+			simd_t curr_d = hn::Load(t, &d.template at<>());
+
+			curr_d = hn::NegMulAdd(prev_d, curr_c, curr_d);
+
+			hn::Store(curr_d, t, &d.template at<>());
+
+			prev_d = curr_d;
+
+			// #pragma omp critical
+			// 				{
+			// 					for (index_t l = 0; l < simd_length; l++)
+			// 						std::cout << "mf " << z << " " << y + l << " " << equation_idx << " "
+			// 								  << hn::ExtractLane(curr_c, l) << " " << hn::ExtractLane(curr_d, l) <<
+			// std::endl;
+			// 				}
+		}
 	}
+
+	if (t_y_end == y_work)
+		synchronize_x_blocked_distributed_remainder(densities, a_data, c_data, ddens_l, ddiag_l, dist_l, n, n_alignment,
+													simd_y_len * simd_length, y_len, coop_size);
+
 
 	barrier.arrive_and_wait();
 }
@@ -593,27 +633,31 @@ static void solve_block_x_remainder(real_t* __restrict__ densities, const real_t
 									const real_t* __restrict__ b, const real_t* __restrict__ c,
 									real_t* __restrict__ a_scratch, real_t* __restrict__ c_scratch,
 									const density_layout_t dens_l, const diagonal_layout_t diag_l,
-									const scratch_layout_t scratch_l, const index_t n, const index_t s, const index_t z,
-									const index_t y_begin, const index_t y_end)
+									const scratch_layout_t scratch_l, const index_t n, const index_t y_begin,
+									const index_t y_end)
 {
-	auto merge_l = noarr::merge_blocks<'Y', 'y'>();
-	auto a_scratch_bag = noarr::make_bag(scratch_l ^ merge_l, a_scratch);
-	auto c_scratch_bag = noarr::make_bag(scratch_l ^ merge_l, c_scratch);
+	using simd_tag = hn::ScalableTag<real_t>;
+	simd_tag d;
+	constexpr index_t simd_length = hn::Lanes(d);
 
-	auto diag_fix = noarr::fix<'s'>(s) ^ merge_l;
+	auto diag_fix = noarr::fix<'Y'>(y_begin / simd_length);
+
+	auto a_scratch_bag = noarr::make_bag(scratch_l ^ diag_fix, a_scratch);
+	auto c_scratch_bag = noarr::make_bag(scratch_l ^ diag_fix, c_scratch);
+
 	auto a_bag = noarr::make_bag(diag_l ^ diag_fix, a);
 	auto b_bag = noarr::make_bag(diag_l ^ diag_fix, b);
 	auto c_bag = noarr::make_bag(diag_l ^ diag_fix, c);
-	auto d_bag = noarr::make_bag(dens_l, densities);
+	auto d_bag = noarr::make_bag(dens_l ^ noarr::slice<'y'>(y_begin, y_end - y_begin), densities);
 
 	if constexpr (begin)
 	{
-		for (index_t y = y_begin; y < y_end; y++)
+		for (index_t y = 0; y < y_end - y_begin; y++)
 		{
 			// Normalize the first and the second equation
 			for (index_t i = 0; i < 2; i++)
 			{
-				const auto idx = noarr::idx<'z', 'y', 'x'>(z, y, i);
+				const auto idx = noarr::idx<'y', 'x'>(y, i);
 
 				const auto r = 1 / b_bag[idx];
 
@@ -630,8 +674,8 @@ static void solve_block_x_remainder(real_t* __restrict__ densities, const real_t
 			// Process the lower diagonal (forward)
 			for (index_t i = 2; i < n; i++)
 			{
-				const auto prev_idx = noarr::idx<'z', 'y', 'x'>(z, y, i - 1);
-				const auto idx = noarr::idx<'z', 'y', 'x'>(z, y, i);
+				const auto prev_idx = noarr::idx<'y', 'x'>(y, i - 1);
+				const auto idx = noarr::idx<'y', 'x'>(y, i);
 
 				const auto r = 1 / (b_bag[idx] - a_bag[idx] * c_scratch_bag[prev_idx]);
 
@@ -650,8 +694,8 @@ static void solve_block_x_remainder(real_t* __restrict__ densities, const real_t
 			// Process the upper diagonal (backward)
 			for (index_t i = n - 3; i >= 1; i--)
 			{
-				const auto idx = noarr::idx<'z', 'y', 'x'>(z, y, i);
-				const auto next_idx = noarr::idx<'z', 'y', 'x'>(z, y, i + 1);
+				const auto idx = noarr::idx<'y', 'x'>(y, i);
+				const auto next_idx = noarr::idx<'y', 'x'>(y, i + 1);
 
 				d_bag[idx] = d_bag[idx] - c_scratch_bag[idx] * d_bag[next_idx];
 
@@ -666,8 +710,8 @@ static void solve_block_x_remainder(real_t* __restrict__ densities, const real_t
 
 			// Process the first row (backward)
 			{
-				const auto idx = noarr::idx<'z', 'y', 'x'>(z, y, 0);
-				const auto next_idx = noarr::idx<'z', 'y', 'x'>(z, y, 1);
+				const auto idx = noarr::idx<'y', 'x'>(y, 0);
+				const auto next_idx = noarr::idx<'y', 'x'>(y, 1);
 
 				const auto r = 1 / (1 - c_scratch_bag[idx] * a_scratch_bag[next_idx]);
 
@@ -687,13 +731,13 @@ static void solve_block_x_remainder(real_t* __restrict__ densities, const real_t
 	{
 		// Final part of modified thomas algorithm
 		// Solve the rest of the unknowns
-		for (index_t y = y_begin; y < y_end; y++)
+		for (index_t y = 0; y < y_end - y_begin; y++)
 		{
 			for (index_t i = 1; i < n - 1; i++)
 			{
-				const auto idx_begin = noarr::idx<'z', 'y', 'x'>(z, y, 0);
-				const auto idx = noarr::idx<'z', 'y', 'x'>(z, y, i);
-				const auto idx_end = noarr::idx<'z', 'y', 'x'>(z, y, n - 1);
+				const auto idx_begin = noarr::idx<'y', 'x'>(y, 0);
+				const auto idx = noarr::idx<'y', 'x'>(y, i);
+				const auto idx_end = noarr::idx<'y', 'x'>(y, n - 1);
 
 				d_bag[idx] = d_bag[idx] - a_scratch_bag[idx] * d_bag[idx_begin] - c_scratch_bag[idx] * d_bag[idx_end];
 
@@ -714,24 +758,25 @@ static void solve_block_x_transpose(real_t* __restrict__ densities, const real_t
 									real_t* __restrict__ a_scratch, real_t* __restrict__ c_scratch,
 									const density_layout_t dens_l, const diagonal_layout_t diag_l,
 									const scratch_layout_t scratch_l, const index_t x_begin, const index_t x_end,
-									const index_t z_begin, const index_t z_end, const index_t s, const index_t,
-									sync_func_t&& synchronize_blocked_x)
+									const index_t z_begin, const index_t z_end, const index_t sync_step,
+									const index_t s, const index_t, sync_func_t&& synchronize_blocked_x)
 {
-	auto blocked_dens_l = dens_l ^ noarr::fix<'s'>(s);
-
 	const index_t n = x_end - x_begin;
-	const index_t y_len = blocked_dens_l | noarr::get_length<'y'>();
 
 	auto a_scratch_bag = noarr::make_bag(scratch_l ^ noarr::fix<'y'>(noarr::lit<0>), a_scratch);
 	auto c_scratch_bag = noarr::make_bag(scratch_l ^ noarr::fix<'y'>(noarr::lit<0>), c_scratch);
 
 	const auto step_len = z_end - z_begin;
 
-	auto diag_fix = noarr::fix<'s', 'y'>(s, noarr::lit<0>) ^ noarr::slice<'z'>(z_begin, step_len);
-	auto a_bag = noarr::make_bag(diag_l ^ diag_fix, a);
-	auto b_bag = noarr::make_bag(diag_l ^ diag_fix, b);
-	auto c_bag = noarr::make_bag(diag_l ^ diag_fix, c);
-	auto d_bag = noarr::make_bag(blocked_dens_l ^ noarr::slice<'z'>(z_begin, step_len), densities);
+	auto ddiag_l = diag_l ^ noarr::fix<'s', 'Z'>(s, z_begin / sync_step);
+	auto a_bag = noarr::make_bag(ddiag_l ^ noarr::fix<'y'>(noarr::lit<0>), a);
+	auto b_bag = noarr::make_bag(ddiag_l ^ noarr::fix<'y'>(noarr::lit<0>), b);
+	auto c_bag = noarr::make_bag(ddiag_l ^ noarr::fix<'y'>(noarr::lit<0>), c);
+	auto d_bag = noarr::make_bag(dens_l ^ noarr::fix<'s'>(s) ^ noarr::slice<'z'>(z_begin, step_len)
+									 ^ noarr::merge_blocks<'z', 'y'>(),
+								 densities);
+
+	const index_t y_len = d_bag | noarr::get_length<'y'>();
 
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;
@@ -742,335 +787,325 @@ static void solve_block_x_transpose(real_t* __restrict__ densities, const real_t
 
 	const index_t simd_y_len = y_len / simd_length;
 
-	for (index_t z = 0; z < step_len; z++)
+	const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
+
+	for (index_t y = 0; y < simd_y_len; y++)
+	{
+		// vector registers that hold the to be transposed x*yz plane
+
+		simd_t d_prev = hn::Zero(d);
+		simd_t a_scratch_prev = hn::Set(d, -1);
+		simd_t c_scratch_prev = hn::Zero(d);
+
+		// forward substitution until last simd_length elements
+		for (index_t i = 0; i < full_n - simd_length; i += simd_length)
+		{
+			// aligned loads
+			for (index_t v = 0; v < simd_length; v++)
+				d_rows[v] = hn::Load(d, &d_bag.template at<'y', 'x'>(y * simd_length + v, i));
+
+			// transposition to enable vectorization
+			transpose(d_rows);
+
+			for (index_t v = 0; v < simd_length; v++)
+			{
+				const index_t x = i + v;
+
+				const auto idx = noarr::idx<'Y', 'x'>(y, x);
+
+				simd_t a_curr = hn::Load(d, &(a_bag[idx]));
+				simd_t b_curr = hn::Load(d, &(b_bag[idx]));
+				simd_t c_curr = hn::Load(d, &(c_bag[idx]));
+				simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
+				simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
+
+				{
+					simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(a_curr, c_scratch_prev, b_curr));
+
+					a_scratch_curr = hn::Mul(r, hn::NegMulAdd(a_curr, a_scratch_prev, hn::Set(d, 0)));
+					c_scratch_curr = hn::Mul(r, c_curr);
+					d_rows[v] = hn::Mul(r, hn::NegMulAdd(a_curr, d_prev, d_rows[v]));
+
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "f " << z_begin + z << " " << y * simd_length + l
+					// << " " << x_begin + x
+					// 										  << " " << hn::ExtractLane(a_curr, l) << " " <<
+					// hn::ExtractLane(b_curr, l)
+					// 										  << " " << hn::ExtractLane(r, l) << " " <<
+					// hn::ExtractLane(d_rows[v], l)
+					// 										  << std::endl;
+					// 						}
+				}
+
+				if (x >= 1)
+				{
+					d_prev = d_rows[v];
+					a_scratch_prev = a_scratch_curr;
+					c_scratch_prev = c_scratch_curr;
+				}
+				hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
+				hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
+			}
+
+			// aligned stores
+			for (index_t v = 0; v < simd_length; v++)
+				hn::Store(d_rows[v], d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, i)));
+		}
+
+		// we are aligned to the vector size, so we can safely continue
+		// here we fuse the end of forward substitution and the beginning of backwards propagation
+		{
+			for (index_t v = 0; v < simd_length; v++)
+				d_rows[v] = hn::Load(d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, full_n - simd_length)));
+
+			// transposition to enable vectorization
+			transpose(d_rows);
+
+			index_t remainder_work = n % simd_length;
+			remainder_work += remainder_work == 0 ? simd_length : 0;
+
+			// the rest of forward part
+			for (index_t v = 0; v < remainder_work; v++)
+			{
+				const index_t x = full_n - simd_length + v;
+
+				const auto idx = noarr::idx<'Y', 'x'>(y, x);
+
+				simd_t a_curr = hn::Load(d, &(a_bag[idx]));
+				simd_t b_curr = hn::Load(d, &(b_bag[idx]));
+				simd_t c_curr = hn::Load(d, &(c_bag[idx]));
+				simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
+				simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
+
+				// if (x < 2)
+				// {
+				// 	simd_t r = hn::Div(hn::Set(d, 1), b_curr);
+
+				// 	a_scratch_curr = hn::Mul(a_curr, r);
+				// 	c_scratch_curr = hn::Mul(c_curr, r);
+				// 	d_rows[v] = hn::Mul(d_rows[v], r);
+				// }
+				// else
+				{
+					simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(a_curr, c_scratch_prev, b_curr));
+
+					a_scratch_curr = hn::Mul(r, hn::NegMulAdd(a_curr, a_scratch_prev, hn::Set(d, 0)));
+					c_scratch_curr = hn::Mul(r, c_curr);
+					d_rows[v] = hn::Mul(r, hn::NegMulAdd(a_curr, d_prev, d_rows[v]));
+
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "f " << z_begin + z << " " << y * simd_length + l
+					// << " " << x_begin + x
+					// 										  << " " << hn::ExtractLane(a_curr, l) << " " <<
+					// hn::ExtractLane(b_curr, l)
+					// 										  << " " << hn::ExtractLane(r, l) << " " <<
+					// hn::ExtractLane(d_rows[v], l)
+					// 										  << std::endl;
+					// 						}
+				}
+
+				if (x != 0 && x != n - 1)
+				{
+					d_prev = d_rows[v];
+					a_scratch_prev = a_scratch_curr;
+					c_scratch_prev = c_scratch_curr;
+				}
+
+				hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
+				hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
+			}
+
+			// the begin of backward part
+			for (index_t v = remainder_work - 3; v >= 0; v--)
+			{
+				const index_t x = full_n - simd_length + v;
+
+				const auto idx = noarr::idx<'Y', 'x'>(y, x);
+
+				simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
+				simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
+
+				if (x <= n - 3 && x >= 1)
+				{
+					d_rows[v] = hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]);
+
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
+					// x_begin + x << " "
+					// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
+					// 										  << hn::ExtractLane(c_scratch_curr, l) << " " << 1 << "
+					// "
+					// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
+					// 						}
+
+					a_scratch_curr = hn::NegMulAdd(c_scratch_curr, a_scratch_prev, a_scratch_curr);
+					c_scratch_curr = hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0));
+				}
+				else if (x == 0)
+				{
+					simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_scratch_curr, a_scratch_prev, hn::Set(d, 1)));
+
+					d_rows[v] = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]));
+
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
+					// x_begin + x << " "
+					// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
+					// 										  << hn::ExtractLane(c_scratch_curr, l) << " " <<
+					// hn::ExtractLane(r, l) << " "
+					// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
+					// 						}
+
+					a_scratch_curr = hn::Mul(r, a_scratch_curr);
+					c_scratch_curr = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0)));
+				}
+
+				d_prev = d_rows[v];
+				a_scratch_prev = a_scratch_curr;
+				c_scratch_prev = c_scratch_curr;
+				hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
+				hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
+			}
+
+			// aligned stores
+			for (index_t v = 0; v < simd_length; v++)
+				hn::Store(d_rows[v], d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, full_n - simd_length)));
+		}
+
+		// we continue with backwards substitution
+		for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
+		{
+			// aligned loads
+			for (index_t v = 0; v < simd_length; v++)
+				d_rows[v] = hn::Load(d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, i)));
+
+			// backward propagation
+			for (index_t v = simd_length - 1; v >= 0; v--)
+			{
+				const index_t x = i + v;
+
+				const auto idx = noarr::idx<'Y', 'x'>(y, x);
+
+				simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
+				simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
+
+				if (x <= n - 3 && x >= 1)
+				{
+					d_rows[v] = hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]);
+
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
+					// x_begin + x << " "
+					// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
+					// 										  << hn::ExtractLane(c_scratch_curr, l) << " " << 1 << "
+					// "
+					// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
+					// 						}
+
+					a_scratch_curr = hn::NegMulAdd(c_scratch_curr, a_scratch_prev, a_scratch_curr);
+					c_scratch_curr = hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0));
+				}
+				else if (x == 0)
+				{
+					simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_scratch_curr, a_scratch_prev, hn::Set(d, 1)));
+					d_rows[v] = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]));
+
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
+					// x_begin + x << " "
+					// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
+					// 										  << hn::ExtractLane(c_scratch_curr, l) << " " <<
+					// hn::ExtractLane(r, l) << " "
+					// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
+					// 						}
+
+					a_scratch_curr = hn::Mul(r, a_scratch_curr);
+					c_scratch_curr = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0)));
+				}
+
+				d_prev = d_rows[v];
+				a_scratch_prev = a_scratch_curr;
+				c_scratch_prev = c_scratch_curr;
+				hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
+				hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
+			}
+
+			// aligned stores
+			for (index_t v = 0; v < simd_length; v++)
+				hn::Store(d_rows[v], d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, i)));
+		}
+	}
+
+	solve_block_x_remainder<true>(densities, a, b, c, a_scratch, c_scratch, d_bag.structure(), ddiag_l, scratch_l, n,
+								  simd_y_len * simd_length, y_len);
+
+	synchronize_blocked_x();
+
+	for (index_t y = 0; y < simd_y_len; y++)
 	{
 		const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
 
-		for (index_t y = 0; y < simd_y_len; y++)
+		const simd_t begin_unknowns = hn::Load(d, &(d_bag.template at<'y', 'x'>(y * simd_length, 0)));
+
+		const auto transposed_y_offset = (n - 1) % simd_length;
+		const auto transposed_x = (n - 1) - transposed_y_offset;
+
+		const simd_t end_unknowns =
+			hn::Load(d, &(d_bag.template at<'y', 'x'>(y * simd_length + transposed_y_offset, transposed_x)));
+
+		for (index_t i = 0; i < full_n; i += simd_length)
 		{
-			// vector registers that hold the to be transposed x*yz plane
+			for (index_t v = 0; v < simd_length; v++)
+				d_rows[v] = hn::Load(d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, i)));
 
-			simd_t d_prev = hn::Zero(d);
-			simd_t a_scratch_prev = hn::Set(d, -1);
-			simd_t c_scratch_prev = hn::Zero(d);
-
-			// forward substitution until last simd_length elements
-			for (index_t i = 0; i < full_n - simd_length; i += simd_length)
+			for (index_t v = 0; v < simd_length; v++)
 			{
-				// aligned loads
-				for (index_t v = 0; v < simd_length; v++)
-					d_rows[v] = hn::Load(d, &d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, i));
+				index_t x = i + v;
 
-				// transposition to enable vectorization
-				transpose(d_rows);
+				const auto idx = noarr::idx<'Y', 'x'>(y, x);
 
-				for (index_t v = 0; v < simd_length; v++)
+				if (x > 0 && x < n - 1)
 				{
-					const index_t x = i + v;
-
-					const auto idx = noarr::idx<'z', 'Y', 'x'>(z, y, x);
-
-					simd_t a_curr = hn::Load(d, &(a_bag[idx]));
-					simd_t b_curr = hn::Load(d, &(b_bag[idx]));
-					simd_t c_curr = hn::Load(d, &(c_bag[idx]));
 					simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
 					simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
 
-					{
-						simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(a_curr, c_scratch_prev, b_curr));
+					d_rows[v] = hn::NegMulAdd(a_scratch_curr, begin_unknowns, d_rows[v]);
+					d_rows[v] = hn::NegMulAdd(c_scratch_curr, end_unknowns, d_rows[v]);
 
-						a_scratch_curr = hn::Mul(r, hn::NegMulAdd(a_curr, a_scratch_prev, hn::Set(d, 0)));
-						c_scratch_curr = hn::Mul(r, c_curr);
-						d_rows[v] = hn::Mul(r, hn::NegMulAdd(a_curr, d_prev, d_rows[v]));
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "f " << z_begin + z << " " << y * simd_length + l
-						// << " " << x_begin + x
-						// 										  << " " << hn::ExtractLane(a_curr, l) << " " <<
-						// hn::ExtractLane(b_curr, l)
-						// 										  << " " << hn::ExtractLane(r, l) << " " <<
-						// hn::ExtractLane(d_rows[v], l)
-						// 										  << std::endl;
-						// 						}
-					}
-
-					if (x >= 1)
-					{
-						d_prev = d_rows[v];
-						a_scratch_prev = a_scratch_curr;
-						c_scratch_prev = c_scratch_curr;
-					}
-					hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
-					hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
+					// #pragma omp critical
+					// 						{
+					// 							for (index_t l = 0; l < simd_length; l++)
+					// 								std::cout << "e " << z_begin + z << " " << y + l << " " <<
+					// x_begin + x << " "
+					// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
+					// 										  << hn::ExtractLane(c_scratch_curr, l) << " " <<
+					// hn::ExtractLane(d_rows[v], l)
+					// 										  << std::endl;
+					// 						}
 				}
-
-				// aligned stores
-				for (index_t v = 0; v < simd_length; v++)
-					hn::Store(d_rows[v], d, &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, i)));
 			}
 
-			// we are aligned to the vector size, so we can safely continue
-			// here we fuse the end of forward substitution and the beginning of backwards propagation
-			{
-				for (index_t v = 0; v < simd_length; v++)
-					d_rows[v] =
-						hn::Load(d, &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, full_n - simd_length)));
+			transpose(d_rows);
 
-				// transposition to enable vectorization
-				transpose(d_rows);
-
-				index_t remainder_work = n % simd_length;
-				remainder_work += remainder_work == 0 ? simd_length : 0;
-
-				// the rest of forward part
-				for (index_t v = 0; v < remainder_work; v++)
-				{
-					const index_t x = full_n - simd_length + v;
-
-					const auto idx = noarr::idx<'z', 'Y', 'x'>(z, y, x);
-
-					simd_t a_curr = hn::Load(d, &(a_bag[idx]));
-					simd_t b_curr = hn::Load(d, &(b_bag[idx]));
-					simd_t c_curr = hn::Load(d, &(c_bag[idx]));
-					simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
-					simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
-
-					// if (x < 2)
-					// {
-					// 	simd_t r = hn::Div(hn::Set(d, 1), b_curr);
-
-					// 	a_scratch_curr = hn::Mul(a_curr, r);
-					// 	c_scratch_curr = hn::Mul(c_curr, r);
-					// 	d_rows[v] = hn::Mul(d_rows[v], r);
-					// }
-					// else
-					{
-						simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(a_curr, c_scratch_prev, b_curr));
-
-						a_scratch_curr = hn::Mul(r, hn::NegMulAdd(a_curr, a_scratch_prev, hn::Set(d, 0)));
-						c_scratch_curr = hn::Mul(r, c_curr);
-						d_rows[v] = hn::Mul(r, hn::NegMulAdd(a_curr, d_prev, d_rows[v]));
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "f " << z_begin + z << " " << y * simd_length + l
-						// << " " << x_begin + x
-						// 										  << " " << hn::ExtractLane(a_curr, l) << " " <<
-						// hn::ExtractLane(b_curr, l)
-						// 										  << " " << hn::ExtractLane(r, l) << " " <<
-						// hn::ExtractLane(d_rows[v], l)
-						// 										  << std::endl;
-						// 						}
-					}
-
-					if (x != 0 && x != n - 1)
-					{
-						d_prev = d_rows[v];
-						a_scratch_prev = a_scratch_curr;
-						c_scratch_prev = c_scratch_curr;
-					}
-
-					hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
-					hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
-				}
-
-				// the begin of backward part
-				for (index_t v = remainder_work - 3; v >= 0; v--)
-				{
-					const index_t x = full_n - simd_length + v;
-
-					const auto idx = noarr::idx<'z', 'Y', 'x'>(z, y, x);
-
-					simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
-					simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
-
-					if (x <= n - 3 && x >= 1)
-					{
-						d_rows[v] = hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]);
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
-						// x_begin + x << " "
-						// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
-						// 										  << hn::ExtractLane(c_scratch_curr, l) << " " << 1 << "
-						// "
-						// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
-						// 						}
-
-						a_scratch_curr = hn::NegMulAdd(c_scratch_curr, a_scratch_prev, a_scratch_curr);
-						c_scratch_curr = hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0));
-					}
-					else if (x == 0)
-					{
-						simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_scratch_curr, a_scratch_prev, hn::Set(d, 1)));
-
-						d_rows[v] = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]));
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
-						// x_begin + x << " "
-						// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
-						// 										  << hn::ExtractLane(c_scratch_curr, l) << " " <<
-						// hn::ExtractLane(r, l) << " "
-						// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
-						// 						}
-
-						a_scratch_curr = hn::Mul(r, a_scratch_curr);
-						c_scratch_curr = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0)));
-					}
-
-					d_prev = d_rows[v];
-					a_scratch_prev = a_scratch_curr;
-					c_scratch_prev = c_scratch_curr;
-					hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
-					hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
-				}
-
-				// aligned stores
-				for (index_t v = 0; v < simd_length; v++)
-					hn::Store(d_rows[v], d,
-							  &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, full_n - simd_length)));
-			}
-
-			// we continue with backwards substitution
-			for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
-			{
-				// aligned loads
-				for (index_t v = 0; v < simd_length; v++)
-					d_rows[v] = hn::Load(d, &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, i)));
-
-				// backward propagation
-				for (index_t v = simd_length - 1; v >= 0; v--)
-				{
-					const index_t x = i + v;
-
-					const auto idx = noarr::idx<'z', 'Y', 'x'>(z, y, x);
-
-					simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
-					simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
-
-					if (x <= n - 3 && x >= 1)
-					{
-						d_rows[v] = hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]);
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
-						// x_begin + x << " "
-						// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
-						// 										  << hn::ExtractLane(c_scratch_curr, l) << " " << 1 << "
-						// "
-						// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
-						// 						}
-
-						a_scratch_curr = hn::NegMulAdd(c_scratch_curr, a_scratch_prev, a_scratch_curr);
-						c_scratch_curr = hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0));
-					}
-					else if (x == 0)
-					{
-						simd_t r = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_scratch_curr, a_scratch_prev, hn::Set(d, 1)));
-						d_rows[v] = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, d_prev, d_rows[v]));
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "b " << z_begin + z << " " << y + l << " " <<
-						// x_begin + x << " "
-						// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
-						// 										  << hn::ExtractLane(c_scratch_curr, l) << " " <<
-						// hn::ExtractLane(r, l) << " "
-						// 										  << hn::ExtractLane(d_rows[v], l) << std::endl;
-						// 						}
-
-						a_scratch_curr = hn::Mul(r, a_scratch_curr);
-						c_scratch_curr = hn::Mul(r, hn::NegMulAdd(c_scratch_curr, c_scratch_prev, hn::Set(d, 0)));
-					}
-
-					d_prev = d_rows[v];
-					a_scratch_prev = a_scratch_curr;
-					c_scratch_prev = c_scratch_curr;
-					hn::Store(a_scratch_curr, d, &a_scratch_bag[idx]);
-					hn::Store(c_scratch_curr, d, &c_scratch_bag[idx]);
-				}
-
-				// aligned stores
-				for (index_t v = 0; v < simd_length; v++)
-					hn::Store(d_rows[v], d, &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, i)));
-			}
+			for (index_t v = 0; v < simd_length; v++)
+				hn::Store(d_rows[v], d, &(d_bag.template at<'y', 'x'>(y * simd_length + v, i)));
 		}
-
-		solve_block_x_remainder<true>(densities, a, b, c, a_scratch, c_scratch,
-									  blocked_dens_l ^ noarr::slice<'z'>(z_begin, step_len), diag_l, scratch_l, n, s, z,
-									  simd_y_len * simd_length, y_len);
 	}
 
-	synchronize_blocked_x(z_begin, z_end);
-
-	for (index_t z = 0; z < step_len; z++)
-	{
-		for (index_t y = 0; y < simd_y_len; y++)
-		{
-			const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
-
-			const simd_t begin_unknowns = hn::Load(d, &(d_bag.template at<'y', 'z', 'x'>(y * simd_length, z, 0)));
-
-			const auto transposed_y_offset = (n - 1) % simd_length;
-			const auto transposed_x = (n - 1) - transposed_y_offset;
-
-			const simd_t end_unknowns = hn::Load(
-				d, &(d_bag.template at<'y', 'z', 'x'>(y * simd_length + transposed_y_offset, z, transposed_x)));
-
-			for (index_t i = 0; i < full_n; i += simd_length)
-			{
-				for (index_t v = 0; v < simd_length; v++)
-					d_rows[v] = hn::Load(d, &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, i)));
-
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					index_t x = i + v;
-
-					const auto idx = noarr::idx<'z', 'Y', 'x'>(z, y, x);
-
-					if (x > 0 && x < n - 1)
-					{
-						simd_t a_scratch_curr = hn::Load(d, &a_scratch_bag[idx]);
-						simd_t c_scratch_curr = hn::Load(d, &c_scratch_bag[idx]);
-
-						d_rows[v] = hn::NegMulAdd(a_scratch_curr, begin_unknowns, d_rows[v]);
-						d_rows[v] = hn::NegMulAdd(c_scratch_curr, end_unknowns, d_rows[v]);
-
-						// #pragma omp critical
-						// 						{
-						// 							for (index_t l = 0; l < simd_length; l++)
-						// 								std::cout << "e " << z_begin + z << " " << y + l << " " <<
-						// x_begin + x << " "
-						// 										  << hn::ExtractLane(a_scratch_curr, l) << " "
-						// 										  << hn::ExtractLane(c_scratch_curr, l) << " " <<
-						// hn::ExtractLane(d_rows[v], l)
-						// 										  << std::endl;
-						// 						}
-					}
-				}
-
-				transpose(d_rows);
-
-				for (index_t v = 0; v < simd_length; v++)
-					hn::Store(d_rows[v], d, &(d_bag.template at<'z', 'y', 'x'>(z, y * simd_length + v, i)));
-			}
-		}
-
-		solve_block_x_remainder<false>(densities, a, b, c, a_scratch, c_scratch,
-									   blocked_dens_l ^ noarr::slice<'z'>(z_begin, step_len), diag_l, scratch_l, n, s,
-									   z, simd_y_len * simd_length, y_len);
-	}
+	solve_block_x_remainder<false>(densities, a, b, c, a_scratch, c_scratch, d_bag.structure(), ddiag_l, scratch_l, n,
+								   simd_y_len * simd_length, y_len);
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t,
@@ -1079,7 +1114,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 												const real_t* __restrict__ b, const real_t* __restrict__ c,
 												real_t* __restrict__ b_scratch, const density_layout_t dens_l,
 												const diagonal_layout_t diag_l, const scratch_layout_t scratch_l,
-												const index_t s, const index_t z, index_t n)
+												const index_t s, const index_t z_begin, const index_t z_end,
+												const index_t sync_step, index_t n)
 {
 	using simd_tag = hn::ScalableTag<real_t>;
 	simd_tag d;
@@ -1088,9 +1124,13 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 	simd_t d_rows[simd_length];
 
-	const index_t y_len = dens_l | noarr::get_length<'y'>();
+	auto ddens_l = dens_l ^ noarr::slice<'z'>(z_begin, z_end - z_begin) ^ noarr::merge_blocks<'z', 'y'>();
+	auto ddiag_l = diag_l ^ noarr::fix<'Z'>(z_begin / sync_step);
 
+	const index_t y_len = ddens_l | noarr::get_length<'y'>();
 	const index_t Y_len = y_len / simd_length;
+
+	// std::cout << y_len << " " << Y_len << std::endl;
 
 	// vectorized body
 	{
@@ -1110,8 +1150,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned loads
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					d_rows[v] = hn::Load(
-						d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
+					d_rows[v] =
+						hn::Load(d, &(ddens_l | noarr::get_at<'y', 'x', 's'>(densities, Y * simd_length + v, i, s)));
 				}
 
 				// transposition to enable vectorization
@@ -1119,10 +1159,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					simd_t a_curr =
-						hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(a, z, Y, 0, i + v, s)));
-					simd_t b_curr =
-						hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(b, z, Y, 0, i + v, s)));
+					simd_t a_curr = hn::Load(d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(a, Y, 0, i + v, s)));
+					simd_t b_curr = hn::Load(d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(b, Y, 0, i + v, s)));
 
 					auto r = hn::Mul(a_curr, scratch_prev);
 
@@ -1132,14 +1170,14 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 					d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
 
 					d_prev = d_rows[v];
-					c_prev = hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, i + v, s)));
+					c_prev = hn::Load(d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(c, Y, 0, i + v, s)));
 				}
 
 				// aligned stores
 				for (index_t v = 0; v < simd_length; v++)
 				{
 					hn::Store(d_rows[v], d,
-							  &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
+							  &(ddens_l | noarr::get_at<'y', 'x', 's'>(densities, Y * simd_length + v, i, s)));
 				}
 			}
 
@@ -1148,9 +1186,9 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 			{
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					d_rows[v] = hn::Load(d, &(dens_l
-											  | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v,
-																				  full_n - simd_length, s)));
+					d_rows[v] = hn::Load(
+						d, &(ddens_l
+							 | noarr::get_at<'y', 'x', 's'>(densities, Y * simd_length + v, full_n - simd_length, s)));
 				}
 
 				// transposition to enable vectorization
@@ -1164,11 +1202,9 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 					for (index_t v = 0; v < remainder_work; v++)
 					{
 						simd_t a_curr = hn::Load(
-							d, &(diag_l
-								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(a, z, Y, 0, full_n - simd_length + v, s)));
+							d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(a, Y, 0, full_n - simd_length + v, s)));
 						simd_t b_curr = hn::Load(
-							d, &(diag_l
-								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(b, z, Y, 0, full_n - simd_length + v, s)));
+							d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(b, Y, 0, full_n - simd_length + v, s)));
 
 						auto r = hn::Mul(a_curr, scratch_prev);
 
@@ -1180,8 +1216,7 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 						d_prev = d_rows[v];
 						c_prev = hn::Load(
-							d, &(diag_l
-								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, full_n - simd_length + v, s)));
+							d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(c, Y, 0, full_n - simd_length + v, s)));
 					}
 				}
 
@@ -1195,8 +1230,7 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 					for (index_t v = remainder_work - 2; v >= 0; v--)
 					{
 						simd_t c_curr = hn::Load(
-							d, &(diag_l
-								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, full_n - simd_length + v, s)));
+							d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(c, Y, 0, full_n - simd_length + v, s)));
 
 						auto scratch =
 							hn::Load(d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
@@ -1212,10 +1246,10 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned stores
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					hn::Store(d_rows[v], d,
-							  &(dens_l
-								| noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v,
-																	full_n - simd_length, s)));
+					hn::Store(
+						d_rows[v], d,
+						&(ddens_l
+						  | noarr::get_at<'y', 'x', 's'>(densities, Y * simd_length + v, full_n - simd_length, s)));
 				}
 			}
 
@@ -1225,16 +1259,15 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned loads
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					d_rows[v] = hn::Load(
-						d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
+					d_rows[v] =
+						hn::Load(d, &(ddens_l | noarr::get_at<'y', 'x', 's'>(densities, Y * simd_length + v, i, s)));
 				}
 
 				// backward propagation
 				{
 					for (index_t v = simd_length - 1; v >= 0; v--)
 					{
-						simd_t c_curr =
-							hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, i + v, s)));
+						simd_t c_curr = hn::Load(d, &(ddiag_l | noarr::get_at<'Y', 'y', 'x', 's'>(c, Y, 0, i + v, s)));
 
 						auto scratch = hn::Load(d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
 						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_curr, d_rows[v]), scratch);
@@ -1250,7 +1283,7 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				for (index_t v = 0; v < simd_length; v++)
 				{
 					hn::Store(d_rows[v], d,
-							  &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
+							  &(ddens_l | noarr::get_at<'y', 'x', 's'>(densities, Y * simd_length + v, i, s)));
 				}
 			}
 		}
@@ -1258,28 +1291,28 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 	// yz remainder
 	{
-		auto remainder_diag_l = diag_l ^ noarr::fix<'Y'>(Y_len);
+		auto remainder_diag_l = ddiag_l ^ noarr::fix<'Y'>(Y_len);
 		auto a_bag = noarr::make_bag(remainder_diag_l, a);
 		auto b_bag = noarr::make_bag(remainder_diag_l, b);
 		auto c_bag = noarr::make_bag(remainder_diag_l, c);
 
 		const index_t y_remainder = y_len - Y_len * simd_length;
 
-		auto d = noarr::make_bag(dens_l ^ noarr::slice<'y'>(Y_len * simd_length, y_remainder), densities);
+		auto d = noarr::make_bag(ddens_l ^ noarr::slice<'y'>(Y_len * simd_length, y_remainder), densities);
 
 		auto scratch = noarr::make_bag(scratch_l ^ noarr::fix<'v'>(0), b_scratch);
 
 		for (index_t y = 0; y < y_remainder; y++)
 		{
 			{
-				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, 0);
+				auto idx = noarr::idx<'s', 'y', 'x'>(s, y, 0);
 				scratch[idx] = 1 / b_bag[idx];
 			}
 
 			for (index_t i = 1; i < n; i++)
 			{
-				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i);
-				auto prev_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i - 1);
+				auto idx = noarr::idx<'s', 'y', 'x'>(s, y, i);
+				auto prev_idx = noarr::idx<'s', 'y', 'x'>(s, y, i - 1);
 
 				auto r = a_bag[idx] * scratch[prev_idx];
 
@@ -1291,7 +1324,7 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 			}
 
 			{
-				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, n - 1);
+				auto idx = noarr::idx<'s', 'y', 'x'>(s, y, n - 1);
 				d[idx] *= scratch[idx];
 
 				// std::cout << "n-1: " << (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) << std::endl;
@@ -1299,8 +1332,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 			for (index_t i = n - 2; i >= 0; i--)
 			{
-				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i);
-				auto next_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i + 1);
+				auto idx = noarr::idx<'s', 'y', 'x'>(s, y, i);
+				auto next_idx = noarr::idx<'s', 'y', 'x'>(s, y, i + 1);
 
 				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
 
@@ -1948,8 +1981,115 @@ static void solve_slice_z_3d(real_t* __restrict__ densities, const real_t* __res
 }
 
 template <typename real_t, bool aligned_x>
+void sdd_full_blocking<real_t, aligned_x>::solve_x_nf()
+{
+	for (index_t i = 0; i < countersx_count_; i++)
+	{
+		countersx_[i]->value = 0;
+	}
+
+#pragma omp parallel
+	{
+		const thread_id_t<index_t> tid = get_thread_id();
+
+		const auto block_x_begin = group_block_offsetsx_[tid.x];
+		const auto block_x_end = block_x_begin + group_block_lengthsx_[tid.x];
+
+		const auto block_z_begin = group_block_offsetsz_[tid.z];
+		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid.z];
+
+		const auto lane_id_x = get_lane_id('x');
+
+		barrier_t<true, index_t> barrier_x(cores_division_[0], countersx_[lane_id_x]->value);
+		// auto& barrier_y = *barriersy_[lane_id_y];
+
+
+		const index_t group_size_x = cores_division_[0];
+
+		for (index_t s = 0; s < group_block_lengthss_[tid.group]; s++)
+		{
+			// #pragma omp critical
+			// 			std::cout << "Thread " << get_thread_num() << " s_begin: " << s << " s_end: " << s + 1
+			// 					  << " block_x_begin: " << block_x_begin << " block_x_end: " << block_x_end
+			// 					  << " block_y_begin: " << group_block_offsetsy_[tid.y]
+			// 					  << " block_y_end: " << group_block_offsetsy_[tid.y] - group_block_lengthsy_[tid.y]
+			// 					  << " block_z_begin: " << block_z_begin << " block_z_end: " << block_z_end
+			// 					  << " group: " << tid.group << std::endl;
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				auto scratch_x = get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x],
+																	  group_block_lengthsy_[tid.y], y_sync_step_);
+
+				auto scratch_x_wo_x = get_scratch_layout<'x', false, false>(group_block_lengthsx_[tid.x],
+																			group_block_lengthsy_[tid.y], y_sync_step_);
+
+				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
+
+				auto current_a_scratch = dist_l | noarr::get_at<'x', 'y', 'z'>(a_scratch_.get(), tid.x, tid.y, tid.z);
+				auto current_c_scratch = dist_l | noarr::get_at<'x', 'y', 'z'>(c_scratch_.get(), tid.x, tid.y, tid.z);
+				auto current_densities =
+					dist_l | noarr::get_at<'x', 'y', 'z'>(thread_substrate_array_.get(), tid.x, tid.y, tid.z);
+
+				auto current_ax = dist_l | noarr::get_at<'x', 'y', 'z'>(ax_.get(), tid.x, tid.y, tid.z);
+				auto current_bx = dist_l | noarr::get_at<'x', 'y', 'z'>(bx_.get(), tid.x, tid.y, tid.z);
+				auto current_cx = dist_l | noarr::get_at<'x', 'y', 'z'>(cx_.get(), tid.x, tid.y, tid.z);
+
+				auto dens_l =
+					get_blocked_substrate_layout(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												 group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+
+				auto dens_l_wo_x =
+					get_blocked_substrate_layout<'x'>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+
+				auto diag_x = get_diag_layout_x<3, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+														  group_block_lengthsz_[tid.z],
+														  group_block_lengthss_[tid.group], y_sync_step_);
+
+				for (index_t blocked_z = block_z_begin; blocked_z < block_z_end; blocked_z += y_sync_step_)
+				{
+					const index_t y_sync_step_len = std::min(y_sync_step_, block_z_end - blocked_z);
+
+
+					auto sync_x = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
+								   c = c_scratch_.get(), dens_l = dens_l_wo_x ^ noarr::fix<'s'>(s),
+								   scratch = scratch_x_wo_x, dist_l = dist_l ^ noarr::fix<'y', 'z'>(tid.y, tid.z),
+								   n = this->problem_.nx,
+								   n_alignment = (index_t)alignment_size_ / (index_t)sizeof(real_t), tid = tid.x,
+								   group_size = group_size_x, &barrier = barrier_x](index_t z_begin, index_t z_end) {
+						synchronize_x_blocked_distributed_nf(densities, a, c, dens_l, scratch, dist_l, n, n_alignment,
+															 z_begin, z_end, tid, group_size, barrier);
+					};
+
+					if (cores_division_[0] != 1)
+						solve_block_x_transpose_nf(
+							current_densities, current_ax, current_bx, current_cx, current_a_scratch, current_c_scratch,
+							dens_l, diag_x, scratch_x, block_x_begin, block_x_end, blocked_z - block_z_begin,
+							blocked_z + y_sync_step_len - block_z_begin, s, x_tile_size_, std::move(sync_x));
+					else
+						for (index_t z = blocked_z; z < blocked_z + y_sync_step_len; z++)
+							solve_slice_x_2d_and_3d_transpose_l_nf<index_t>(
+								current_densities, current_ax, current_bx, current_cx, current_a_scratch, dens_l,
+								diag_x,
+								get_non_blocked_scratch_layout<'x'>(group_block_lengthsx_[tid.x],
+																	alignment_size_ / sizeof(real_t)),
+								s, z - block_z_begin, this->problem_.nx);
+				}
+			}
+		}
+	}
+}
+
+template <typename real_t, bool aligned_x>
 void sdd_full_blocking<real_t, aligned_x>::solve_x()
 {
+	if (!fuse_z_)
+	{
+		solve_x_nf();
+		return;
+	}
+
 	for (index_t i = 0; i < countersx_count_; i++)
 	{
 		countersx_[i]->value = 0;
@@ -2010,8 +2150,9 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x()
 					get_blocked_substrate_layout<'x'>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
 													  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
 
-				auto diag_x = get_diag_layout_x(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
-												group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+				auto diag_x =
+					get_diag_layout_x(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+									  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group], y_sync_step_);
 
 				for (index_t blocked_z = block_z_begin; blocked_z < block_z_end; blocked_z += y_sync_step_)
 				{
@@ -2021,26 +2162,28 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x()
 					auto sync_x = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
 								   c = c_scratch_.get(), dens_l = dens_l_wo_x ^ noarr::fix<'s'>(s),
 								   scratch = scratch_x_wo_x, dist_l = dist_l ^ noarr::fix<'y', 'z'>(tid.y, tid.z),
-								   n = this->problem_.nx,
+								   n = this->problem_.nx, sync_step = y_sync_step_,
 								   n_alignment = (index_t)alignment_size_ / (index_t)sizeof(real_t), tid = tid.x,
-								   group_size = group_size_x, &barrier = barrier_x](index_t z_begin, index_t z_end) {
+								   z_begin = blocked_z - block_z_begin,
+								   z_end = blocked_z + y_sync_step_len - block_z_begin, group_size = group_size_x,
+								   &barrier = barrier_x]() {
 						synchronize_x_blocked_distributed(densities, a, c, dens_l, scratch, dist_l, n, n_alignment,
-														  z_begin, z_end, tid, group_size, barrier);
+														  z_begin, z_end, sync_step, tid, group_size, barrier);
 					};
 
 					if (cores_division_[0] != 1)
-						solve_block_x_transpose(
-							current_densities, current_ax, current_bx, current_cx, current_a_scratch, current_c_scratch,
-							dens_l, diag_x, scratch_x, block_x_begin, block_x_end, blocked_z - block_z_begin,
-							blocked_z + y_sync_step_len - block_z_begin, s, x_tile_size_, std::move(sync_x));
+						solve_block_x_transpose(current_densities, current_ax, current_bx, current_cx,
+												current_a_scratch, current_c_scratch, dens_l, diag_x, scratch_x,
+												block_x_begin, block_x_end, blocked_z - block_z_begin,
+												blocked_z + y_sync_step_len - block_z_begin, y_sync_step_, s,
+												x_tile_size_, std::move(sync_x));
 					else
-						for (index_t z = blocked_z; z < blocked_z + y_sync_step_len; z++)
-							solve_slice_x_2d_and_3d_transpose_l<index_t>(
-								current_densities, current_ax, current_bx, current_cx, current_a_scratch, dens_l,
-								diag_x,
-								get_non_blocked_scratch_layout<'x'>(group_block_lengthsx_[tid.x],
-																	alignment_size_ / sizeof(real_t)),
-								s, z - block_z_begin, this->problem_.nx);
+						solve_slice_x_2d_and_3d_transpose_l<index_t>(
+							current_densities, current_ax, current_bx, current_cx, current_a_scratch, dens_l, diag_x,
+							get_non_blocked_scratch_layout<'x'>(group_block_lengthsx_[tid.x],
+																alignment_size_ / sizeof(real_t)),
+							s, blocked_z - block_z_begin, blocked_z + y_sync_step_len - block_z_begin, y_sync_step_,
+							this->problem_.nx);
 				}
 			}
 		}
@@ -2224,6 +2367,12 @@ void sdd_full_blocking<real_t, aligned_x>::solve_z()
 template <typename real_t, bool aligned_x>
 void sdd_full_blocking<real_t, aligned_x>::solve()
 {
+	if (!fuse_z_)
+	{
+		solve_nf();
+		return;
+	}
+
 	for (index_t i = 0; i < countersx_count_; i++)
 	{
 		countersx_[i]->value = 0;
@@ -2329,8 +2478,203 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 					get_blocked_substrate_layout<'z'>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
 													  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
 
-				auto diag_x = get_diag_layout_x(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
-												group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+				auto diag_x =
+					get_diag_layout_x(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+									  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group], y_sync_step_);
+
+				for (index_t blocked_z = block_z_begin; blocked_z < block_z_end; blocked_z += y_sync_step_)
+				{
+					const index_t y_sync_step_len = std::min(y_sync_step_, block_z_end - blocked_z);
+
+
+					auto sync_x = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
+								   c = c_scratch_.get(), dens_l = dens_l_wo_x ^ noarr::fix<'s'>(s),
+								   scratch = scratch_x_wol, dist_l = dist_l ^ noarr::fix<'y', 'z'>(tid.y, tid.z),
+								   n = this->problem_.nx, sync_step = y_sync_step_,
+								   n_alignment = (index_t)alignment_size_ / (index_t)sizeof(real_t), tid = tid.x,
+								   z_begin = blocked_z - block_z_begin,
+								   z_end = blocked_z + y_sync_step_len - block_z_begin, group_size = group_size_x,
+								   &barrier = barrier_x]() {
+						synchronize_x_blocked_distributed(densities, a, c, dens_l, scratch, dist_l, n, n_alignment,
+														  z_begin, z_end, sync_step, tid, group_size, barrier);
+					};
+
+					if (cores_division_[0] != 1)
+						solve_block_x_transpose(current_densities, current_ax, current_bx, current_cx,
+												current_a_scratch, current_c_scratch, dens_l, diag_x, scratch_x,
+												block_x_begin, block_x_end, blocked_z - block_z_begin,
+												blocked_z + y_sync_step_len - block_z_begin, y_sync_step_, s,
+												x_tile_size_, std::move(sync_x));
+					else
+						solve_slice_x_2d_and_3d_transpose_l<index_t>(
+							current_densities, current_ax, current_bx, current_cx, current_a_scratch, dens_l, diag_x,
+							get_non_blocked_scratch_layout<'x'>(group_block_lengthsx_[tid.x],
+																alignment_size_ / sizeof(real_t)),
+							s, blocked_z - block_z_begin, blocked_z + y_sync_step_len - block_z_begin, y_sync_step_,
+							this->problem_.nx);
+
+
+					auto sync_y = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
+								   c = c_scratch_.get(), dens_l = dens_l_wo_y ^ noarr::fix<'s'>(s),
+								   scratch = scratch_y_wol, dist_l = dist_l ^ noarr::fix<'x', 'z'>(tid.x, tid.z),
+								   n = this->problem_.ny, tid = tid.y, group_size = group_size_y,
+								   &barrier = barrier_y](index_t z_begin, index_t z_end) {
+						synchronize_y_blocked_distributed(densities, a, c, dens_l, scratch, dist_l, n, z_begin, z_end,
+														  tid, group_size, barrier);
+					};
+
+					if (cores_division_[1] != 1)
+						solve_block_y(current_densities, current_ay, current_by, current_cy, current_a_scratch,
+									  current_c_scratch, dens_l_wo_y, scratch_y, block_y_begin, block_y_end,
+									  blocked_z - block_z_begin, blocked_z + y_sync_step_len - block_z_begin, s,
+									  group_block_lengthsx_[tid.x], std::move(sync_y));
+					else
+						for (index_t z = blocked_z; z < blocked_z + y_sync_step_len; z++)
+							solve_slice_y_3d<index_t>(
+								current_densities, current_ay, current_by, current_cy, current_a_scratch, dens_l,
+								get_non_blocked_scratch_layout<'y'>(
+									group_block_lengthsy_[tid.y], std::min(x_tile_size_, group_block_lengthsx_[tid.x])),
+								s, z - block_z_begin, x_tile_size_, group_block_lengthsx_[tid.x]);
+				}
+
+				if (this->problem_.dims == 3)
+				{
+					auto sync_z = [densities = thread_substrate_array_.get(), a = a_scratch_.get(),
+								   c = c_scratch_.get(), dens_l = dens_l_wo_z ^ noarr::fix<'s'>(s),
+								   scratch = scratch_z_wol, dist_l = dist_l ^ noarr::fix<'x', 'y'>(tid.x, tid.y),
+								   n = this->problem_.nz, tid = tid.z, group_size = group_size_z,
+								   &barrier = barrier_z](index_t y_begin, index_t y_end) {
+						synchronize_z_blocked_distributed(densities, a, c, dens_l, scratch, dist_l, n, y_begin, y_end,
+														  tid, group_size, barrier);
+					};
+
+					if (cores_division_[2] != 1)
+						solve_block_z(current_densities, current_az, current_bz, current_cz, current_a_scratch,
+									  current_c_scratch, dens_l_wo_z, scratch_z, block_z_begin, block_z_end, s,
+									  group_block_lengthsx_[tid.x], z_sync_step_, std::move(sync_z));
+					else
+						solve_slice_z_3d<index_t>(
+							current_densities, current_az, current_bz, current_cz, current_a_scratch, dens_l,
+							get_non_blocked_scratch_layout<'z'>(group_block_lengthsz_[tid.z],
+																std::min(x_tile_size_, group_block_lengthsx_[tid.x])),
+							s, x_tile_size_, group_block_lengthsx_[tid.x]);
+				}
+			}
+		}
+	}
+}
+
+template <typename real_t, bool aligned_x>
+void sdd_full_blocking<real_t, aligned_x>::solve_nf()
+{
+	for (index_t i = 0; i < countersx_count_; i++)
+	{
+		countersx_[i]->value = 0;
+	}
+	for (index_t i = 0; i < countersy_count_; i++)
+	{
+		countersy_[i]->value = 0;
+	}
+	for (index_t i = 0; i < countersz_count_; i++)
+	{
+		countersz_[i]->value = 0;
+	}
+
+#pragma omp parallel
+	{
+		perf_counter counter("sdd-fb");
+
+		const thread_id_t<index_t> tid = get_thread_id();
+
+		const auto block_x_begin = group_block_offsetsx_[tid.x];
+		const auto block_x_end = block_x_begin + group_block_lengthsx_[tid.x];
+
+		const auto block_y_begin = group_block_offsetsy_[tid.y];
+		const auto block_y_end = block_y_begin + group_block_lengthsy_[tid.y];
+
+		const auto block_z_begin = group_block_offsetsz_[tid.z];
+		const auto block_z_end = block_z_begin + group_block_lengthsz_[tid.z];
+
+		const auto lane_id_x = get_lane_id('x');
+
+		barrier_t<true, index_t> barrier_x(cores_division_[0], countersx_[lane_id_x]->value);
+		// auto& barrier_y = *barriersy_[lane_id_y];
+
+		const auto lane_id_y = get_lane_id('y');
+
+		barrier_t<true, index_t> barrier_y(cores_division_[1], countersy_[lane_id_y]->value);
+		// auto& barrier_y = *barriersy_[lane_id_y];
+
+		const auto lane_id_z = get_lane_id('z');
+
+		barrier_t<true, index_t> barrier_z(cores_division_[2], countersz_[lane_id_z]->value);
+		// auto& barrier_z = *barriersz_[lane_id_z];
+
+		const index_t group_size_x = cores_division_[0];
+		const index_t group_size_y = cores_division_[1];
+		const index_t group_size_z = cores_division_[2];
+
+		for (index_t s = 0; s < group_block_lengthss_[tid.group]; s++)
+		{
+			// #pragma omp critical
+			// 			std::cout << "Thread " << get_thread_num() << " s_begin: " << s << " s_end: " << s + 1
+			// 					  << " block_y_begin: " << block_y_begin << " block_y_end: " << block_y_end
+			// 					  << " block_z_begin: " << block_z_begin << " block_z_end: " << block_z_end
+			// 					  << " group: " << tid.group << std::endl;
+
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+			{
+				auto scratch_x = get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x],
+																	  group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_y = get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x],
+															   group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_,
+															   group_block_lengthsz_[tid.z]);
+				auto scratch_x_wol = get_scratch_layout<'x', false, false>(group_block_lengthsx_[tid.x],
+																		   group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_y_wol = get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x],
+																	group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_z_wol = get_scratch_layout<'z', false>(group_block_lengthsx_[tid.x], z_sync_step_,
+																	group_block_lengthsz_[tid.z]);
+
+				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
+
+				auto current_a_scratch = dist_l | noarr::get_at<'x', 'y', 'z'>(a_scratch_.get(), tid.x, tid.y, tid.z);
+				auto current_c_scratch = dist_l | noarr::get_at<'x', 'y', 'z'>(c_scratch_.get(), tid.x, tid.y, tid.z);
+				auto current_densities =
+					dist_l | noarr::get_at<'x', 'y', 'z'>(thread_substrate_array_.get(), tid.x, tid.y, tid.z);
+
+				auto current_ax = dist_l | noarr::get_at<'x', 'y', 'z'>(ax_.get(), tid.x, tid.y, tid.z);
+				auto current_bx = dist_l | noarr::get_at<'x', 'y', 'z'>(bx_.get(), tid.x, tid.y, tid.z);
+				auto current_cx = dist_l | noarr::get_at<'x', 'y', 'z'>(cx_.get(), tid.x, tid.y, tid.z);
+
+				auto current_ay = dist_l | noarr::get_at<'x', 'y', 'z'>(ay_.get(), tid.x, tid.y, tid.z);
+				auto current_by = dist_l | noarr::get_at<'x', 'y', 'z'>(by_.get(), tid.x, tid.y, tid.z);
+				auto current_cy = dist_l | noarr::get_at<'x', 'y', 'z'>(cy_.get(), tid.x, tid.y, tid.z);
+
+				auto current_az = dist_l | noarr::get_at<'x', 'y', 'z'>(az_.get(), tid.x, tid.y, tid.z);
+				auto current_bz = dist_l | noarr::get_at<'x', 'y', 'z'>(bz_.get(), tid.x, tid.y, tid.z);
+				auto current_cz = dist_l | noarr::get_at<'x', 'y', 'z'>(cz_.get(), tid.x, tid.y, tid.z);
+
+				auto dens_l =
+					get_blocked_substrate_layout(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												 group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+
+				auto dens_l_wo_x =
+					get_blocked_substrate_layout<'x'>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+
+				auto dens_l_wo_y =
+					get_blocked_substrate_layout<'y'>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+
+				auto dens_l_wo_z =
+					get_blocked_substrate_layout<'z'>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													  group_block_lengthsz_[tid.z], group_block_lengthss_[tid.group]);
+
+				auto diag_x = get_diag_layout_x<3, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+														  group_block_lengthsz_[tid.z],
+														  group_block_lengthss_[tid.group], y_sync_step_);
 
 				for (index_t blocked_z = block_z_begin; blocked_z < block_z_end; blocked_z += y_sync_step_)
 				{
@@ -2343,18 +2687,18 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 								   n = this->problem_.nx,
 								   n_alignment = (index_t)alignment_size_ / (index_t)sizeof(real_t), tid = tid.x,
 								   group_size = group_size_x, &barrier = barrier_x](index_t z_begin, index_t z_end) {
-						synchronize_x_blocked_distributed(densities, a, c, dens_l, scratch, dist_l, n, n_alignment,
-														  z_begin, z_end, tid, group_size, barrier);
+						synchronize_x_blocked_distributed_nf(densities, a, c, dens_l, scratch, dist_l, n, n_alignment,
+															 z_begin, z_end, tid, group_size, barrier);
 					};
 
 					if (cores_division_[0] != 1)
-						solve_block_x_transpose(
+						solve_block_x_transpose_nf(
 							current_densities, current_ax, current_bx, current_cx, current_a_scratch, current_c_scratch,
 							dens_l, diag_x, scratch_x, block_x_begin, block_x_end, blocked_z - block_z_begin,
 							blocked_z + y_sync_step_len - block_z_begin, s, x_tile_size_, std::move(sync_x));
 					else
 						for (index_t z = blocked_z; z < blocked_z + y_sync_step_len; z++)
-							solve_slice_x_2d_and_3d_transpose_l<index_t>(
+							solve_slice_x_2d_and_3d_transpose_l_nf<index_t>(
 								current_densities, current_ax, current_bx, current_cx, current_a_scratch, dens_l,
 								diag_x,
 								get_non_blocked_scratch_layout<'x'>(group_block_lengthsx_[tid.x],

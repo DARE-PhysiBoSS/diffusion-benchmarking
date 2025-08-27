@@ -28,6 +28,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 
 	index_t x_tile_size_;
 	std::size_t alignment_size_;
+	bool fuse_z_;
 
 	std::array<index_t, 3> cores_division_;
 
@@ -68,7 +69,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 			return layout ^ noarr::set_length<'x', 'y', 'z', 's'>(x_size_padded, ny, nz, substrates_count);
 	}
 
-	template <char dim, bool with_len>
+	template <char dim, bool with_len, bool fused_z = true>
 	auto get_scratch_layout(index_t nx, index_t ny, index_t nz)
 	{
 		std::size_t x_size = nx * sizeof(real_t);
@@ -81,15 +82,30 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 			simd_tag d;
 			std::size_t elements = hn::Lanes(d);
 
-			std::size_t Y_size = (ny + elements - 1) / elements;
+			if constexpr (fused_z)
+			{
+				std::size_t Y_size = (ny * nz + elements - 1) / elements;
 
-			auto layout = noarr::scalar<real_t>() ^ noarr::vector<'y'>(elements) ^ noarr::vector<'x'>()
-						  ^ noarr::vector<'Y'>(Y_size) ^ noarr::vector<'z'>(nz);
+				auto layout = noarr::scalar<real_t>() ^ noarr::vector<'y'>(elements) ^ noarr::vector<'x'>()
+							  ^ noarr::vector<'Y'>(Y_size);
 
-			if constexpr (!with_len)
-				return layout;
+				if constexpr (!with_len)
+					return layout;
+				else
+					return layout ^ noarr::set_length<'x'>(nx);
+			}
 			else
-				return layout ^ noarr::set_length<'x'>(nx);
+			{
+				std::size_t Y_size = (ny + elements - 1) / elements;
+
+				auto layout = noarr::scalar<real_t>() ^ noarr::vector<'y'>(elements) ^ noarr::vector<'x'>()
+							  ^ noarr::vector<'Y'>(Y_size) ^ noarr::vector<'z'>(nz);
+
+				if constexpr (!with_len)
+					return layout;
+				else
+					return layout ^ noarr::set_length<'x'>(nx);
+			}
 		}
 		else if constexpr (dim == 'y')
 		{
@@ -129,28 +145,41 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 												  substrate_groups_);
 	}
 
-	template <std::size_t dims = 3>
-	auto get_diag_layout_x(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
+	template <std::size_t dims = 3, bool fused_z = true>
+	auto get_diag_layout_x(index_t nx, index_t ny, index_t nz, index_t substrates_count, index_t sync_step) const
 	{
 		using simd_tag = hn::ScalableTag<real_t>;
 		simd_tag d;
 		std::size_t elements = hn::Lanes(d);
 
-		std::size_t Y_size = (ny + elements - 1) / elements;
-
 		if constexpr (dims == 2)
 		{
+			std::size_t Y_size = (ny + elements - 1) / elements;
+
 			return noarr::scalar<real_t>() ^ noarr::vectors<'y', 'x', 'Y', 's'>(elements, nx, Y_size, substrates_count);
 		}
 
 		else if constexpr (dims == 3)
 		{
-			return noarr::scalar<real_t>()
-				   ^ noarr::vectors<'y', 'x', 'Y', 'z', 's'>(elements, nx, Y_size, nz, substrates_count);
+			if constexpr (fused_z)
+			{
+				std::size_t Y_size = (ny * sync_step + elements - 1) / elements;
+
+				return noarr::scalar<real_t>()
+					   ^ noarr::vectors<'y', 'x', 'Y', 'Z', 's'>(elements, nx, Y_size, (nz + sync_step - 1) / sync_step,
+																 substrates_count);
+			}
+			else
+			{
+				std::size_t Y_size = (ny + elements - 1) / elements;
+
+				return noarr::scalar<real_t>()
+					   ^ noarr::vectors<'y', 'x', 'Y', 'z', 's'>(elements, nx, Y_size, nz, substrates_count);
+			}
 		}
 	}
 
-	template <bool dim_x>
+	template <bool dim_x, bool fused_z = true>
 	void precompute_values(std::unique_ptr<real_t*[]>& a, std::unique_ptr<real_t*[]>& b, std::unique_ptr<real_t*[]>& c,
 						   index_t shape, index_t n, index_t dims, char dim);
 
@@ -211,7 +240,9 @@ public:
 	void solve_z() override;
 
 	void solve() override;
-	void solve_blocked_2d();
+
+	void solve_nf();
+	void solve_x_nf();
 
 	~sdd_full_blocking();
 };
