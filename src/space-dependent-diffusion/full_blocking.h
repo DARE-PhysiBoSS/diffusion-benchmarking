@@ -6,14 +6,7 @@
 #include "../least_memory_thomas_solver_d_f.h"
 #include "../substrate_layouts.h"
 #include "../tridiagonal_solver.h"
-
-
-/*
-Restrictions:
-- (nx / cores_division[0]) should be at least 8 for doubles and 16 for floats 
-- (ny / cores_division[1]) should be at least 8 for doubles and 16 for floats 
-- nx, ny, nz should be divisible by respective cores_division
-*/
+#include "../vector_transpose_helper.h"
 
 
 template <typename real_t, bool aligned_x>
@@ -56,54 +49,78 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	template <char dim_to_skip = ' '>
 	auto get_blocked_substrate_layout(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
 	{
+		std::size_t x_size = nx * sizeof(real_t);
+		std::size_t x_size_padded = (x_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		x_size_padded /= sizeof(real_t);
+
 		auto layout = noarr::scalar<real_t>() ^ noarr::vector<'x'>() ^ noarr::vector<'y'>() ^ noarr::vector<'z'>()
 					  ^ noarr::vector<'s'>();
 
 		if constexpr (dim_to_skip == 'x')
 			return layout ^ noarr::set_length<'y', 'z', 's'>(ny, nz, substrates_count);
 		else if constexpr (dim_to_skip == 'y')
-			return layout ^ noarr::set_length<'x', 'z', 's'>(nx, nz, substrates_count);
+			return layout ^ noarr::set_length<'x', 'z', 's'>(x_size_padded, nz, substrates_count);
 		else if constexpr (dim_to_skip == 'z')
-			return layout ^ noarr::set_length<'x', 'y', 's'>(nx, ny, substrates_count);
+			return layout ^ noarr::set_length<'x', 'y', 's'>(x_size_padded, ny, substrates_count);
 		else if constexpr (dim_to_skip == '*')
 			return layout ^ noarr::set_length<'s'>(substrates_count);
 		else
-			return layout ^ noarr::set_length<'x', 'y', 'z', 's'>(nx, ny, nz, substrates_count);
+			return layout ^ noarr::set_length<'x', 'y', 'z', 's'>(x_size_padded, ny, nz, substrates_count);
 	}
 
-	template <char dim>
+	template <char dim, bool with_len>
 	auto get_scratch_layout(index_t nx, index_t ny, index_t nz)
 	{
+		std::size_t x_size = nx * sizeof(real_t);
+		std::size_t x_size_padded = (x_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
+		x_size_padded /= sizeof(real_t);
+
 		if constexpr (dim == 'x')
 		{
-			return noarr::scalar<real_t>() ^ noarr::vectors<'y', 'x', 'z'>(ny, nx, nz);
+			using simd_tag = hn::ScalableTag<real_t>;
+			simd_tag d;
+			std::size_t elements = hn::Lanes(d);
+
+			std::size_t Y_size = (ny + elements - 1) / elements;
+
+			auto layout = noarr::scalar<real_t>() ^ noarr::vector<'y'>(elements) ^ noarr::vector<'x'>()
+						  ^ noarr::vector<'Y'>(Y_size) ^ noarr::vector<'z'>(nz);
+
+			if constexpr (!with_len)
+				return layout;
+			else
+				return layout ^ noarr::set_length<'x'>(nx);
 		}
 		else if constexpr (dim == 'y')
 		{
-			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 'y', 'z'>(nx, ny, nz);
+			auto layout = noarr::scalar<real_t>() ^ noarr::vector<'x'>(x_size_padded) ^ noarr::vector<'y'>()
+						  ^ noarr::vector<'z'>(nz);
+
+			if constexpr (!with_len)
+				return layout;
+			else
+				return layout ^ noarr::set_length<'y'>(ny);
 		}
 		else if constexpr (dim == 'z')
 		{
-			return noarr::scalar<real_t>() ^ noarr::vectors<'x', 'z', 'y'>(nx, nz, ny);
+			auto layout = noarr::scalar<real_t>() ^ noarr::vector<'x'>(x_size_padded) ^ noarr::vector<'z'>()
+						  ^ noarr::vector<'y'>(ny);
+
+			if constexpr (!with_len)
+				return layout;
+			else
+				return layout ^ noarr::set_length<'z'>(nz);
 		}
 	}
 
 	template <char dim>
-	auto get_non_blocked_scratch_layout()
+	auto get_non_blocked_scratch_layout(index_t n, index_t s)
 	{
-		const auto n = std::max({ this->problem_.nx, group_blocks_[1] + 1, group_blocks_[2] + 1 });
-		const auto s = std::max<std::size_t>(alignment_size_ / sizeof(real_t), x_tile_size_);
-
-		std::size_t size = n * sizeof(real_t);
-		std::size_t size_padded = (size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
-		size_padded /= sizeof(real_t);
-
-
 		std::size_t ssize = s * sizeof(real_t);
 		std::size_t ssize_padded = (ssize + alignment_size_ - 1) / alignment_size_ * alignment_size_;
 		ssize_padded /= sizeof(real_t);
 
-		return noarr::scalar<real_t>() ^ noarr::vectors<'v', dim>(ssize_padded, size_padded);
+		return noarr::scalar<real_t>() ^ noarr::vectors<'v', dim>(ssize_padded, n);
 	}
 
 	auto get_thread_distribution_layout() const
@@ -115,15 +132,22 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	template <std::size_t dims = 3>
 	auto get_diag_layout_x(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
 	{
-		std::size_t y_size = ny * sizeof(real_t);
-		std::size_t y_size_padded = (y_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
-		y_size_padded /= sizeof(real_t);
+		using simd_tag = hn::ScalableTag<real_t>;
+		simd_tag d;
+		std::size_t elements = hn::Lanes(d);
+
+		std::size_t Y_size = (ny + elements - 1) / elements;
 
 		if constexpr (dims == 2)
-			return noarr::scalar<real_t>() ^ noarr::vectors<'y', 'x', 's'>(y_size_padded, nx, substrates_count);
+		{
+			return noarr::scalar<real_t>() ^ noarr::vectors<'y', 'x', 'Y', 's'>(elements, nx, Y_size, substrates_count);
+		}
+
 		else if constexpr (dims == 3)
+		{
 			return noarr::scalar<real_t>()
-				   ^ noarr::vectors<'y', 'x', 'z', 's'>(y_size_padded, nx, nz, substrates_count);
+				   ^ noarr::vectors<'y', 'x', 'Y', 'z', 's'>(elements, nx, Y_size, nz, substrates_count);
+		}
 	}
 
 	template <bool dim_x>

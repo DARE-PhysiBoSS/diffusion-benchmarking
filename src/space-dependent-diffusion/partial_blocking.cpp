@@ -99,7 +99,7 @@ void sdd_partial_blocking<real_t, aligned_x>::initialize()
 {
 	if (continuous_x_diagonal_)
 		precompute_values(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x',
-						  get_diag_layout_x());
+						  get_diag_layout_x() ^ noarr::merge_blocks<'Y', 'y', 'y'>());
 	else
 		precompute_values(ax_, bx_, cx_, this->problem_.dx, this->problem_.nx, this->problem_.dims, 'x',
 						  get_substrates_layout());
@@ -138,13 +138,13 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 	const index_t y_len = dens_l | noarr::get_length<'y'>();
 
-	const index_t simd_y_len = y_len / simd_length * simd_length;
+	const index_t Y_len = y_len / simd_length;
 
 	// vectorized body
 	{
 		const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
 
-		for (index_t y = 0; y < simd_y_len; y += simd_length)
+		for (index_t Y = 0; Y < Y_len; Y++)
 		{
 			// vector registers that hold the to be transposed x*yz plane
 
@@ -158,7 +158,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned loads
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					d_rows[v] = hn::Load(d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+					d_rows[v] = hn::Load(
+						d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
 				}
 
 				// transposition to enable vectorization
@@ -166,8 +167,10 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					simd_t a_curr = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(a, z, y, i + v, s)));
-					simd_t b_curr = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(b, z, y, i + v, s)));
+					simd_t a_curr =
+						hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(a, z, Y, 0, i + v, s)));
+					simd_t b_curr =
+						hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(b, z, Y, 0, i + v, s)));
 
 					auto r = hn::Mul(a_curr, scratch_prev);
 
@@ -177,13 +180,14 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 					d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
 
 					d_prev = d_rows[v];
-					c_prev = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, i + v, s)));
+					c_prev = hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, i + v, s)));
 				}
 
 				// aligned stores
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					hn::Store(d_rows[v], d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+					hn::Store(d_rows[v], d,
+							  &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
 				}
 			}
 
@@ -192,8 +196,9 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 			{
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					d_rows[v] = hn::Load(
-						d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, full_n - simd_length, s)));
+					d_rows[v] = hn::Load(d, &(dens_l
+											  | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v,
+																				  full_n - simd_length, s)));
 				}
 
 				// transposition to enable vectorization
@@ -207,9 +212,11 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 					for (index_t v = 0; v < remainder_work; v++)
 					{
 						simd_t a_curr = hn::Load(
-							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(a, z, y, full_n - simd_length + v, s)));
+							d, &(diag_l
+								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(a, z, Y, 0, full_n - simd_length + v, s)));
 						simd_t b_curr = hn::Load(
-							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(b, z, y, full_n - simd_length + v, s)));
+							d, &(diag_l
+								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(b, z, Y, 0, full_n - simd_length + v, s)));
 
 						auto r = hn::Mul(a_curr, scratch_prev);
 
@@ -221,7 +228,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 						d_prev = d_rows[v];
 						c_prev = hn::Load(
-							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, full_n - simd_length + v, s)));
+							d, &(diag_l
+								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, full_n - simd_length + v, s)));
 					}
 				}
 
@@ -235,7 +243,8 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 					for (index_t v = remainder_work - 2; v >= 0; v--)
 					{
 						simd_t c_curr = hn::Load(
-							d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, full_n - simd_length + v, s)));
+							d, &(diag_l
+								 | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, full_n - simd_length + v, s)));
 
 						auto scratch =
 							hn::Load(d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
@@ -251,9 +260,10 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned stores
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					hn::Store(
-						d_rows[v], d,
-						&(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, full_n - simd_length, s)));
+					hn::Store(d_rows[v], d,
+							  &(dens_l
+								| noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v,
+																	full_n - simd_length, s)));
 				}
 			}
 
@@ -263,14 +273,16 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned loads
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					d_rows[v] = hn::Load(d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+					d_rows[v] = hn::Load(
+						d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
 				}
 
 				// backward propagation
 				{
 					for (index_t v = simd_length - 1; v >= 0; v--)
 					{
-						simd_t c_curr = hn::Load(d, &(diag_l | noarr::get_at<'z', 'y', 'x', 's'>(c, z, y, i + v, s)));
+						simd_t c_curr =
+							hn::Load(d, &(diag_l | noarr::get_at<'z', 'Y', 'y', 'x', 's'>(c, z, Y, 0, i + v, s)));
 
 						auto scratch = hn::Load(d, &(scratch_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
 						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_curr, d_rows[v]), scratch);
@@ -285,58 +297,65 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 				// aligned stores
 				for (index_t v = 0; v < simd_length; v++)
 				{
-					hn::Store(d_rows[v], d, &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, y + v, i, s)));
+					hn::Store(d_rows[v], d,
+							  &(dens_l | noarr::get_at<'z', 'y', 'x', 's'>(densities, z, Y * simd_length + v, i, s)));
 				}
 			}
 		}
 	}
 
-	// 	// yz remainder
-	// 	{
-	// 		auto d = noarr::make_bag(dens_l, densities);
+	// yz remainder
+	{
+		auto remainder_diag_l = diag_l ^ noarr::fix<'Y'>(Y_len);
+		auto a_bag = noarr::make_bag(remainder_diag_l, a);
+		auto b_bag = noarr::make_bag(remainder_diag_l, b);
+		auto c_bag = noarr::make_bag(remainder_diag_l, c);
 
-	// 		auto scratch = noarr::make_bag(scratch_l, b_scratch);
+		const index_t y_remainder = y_len - Y_len * simd_length;
 
-	// #pragma omp for schedule(static) nowait
-	// 		for (index_t yz = simd_yz_len; yz < m; yz++)
-	// 		{
-	// 			{
-	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, 0);
-	// 				scratch[idx] = 1 / b_bag[idx];
-	// 			}
+		auto d = noarr::make_bag(dens_l ^ noarr::slice<'y'>(Y_len * simd_length, y_remainder), densities);
 
-	// 			for (index_t i = 1; i < n; i++)
-	// 			{
-	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, i);
-	// 				auto prev_idx = noarr::idx<'s', 'v', 'x'>(s, yz, i - 1);
+		auto scratch = noarr::make_bag(scratch_l ^ noarr::fix<'v'>(0), b_scratch);
 
-	// 				auto r = a_bag[prev_idx] * scratch[prev_idx];
+		for (index_t y = 0; y < y_remainder; y++)
+		{
+			{
+				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, 0);
+				scratch[idx] = 1 / b_bag[idx];
+			}
 
-	// 				scratch[idx] = 1 / (b_bag[idx] - c_bag[idx] * r);
+			for (index_t i = 1; i < n; i++)
+			{
+				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i);
+				auto prev_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i - 1);
 
-	// 				d[idx] -= r * d[prev_idx];
+				auto r = a_bag[idx] * scratch[prev_idx];
 
-	// 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
-	// 			}
+				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
 
-	// 			{
-	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, n - 1);
-	// 				d[idx] *= scratch[idx];
+				d[idx] -= r * d[prev_idx];
 
-	// 				// std::cout << "n-1: " << (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) << std::endl;
-	// 			}
+				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+			}
 
-	// 			for (index_t i = n - 2; i >= 0; i--)
-	// 			{
-	// 				auto idx = noarr::idx<'s', 'v', 'x'>(s, yz, i);
-	// 				auto next_idx = noarr::idx<'s', 'v', 'x'>(s, yz, i + 1);
+			{
+				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, n - 1);
+				d[idx] *= scratch[idx];
 
-	// 				d[idx] = (d[idx] - c_bag[next_idx] * d[next_idx]) * scratch[idx];
+				// std::cout << "n-1: " << (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) << std::endl;
+			}
 
-	// 				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
-	// 			}
-	// 		}
-	// 	}
+			for (index_t i = n - 2; i >= 0; i--)
+			{
+				auto idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i);
+				auto next_idx = noarr::idx<'s', 'z', 'y', 'x'>(s, z, y, i + 1);
+
+				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
+
+				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
+			}
+		}
+	}
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>

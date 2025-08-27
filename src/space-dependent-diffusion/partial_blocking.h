@@ -69,17 +69,23 @@ public:
 	template <std::size_t dims = 3>
 	auto get_diag_layout_x() const
 	{
-		std::size_t y_size = this->problem_.ny * sizeof(real_t);
-		std::size_t y_size_padded = (y_size + alignment_size_ - 1) / alignment_size_ * alignment_size_;
-		y_size_padded /= sizeof(real_t);
+		std::size_t elements = alignment_size_ / sizeof(real_t);
+
+		std::size_t Y_size = (this->problem_.ny + elements - 1) / elements;
 
 		if constexpr (dims == 2)
+		{
 			return noarr::scalar<real_t>()
-				   ^ noarr::vectors<'y', 'x', 's'>(y_size_padded, this->problem_.nx, this->problem_.substrates_count);
-		else if constexpr (dims == 3)
-			return noarr::scalar<real_t>()
-				   ^ noarr::vectors<'y', 'x', 'z', 's'>(y_size_padded, this->problem_.nx, this->problem_.nz,
+				   ^ noarr::vectors<'y', 'x', 'Y', 's'>(elements, this->problem_.nx, Y_size,
 														this->problem_.substrates_count);
+		}
+
+		else if constexpr (dims == 3)
+		{
+			return noarr::scalar<real_t>()
+				   ^ noarr::vectors<'y', 'x', 'Y', 'z', 's'>(elements, this->problem_.nx, Y_size, this->problem_.nz,
+															 this->problem_.substrates_count);
+		}
 	}
 
 	void prepare(const max_problem_t& problem) override;
