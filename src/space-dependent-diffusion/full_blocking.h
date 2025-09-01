@@ -29,6 +29,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	index_t x_tile_size_;
 	std::size_t alignment_size_;
 	bool fuse_z_;
+	bool alt_blocked_;
 
 	std::array<index_t, 3> cores_division_;
 
