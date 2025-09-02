@@ -1767,14 +1767,15 @@ constexpr static void synchronize_y_blocked_distributed(real_t** __restrict__ de
 	const auto sscratch_l = scratch_l ^ noarr::merge_blocks<'X', 'x'>();
 
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t x_simd_len = (x_len + simd_length - 1) / simd_length * simd_length;
+	const index_t z_len = z_end - z_begin;
+	const index_t x_simd_len = (x_len + simd_length - 1) / simd_length;
 
 	const index_t block_size = n / coop_size;
 
-	const index_t z_len = z_end - z_begin;
-	const index_t block_size_z = z_len / coop_size;
-	const index_t t_z_begin = z_begin + tid * block_size_z + std::min(tid, z_len % coop_size);
-	const index_t t_z_end = t_z_begin + block_size_z + ((tid < z_len % coop_size) ? 1 : 0);
+	const index_t work_len = z_len * x_simd_len;
+	const index_t block_size_z = work_len / coop_size;
+	const index_t work_begin = tid * block_size_z + std::min(tid, work_len % coop_size);
+	const index_t work_end = work_begin + block_size_z + ((tid < work_len % coop_size) ? 1 : 0);
 
 	// #pragma omp critical
 	// 	std::cout << "Thread " << tid << " block_begin: " << x_simd_begin << " block_end: " << x_simd_end
@@ -1789,72 +1790,72 @@ constexpr static void synchronize_y_blocked_distributed(real_t** __restrict__ de
 		return std::make_tuple(block_idx, noarr::set_length<'y'>(actual_block_size) ^ noarr::fix<'y'>(offset));
 	};
 
-	for (index_t z = t_z_begin; z < t_z_end; z++)
+	for (index_t w_idx = work_begin; w_idx < work_end; w_idx++)
 	{
-		for (index_t x = 0; x < x_simd_len; x += simd_length)
+		const index_t z = z_begin + w_idx / x_simd_len;
+		const index_t x = (w_idx % x_simd_len) * simd_length;
+
+		simd_t prev_c;
+		simd_t prev_d;
+
 		{
-			simd_t prev_c;
-			simd_t prev_d;
+			const auto [prev_block_idx, fix_l] = get_i(0);
+			const auto prev_c_bag =
+				noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(c_data, prev_block_idx));
+			const auto prev_d_bag =
+				noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'y'>(densities, prev_block_idx));
 
-			{
-				const auto [prev_block_idx, fix_l] = get_i(0);
-				const auto prev_c_bag =
-					noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(c_data, prev_block_idx));
-				const auto prev_d_bag =
-					noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'y'>(densities, prev_block_idx));
+			prev_c = hn::Load(t, &prev_c_bag.template at<'x', 'z'>(x, z - z_begin));
+			prev_d = hn::Load(t, &prev_d_bag.template at<'x', 'z'>(x, z));
+		}
 
-				prev_c = hn::Load(t, &prev_c_bag.template at<'x', 'z'>(x, z - z_begin));
-				prev_d = hn::Load(t, &prev_d_bag.template at<'x', 'z'>(x, z));
-			}
+		for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+		{
+			const auto [block_idx, fix_l] = get_i(equation_idx);
 
-			for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
-			{
-				const auto [block_idx, fix_l] = get_i(equation_idx);
+			const auto a = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(a_data, block_idx));
+			const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(c_data, block_idx));
+			const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
 
-				const auto a = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(a_data, block_idx));
-				const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(c_data, block_idx));
-				const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
+			simd_t curr_a = hn::Load(t, &a.template at<'x', 'z'>(x, z - z_begin));
+			simd_t curr_c = hn::Load(t, &c.template at<'x', 'z'>(x, z - z_begin));
+			simd_t curr_d = hn::Load(t, &d.template at<'x', 'z'>(x, z));
 
-				simd_t curr_a = hn::Load(t, &a.template at<'x', 'z'>(x, z - z_begin));
-				simd_t curr_c = hn::Load(t, &c.template at<'x', 'z'>(x, z - z_begin));
-				simd_t curr_d = hn::Load(t, &d.template at<'x', 'z'>(x, z));
+			simd_t r = hn::Div(hn::Set(t, 1), hn::NegMulAdd(prev_c, curr_a, hn::Set(t, 1)));
 
-				simd_t r = hn::Div(hn::Set(t, 1), hn::NegMulAdd(prev_c, curr_a, hn::Set(t, 1)));
+			curr_d = hn::Mul(r, hn::NegMulAdd(prev_d, curr_a, curr_d));
+			curr_c = hn::Mul(r, curr_c);
 
-				curr_d = hn::Mul(r, hn::NegMulAdd(prev_d, curr_a, curr_d));
-				curr_c = hn::Mul(r, curr_c);
+			hn::Store(curr_c, t, &c.template at<'x', 'z'>(x, z - z_begin));
+			hn::Store(curr_d, t, &d.template at<'x', 'z'>(x, z));
 
-				hn::Store(curr_c, t, &c.template at<'x', 'z'>(x, z - z_begin));
-				hn::Store(curr_d, t, &d.template at<'x', 'z'>(x, z));
+			prev_c = curr_c;
+			prev_d = curr_d;
 
-				prev_c = curr_c;
-				prev_d = curr_d;
+			// #pragma omp critical
+			// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
+		}
 
-				// #pragma omp critical
-				// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
-				// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
-			}
+		for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+		{
+			const auto [block_idx, fix_l] = get_i(equation_idx);
 
-			for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
-			{
-				const auto [block_idx, fix_l] = get_i(equation_idx);
+			const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(c_data, block_idx));
+			const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
 
-				const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'y'>(c_data, block_idx));
-				const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'y'>(densities, block_idx));
+			simd_t curr_c = hn::Load(t, &c.template at<'x', 'z'>(x, z - z_begin));
+			simd_t curr_d = hn::Load(t, &d.template at<'x', 'z'>(x, z));
 
-				simd_t curr_c = hn::Load(t, &c.template at<'x', 'z'>(x, z - z_begin));
-				simd_t curr_d = hn::Load(t, &d.template at<'x', 'z'>(x, z));
+			curr_d = hn::NegMulAdd(prev_d, curr_c, curr_d);
 
-				curr_d = hn::NegMulAdd(prev_d, curr_c, curr_d);
+			hn::Store(curr_d, t, &d.template at<'x', 'z'>(x, z));
 
-				hn::Store(curr_d, t, &d.template at<'x', 'z'>(x, z));
+			prev_d = curr_d;
 
-				prev_d = curr_d;
-
-				// #pragma omp critical
-				// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
-				// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
-			}
+			// #pragma omp critical
+			// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
 		}
 	}
 
@@ -2271,14 +2272,15 @@ constexpr static void synchronize_z_blocked_distributed(real_t** __restrict__ de
 	const auto sscratch_l = scratch_l ^ noarr::merge_blocks<'X', 'x'>();
 
 	const index_t x_len = dens_l | noarr::get_length<'x'>();
-	const index_t x_simd_len = (x_len + simd_length - 1) / simd_length * simd_length;
+	const index_t y_len = y_end - y_begin;
+	const index_t x_simd_len = (x_len + simd_length - 1) / simd_length;
 
 	const index_t block_size = n / coop_size;
 
-	const index_t y_len = y_end - y_begin;
-	const index_t block_size_y = y_len / coop_size;
-	const index_t t_y_begin = y_begin + tid * block_size_y + std::min(tid, y_len % coop_size);
-	const index_t t_y_end = t_y_begin + block_size_y + ((tid < y_len % coop_size) ? 1 : 0);
+	const index_t work_len = y_len * x_simd_len;
+	const index_t block_size_y = work_len / coop_size;
+	const index_t work_begin = tid * block_size_y + std::min(tid, work_len % coop_size);
+	const index_t work_end = work_begin + block_size_y + ((tid < work_len % coop_size) ? 1 : 0);
 
 	// #pragma omp critical
 	// 	std::cout << "Thread " << tid << " block_begin: " << x_begin << " block_end: " << x_end
@@ -2293,72 +2295,72 @@ constexpr static void synchronize_z_blocked_distributed(real_t** __restrict__ de
 		return std::make_tuple(block_idx, noarr::set_length<'z'>(actual_block_size) ^ noarr::fix<'z'>(offset));
 	};
 
-	for (index_t y = t_y_begin; y < t_y_end; y++)
+	for (index_t w_idx = work_begin; w_idx < work_end; w_idx++)
 	{
-		for (index_t x = 0; x < x_simd_len; x += simd_length)
+		const index_t y = y_begin + w_idx / x_simd_len;
+		const index_t x = (w_idx % x_simd_len) * simd_length;
+
+		simd_t prev_c;
+		simd_t prev_d;
+
 		{
-			simd_t prev_c;
-			simd_t prev_d;
+			const auto [prev_block_idx, fix_l] = get_i(0);
+			const auto prev_c_bag =
+				noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(c_data, prev_block_idx));
+			const auto prev_d_bag =
+				noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'z'>(densities, prev_block_idx));
 
-			{
-				const auto [prev_block_idx, fix_l] = get_i(0);
-				const auto prev_c_bag =
-					noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(c_data, prev_block_idx));
-				const auto prev_d_bag =
-					noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'z'>(densities, prev_block_idx));
+			prev_c = hn::Load(t, &prev_c_bag.template at<'x', 'y'>(x, y - y_begin));
+			prev_d = hn::Load(t, &prev_d_bag.template at<'x', 'y'>(x, y));
+		}
 
-				prev_c = hn::Load(t, &prev_c_bag.template at<'x', 'y'>(x, y - y_begin));
-				prev_d = hn::Load(t, &prev_d_bag.template at<'x', 'y'>(x, y));
-			}
+		for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
+		{
+			const auto [block_idx, fix_l] = get_i(equation_idx);
 
-			for (index_t equation_idx = 1; equation_idx < coop_size * 2; equation_idx++)
-			{
-				const auto [block_idx, fix_l] = get_i(equation_idx);
+			const auto a = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(a_data, block_idx));
+			const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(c_data, block_idx));
+			const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
 
-				const auto a = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(a_data, block_idx));
-				const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(c_data, block_idx));
-				const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
+			simd_t curr_a = hn::Load(t, &a.template at<'x', 'y'>(x, y - y_begin));
+			simd_t curr_c = hn::Load(t, &c.template at<'x', 'y'>(x, y - y_begin));
+			simd_t curr_d = hn::Load(t, &d.template at<'x', 'y'>(x, y));
 
-				simd_t curr_a = hn::Load(t, &a.template at<'x', 'y'>(x, y - y_begin));
-				simd_t curr_c = hn::Load(t, &c.template at<'x', 'y'>(x, y - y_begin));
-				simd_t curr_d = hn::Load(t, &d.template at<'x', 'y'>(x, y));
+			simd_t r = hn::Div(hn::Set(t, 1), hn::NegMulAdd(prev_c, curr_a, hn::Set(t, 1)));
 
-				simd_t r = hn::Div(hn::Set(t, 1), hn::NegMulAdd(prev_c, curr_a, hn::Set(t, 1)));
+			curr_d = hn::Mul(r, hn::NegMulAdd(prev_d, curr_a, curr_d));
+			curr_c = hn::Mul(r, curr_c);
 
-				curr_d = hn::Mul(r, hn::NegMulAdd(prev_d, curr_a, curr_d));
-				curr_c = hn::Mul(r, curr_c);
+			hn::Store(curr_c, t, &c.template at<'x', 'y'>(x, y - y_begin));
+			hn::Store(curr_d, t, &d.template at<'x', 'y'>(x, y));
 
-				hn::Store(curr_c, t, &c.template at<'x', 'y'>(x, y - y_begin));
-				hn::Store(curr_d, t, &d.template at<'x', 'y'>(x, y));
+			prev_c = curr_c;
+			prev_d = curr_d;
 
-				prev_c = curr_c;
-				prev_d = curr_d;
+			// #pragma omp critical
+			// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
+		}
 
-				// #pragma omp critical
-				// 			std::cout << "mf " << z << " " << i << " " << x << " rf: " << rf[state]
-				// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
-			}
+		for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
+		{
+			const auto [block_idx, fix_l] = get_i(equation_idx);
 
-			for (index_t equation_idx = coop_size * 2 - 2; equation_idx >= 0; equation_idx--)
-			{
-				const auto [block_idx, fix_l] = get_i(equation_idx);
+			const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(c_data, block_idx));
+			const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
 
-				const auto c = noarr::make_bag(sscratch_l ^ fix_l, dist_l | noarr::get_at<'z'>(c_data, block_idx));
-				const auto d = noarr::make_bag(dens_l ^ fix_l, dist_l | noarr::get_at<'z'>(densities, block_idx));
+			simd_t curr_c = hn::Load(t, &c.template at<'x', 'y'>(x, y - y_begin));
+			simd_t curr_d = hn::Load(t, &d.template at<'x', 'y'>(x, y));
 
-				simd_t curr_c = hn::Load(t, &c.template at<'x', 'y'>(x, y - y_begin));
-				simd_t curr_d = hn::Load(t, &d.template at<'x', 'y'>(x, y));
+			curr_d = hn::NegMulAdd(prev_d, curr_c, curr_d);
 
-				curr_d = hn::NegMulAdd(prev_d, curr_c, curr_d);
+			hn::Store(curr_d, t, &d.template at<'x', 'y'>(x, y));
 
-				hn::Store(curr_d, t, &d.template at<'x', 'y'>(x, y));
+			prev_d = curr_d;
 
-				prev_d = curr_d;
-
-				// #pragma omp critical
-				// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
-				// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
-			}
+			// #pragma omp critical
+			// 			std::cout << "mb " << z << " " << i << " " << x << " b: " << b[state] << " c: " << c[state]
+			// 					  << " d: " << d.template at<'x', 'z', 'y'>(x, z, i) << std::endl;
 		}
 	}
 
