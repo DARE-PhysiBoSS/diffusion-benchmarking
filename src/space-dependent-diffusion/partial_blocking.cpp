@@ -177,21 +177,12 @@ constexpr static void x_backward(const density_bag_t d, const index_t y, const d
 	}
 }
 
-
 template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
 		  typename... vec_pack_t>
-constexpr static simd_t x_forward_vectorized(simd_tag, const index_t, const index_t, const diagonal_t, const diagonal_t,
-											 const diagonal_t, const scratch_t, simd_t&, simd_t&, simd_t& last)
-{
-	return last;
-}
-
-template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
-		  typename... vec_pack_t>
-constexpr static simd_t x_forward_vectorized(simd_tag d, const index_t x, const index_t y, const diagonal_t a,
-											 const diagonal_t b, const diagonal_t c, const scratch_t b_scratch,
-											 simd_t& scratch_prev, simd_t& c_prev, simd_t& d_prev, simd_t& d_first,
-											 vec_pack_t&&... vec_pack)
+constexpr static void x_forward_vectorized(simd_tag d, const index_t x, const index_t y, const diagonal_t a,
+										   const diagonal_t b, const diagonal_t c, const scratch_t b_scratch,
+										   simd_t& scratch_prev, simd_t& c_prev, simd_t& d_prev, simd_t& d_first,
+										   vec_pack_t&... vec_pack)
 {
 	const auto idx = noarr::idx<'y', 'x'>(y, x);
 
@@ -207,23 +198,16 @@ constexpr static simd_t x_forward_vectorized(simd_tag d, const index_t x, const 
 
 	c_prev = hn::Load(d, &c[idx]);
 
-	return x_forward_vectorized(d, x + 1, y, a, b, c, b_scratch, scratch_prev, c_prev, d_first,
-								std::forward<vec_pack_t>(vec_pack)...);
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_forward_vectorized(d, x + 1, y, a, b, c, b_scratch, scratch_prev, c_prev, d_first, vec_pack...);
 }
-
-template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
-		  typename... vec_pack_t>
-constexpr static void x_forward_vectorized(simd_tag, const index_t, const index_t, const index_t, const diagonal_t,
-										   const diagonal_t, const diagonal_t, const scratch_t, simd_t&, simd_t&,
-										   simd_t&)
-{}
 
 template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
 		  typename... vec_pack_t>
 constexpr static void x_forward_vectorized(simd_tag d, const index_t length, const index_t x, const index_t y,
 										   const diagonal_t a, const diagonal_t b, const diagonal_t c,
 										   const scratch_t b_scratch, simd_t& scratch_prev, simd_t& c_prev,
-										   simd_t& d_prev, simd_t& d_first, vec_pack_t&&... vec_pack)
+										   simd_t& d_prev, simd_t& d_first, vec_pack_t&... vec_pack)
 {
 	if (length == 0)
 		return;
@@ -242,23 +226,18 @@ constexpr static void x_forward_vectorized(simd_tag d, const index_t length, con
 
 	c_prev = hn::Load(d, &c[idx]);
 
-	x_forward_vectorized(d, length - 1, x + 1, y, a, b, c, b_scratch, scratch_prev, c_prev, d_first,
-						 std::forward<vec_pack_t>(vec_pack)...);
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_forward_vectorized(d, length - 1, x + 1, y, a, b, c, b_scratch, scratch_prev, c_prev, d_first, vec_pack...);
 }
-
-template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
-		  typename... vec_pack_t>
-constexpr static void x_backward_vectorized(simd_tag, const index_t, const index_t, const diagonal_t, scratch_t,
-											simd_t&)
-{}
 
 template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
 		  typename... vec_pack_t>
 constexpr static simd_t x_backward_vectorized(simd_tag d, const index_t x, const index_t y, const diagonal_t c,
 											  scratch_t b_scratch, simd_t& d_first, simd_t& d_prev,
-											  vec_pack_t&&... vec_pack)
+											  vec_pack_t&... vec_pack)
 {
-	x_backward_vectorized(d, x + 1, y, c, b_scratch, d_prev, std::forward<vec_pack_t>(vec_pack)...);
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_backward_vectorized(d, x + 1, y, c, b_scratch, d_prev, vec_pack...);
 
 	const auto idx = noarr::idx<'y', 'x'>(y, x);
 
@@ -270,22 +249,18 @@ constexpr static simd_t x_backward_vectorized(simd_tag d, const index_t x, const
 	return d_first;
 }
 
-template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
-		  typename... vec_pack_t>
-constexpr static void x_backward_vectorized(simd_tag, const index_t, const index_t, const index_t, const diagonal_t,
-											scratch_t, simd_t&)
-{}
 
 template <typename index_t, typename simd_t, typename simd_tag, typename diagonal_t, typename scratch_t,
 		  typename... vec_pack_t>
 constexpr static simd_t x_backward_vectorized(simd_tag d, const index_t length, const index_t x, const index_t y,
 											  const diagonal_t c, scratch_t b_scratch, simd_t& d_first, simd_t& d_prev,
-											  vec_pack_t&&... vec_pack)
+											  vec_pack_t&... vec_pack)
 {
 	if (length == 0)
 		return d_first;
 
-	x_backward_vectorized(d, length - 1, x + 1, y, c, b_scratch, d_prev, std::forward<vec_pack_t>(vec_pack)...);
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_backward_vectorized(d, length - 1, x + 1, y, c, b_scratch, d_prev, vec_pack...);
 
 	const auto idx = noarr::idx<'y', 'x'>(y, x);
 
@@ -293,18 +268,104 @@ constexpr static simd_t x_backward_vectorized(simd_tag d, const index_t length, 
 	simd_t scratch = hn::Load(d, &b_scratch[idx]);
 
 	d_first = hn::Mul(hn::NegMulAdd(d_prev, c_curr, d_first), scratch);
+
+	return d_first;
+}
+
+template <typename index_t, typename simd_tag, typename scratch_t, typename simd_t, typename... vec_pack_t>
+constexpr static void x_forward_vectorized_multi(simd_tag d, const index_t x, const index_t y, simd_t& scratch_prev,
+												 const scratch_t b_scratch, simd_t& a_first, vec_pack_t&... a_vec_pack,
+												 simd_t& b_first, vec_pack_t&... b_vec_pack, simd_t& c_prev,
+												 vec_pack_t&... c_vec_pack, simd_t& c_ignore, simd_t& d_prev,
+												 simd_t& d_first, vec_pack_t&... d_vec_pack)
+{
+	const auto idx = noarr::idx<'y', 'x'>(y, x);
+
+	auto r = hn::Mul(a_first, scratch_prev);
+
+	scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_first));
+	hn::Store(scratch_prev, d, &b_scratch[idx]);
+
+	d_first = hn::NegMulAdd(d_prev, r, d_first);
+
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_forward_vectorized_multi<index_t, simd_tag, scratch_t, vec_pack_t...>(
+			d, x + 1, y, scratch_prev, b_scratch, a_vec_pack..., b_vec_pack..., c_vec_pack..., c_ignore, d_first,
+			d_vec_pack...);
+}
+
+template <typename index_t, typename simd_tag, typename scratch_t, typename simd_t, typename... vec_pack_t>
+constexpr static void x_forward_vectorized_multi(simd_tag d, const index_t length, const index_t x, const index_t y,
+												 simd_t& scratch_prev, const scratch_t b_scratch, simd_t& a_first,
+												 vec_pack_t&... a_vec_pack, simd_t& b_first, vec_pack_t&... b_vec_pack,
+												 simd_t& c_prev, vec_pack_t&... c_vec_pack, simd_t& c_ignore,
+												 simd_t& d_prev, simd_t& d_first, vec_pack_t&... d_vec_pack)
+{
+	if (length == 0)
+		return;
+
+	const auto idx = noarr::idx<'y', 'x'>(y, x);
+
+	auto r = hn::Mul(a_first, scratch_prev);
+
+	scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_first));
+	hn::Store(scratch_prev, d, &b_scratch[idx]);
+
+	d_first = hn::NegMulAdd(d_prev, r, d_first);
+
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_forward_vectorized_multi<index_t, simd_tag, scratch_t, vec_pack_t...>(
+			d, length - 1, x + 1, y, scratch_prev, b_scratch, a_vec_pack..., b_vec_pack..., c_vec_pack..., c_ignore,
+			d_first, d_vec_pack...);
+}
+
+template <typename index_t, typename simd_tag, typename scratch_t, typename simd_t, typename... vec_pack_t>
+constexpr static simd_t x_backward_vectorized_multi(simd_tag d, const index_t x, const index_t y, scratch_t b_scratch,
+													simd_t& c_first, vec_pack_t&... c_vec_pack, simd_t& d_first,
+													simd_t& d_prev, vec_pack_t&... vec_pack)
+{
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_backward_vectorized_multi<index_t, simd_tag, scratch_t, vec_pack_t...>(d, x + 1, y, b_scratch, c_vec_pack...,
+																				 d_prev, vec_pack...);
+
+	const auto idx = noarr::idx<'y', 'x'>(y, x);
+
+	auto scratch = hn::Load(d, &b_scratch[idx]);
+
+	d_first = hn::Mul(hn::NegMulAdd(d_prev, c_first, d_first), scratch);
+
+	return d_first;
+}
+
+template <typename index_t, typename simd_tag, typename scratch_t, typename simd_t, typename... vec_pack_t>
+constexpr static simd_t x_backward_vectorized_multi(simd_tag d, const index_t length, const index_t x, const index_t y,
+													scratch_t b_scratch, simd_t& c_first, vec_pack_t&... c_vec_pack,
+													simd_t& d_first, simd_t& d_prev, vec_pack_t&... vec_pack)
+{
+	if (length == 0)
+		return d_first;
+
+	if constexpr (sizeof...(vec_pack_t) != 0)
+		x_backward_vectorized_multi<index_t, simd_tag, scratch_t, vec_pack_t...>(d, length - 1, x + 1, y, b_scratch,
+																				 c_vec_pack..., d_prev, vec_pack...);
+
+	const auto idx = noarr::idx<'y', 'x'>(y, x);
+
+	auto scratch = hn::Load(d, &b_scratch[idx]);
+
+	d_first = hn::Mul(hn::NegMulAdd(d_prev, c_first, d_first), scratch);
 
 	return d_first;
 }
 
 template <typename simd_t, typename simd_tag, typename index_t, typename density_bag_t, typename... simd_pack_t>
 constexpr static void load(const density_bag_t d, simd_tag t, const index_t x, const index_t y, const index_t z,
-						   simd_t& first, simd_pack_t&&... vec_pack)
+						   simd_t& first, simd_pack_t&... vec_pack)
 {
 	first = hn::Load(t, &(d.template at<'z', 'y', 'x'>(z, y, x)));
 	if constexpr (sizeof...(vec_pack) > 0)
 	{
-		load(d, t, x, y + 1, z, std::forward<simd_pack_t>(vec_pack)...);
+		load(d, t, x, y + 1, z, vec_pack...);
 	}
 }
 
@@ -319,12 +380,24 @@ constexpr static void store(const density_bag_t d, simd_tag t, const index_t x, 
 	}
 }
 
+template <typename T>
+constexpr inline decltype(auto) id(T&& t)
+{
+	return std::forward<T>(t);
+}
+
+template <typename... Args>
+constexpr decltype(auto) get_last(Args&&... args)
+{
+	return (id(std::forward<Args>(args)), ...);
+}
+
 template <typename simd_t, typename simd_tag, typename index_t, typename density_bag_t, typename diag_bag_t,
 		  typename scratch_bag_t, typename... simd_pack_t>
 constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t, const index_t y_offset,
 											  const index_t y_len, const index_t z, const diag_bag_t a,
 											  const diag_bag_t b, const diag_bag_t c, const scratch_bag_t b_scratch,
-											  simd_pack_t&&... vec_pack)
+											  simd_pack_t... vec_pack)
 {
 	const index_t n = d | noarr::get_length<'x'>();
 
@@ -341,69 +414,176 @@ constexpr static void xy_fused_transpose_part(const density_bag_t d, simd_tag t,
 		// forward substitution until last simd_length elements
 		for (index_t i = 0; i < full_n - simd_length; i += simd_length)
 		{
-			load(d, t, i, y, z, std::forward<simd_pack_t>(vec_pack)...);
+			load(d, t, i, y, z, vec_pack...);
 
 			// transposition to enable vectorization
-			transpose(std::forward<simd_pack_t>(vec_pack)...);
+			transpose(vec_pack...);
 
 			// actual forward substitution (vectorized)
-			d_prev = x_forward_vectorized(t, i, y, a, b, c, b_scratch, scratch_prev, c_prev, d_prev,
-										  std::forward<simd_pack_t>(vec_pack)...);
+			x_forward_vectorized(t, i, y, a, b, c, b_scratch, scratch_prev, c_prev, d_prev, vec_pack...);
+
+			d_prev = get_last(vec_pack...);
 
 			// transposition back to the original form
 			// transpose(rows);
 
-			store(d, t, i, y, z, std::forward<simd_pack_t>(vec_pack)...);
+			store(d, t, i, y, z, vec_pack...);
 		}
 
 		// we are aligned to the vector size, so we can safely continue
 		// here we fuse the end of forward substitution and the beginning of backwards propagation
 		{
-			load(d, t, full_n - simd_length, y, z, std::forward<simd_pack_t>(vec_pack)...);
+			load(d, t, full_n - simd_length, y, z, vec_pack...);
 
 			// transposition to enable vectorization
-			transpose(std::forward<simd_pack_t>(vec_pack)...);
+			transpose(vec_pack...);
 
 			index_t remainder_work = n % simd_length;
 			remainder_work += remainder_work == 0 ? simd_length : 0;
 
 			// the rest of forward part
 			x_forward_vectorized(t, remainder_work, full_n - simd_length, y, a, b, c, b_scratch, scratch_prev, c_prev,
-								 d_prev, std::forward<simd_pack_t>(vec_pack)...);
+								 d_prev, vec_pack...);
 
 			d_prev = hn::Zero(t);
 
 			// the begin of backward part
-			d_prev = x_backward_vectorized(t, remainder_work, full_n - simd_length, y, c, b_scratch,
-										   std::forward<simd_pack_t>(vec_pack)..., d_prev);
+			d_prev =
+				x_backward_vectorized(t, remainder_work, full_n - simd_length, y, c, b_scratch, vec_pack..., d_prev);
 
 			// transposition back to the original form
-			transpose(std::forward<simd_pack_t>(vec_pack)...);
+			transpose(vec_pack...);
 
-			store(d, t, full_n - simd_length, y, z, std::forward<simd_pack_t>(vec_pack)...);
+			store(d, t, full_n - simd_length, y, z, vec_pack...);
 		}
 
 		// we continue with backwards substitution
 		for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
 		{
-			load(d, t, i, y, z, std::forward<simd_pack_t>(vec_pack)...);
+			load(d, t, i, y, z, vec_pack...);
 
 			// transposition to enable vectorization
 			// transpose(rows);
 
 			// backward propagation
-			d_prev = x_backward_vectorized(t, i, y, c, b_scratch, std::forward<simd_pack_t>(vec_pack)..., d_prev);
+			d_prev = x_backward_vectorized(t, i, y, c, b_scratch, vec_pack..., d_prev);
 
 			// transposition back to the original form
-			transpose(std::forward<simd_pack_t>(vec_pack)...);
+			transpose(vec_pack...);
 
-			store(d, t, i, y, z, std::forward<simd_pack_t>(vec_pack)...);
+			store(d, t, i, y, z, vec_pack...);
+		}
+	}
+}
+
+template <typename simd_t, typename simd_tag, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t, typename... simd_pack_t>
+constexpr static void xy_fused_transpose_part_multi(const density_bag_t d, simd_tag t, const index_t y_offset,
+													const index_t y_len, const index_t z, const diag_bag_t a,
+													const diag_bag_t b, const diag_bag_t c,
+													const scratch_bag_t b_scratch, simd_pack_t... a_vec_pack,
+													simd_pack_t... b_vec_pack, simd_pack_t... c_vec_pack,
+													simd_pack_t... d_vec_pack)
+{
+	const index_t n = d | noarr::get_length<'x'>();
+
+	constexpr index_t simd_length = sizeof...(d_vec_pack);
+
+	const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
+
+	for (index_t y = y_offset; y < y_len; y += simd_length)
+	{
+		simd_t c_prev = hn::Zero(t);
+		simd_t d_prev = hn::Zero(t);
+		simd_t scratch_prev = hn::Zero(t);
+
+
+		// forward substitution until last simd_length elements
+		for (index_t i = 0; i < full_n - simd_length; i += simd_length)
+		{
+			load(a, t, i, y, z, a_vec_pack...);
+			load(b, t, i, y, z, b_vec_pack...);
+			load(c, t, i, y, z, c_vec_pack...);
+			load(d, t, i, y, z, d_vec_pack...);
+
+			// transposition to enable vectorization
+			transpose(a_vec_pack...);
+			transpose(b_vec_pack...);
+			transpose(c_vec_pack...);
+			transpose(d_vec_pack...);
+
+			// actual forward substitution (vectorized)
+			x_forward_vectorized_multi<index_t, simd_tag, scratch_bag_t, simd_pack_t...>(
+				t, i, y, scratch_prev, b_scratch, a_vec_pack..., b_vec_pack..., c_prev, c_vec_pack..., d_prev,
+				d_vec_pack...);
+
+			c_prev = get_last(c_vec_pack...);
+			d_prev = get_last(d_vec_pack...);
+
+			// transposition back to the original form
+			// transpose(rows);
+
+			store(d, t, i, y, z, d_vec_pack...);
+		}
+
+		// we are aligned to the vector size, so we can safely continue
+		// here we fuse the end of forward substitution and the beginning of backwards propagation
+		{
+			load(a, t, full_n - simd_length, y, z, a_vec_pack...);
+			load(b, t, full_n - simd_length, y, z, b_vec_pack...);
+			load(c, t, full_n - simd_length, y, z, c_vec_pack...);
+			load(d, t, full_n - simd_length, y, z, d_vec_pack...);
+
+			// transposition to enable vectorization
+			transpose(a_vec_pack...);
+			transpose(b_vec_pack...);
+			transpose(c_vec_pack...);
+			transpose(d_vec_pack...);
+
+			index_t remainder_work = n % simd_length;
+			remainder_work += remainder_work == 0 ? simd_length : 0;
+
+			// the rest of forward part
+			x_forward_vectorized_multi<index_t, simd_tag, scratch_bag_t, simd_pack_t...>(
+				t, remainder_work, full_n - simd_length, y, scratch_prev, b_scratch, a_vec_pack..., b_vec_pack...,
+				c_prev, c_vec_pack..., d_prev, d_vec_pack...);
+
+			d_prev = hn::Zero(t);
+
+			// the begin of backward part
+			d_prev = x_backward_vectorized_multi<index_t, simd_tag, scratch_bag_t, simd_pack_t...>(
+				t, remainder_work, full_n - simd_length, y, b_scratch, c_vec_pack..., d_vec_pack..., d_prev);
+
+			// transposition back to the original form
+			transpose(d_vec_pack...);
+
+			store(d, t, full_n - simd_length, y, z, d_vec_pack...);
+		}
+
+		// we continue with backwards substitution
+		for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
+		{
+			load(c, t, i, y, z, c_vec_pack...);
+			load(d, t, i, y, z, d_vec_pack...);
+
+			// transposition to enable vectorization
+			transpose(c_vec_pack...);
+
+			// backward propagation
+			d_prev = x_backward_vectorized_multi<index_t, simd_tag, scratch_bag_t, simd_pack_t...>(
+				t, i, y, b_scratch, c_vec_pack..., d_vec_pack..., d_prev);
+
+			// transposition back to the original form
+			transpose(d_vec_pack...);
+
+			store(d, t, i, y, z, d_vec_pack...);
 		}
 	}
 }
 
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t>
 constexpr void xy_fused_transpose_part_2(const density_bag_t d, const index_t z, const diag_bag_t a, const diag_bag_t b,
 										 const diag_bag_t c, const scratch_bag_t b_scratch, const index_t y_offset)
 {
@@ -413,6 +593,7 @@ constexpr void xy_fused_transpose_part_2(const density_bag_t d, const index_t z,
 
 	const index_t simd_y_len = (y_len - y_offset) / simd_length * simd_length;
 
+	if constexpr (!multi)
 	{
 		using simd_tag = hn::FixedTag<real_t, 2>;
 		simd_tag t;
@@ -421,6 +602,21 @@ constexpr void xy_fused_transpose_part_2(const density_bag_t d, const index_t z,
 		simd_t vec0, vec1;
 
 		xy_fused_transpose_part<simd_t>(d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, vec0, vec1);
+	}
+	else
+	{
+		using simd_tag = hn::FixedTag<real_t, 2>;
+		simd_tag t;
+		using simd_t = hn::Vec<simd_tag>;
+
+		simd_t avec0, avec1;
+		simd_t bvec0, bvec1;
+		simd_t cvec0, cvec1;
+		simd_t dvec0, dvec1;
+
+		xy_fused_transpose_part_multi<simd_t, simd_tag, index_t, density_bag_t, diag_bag_t, scratch_bag_t, simd_t,
+									  simd_t>(d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, avec0,
+											  avec1, bvec0, bvec1, cvec0, cvec1, dvec0, dvec1);
 	}
 
 	for (index_t y = y_offset + simd_y_len; y < y_len; y++)
@@ -431,7 +627,8 @@ constexpr void xy_fused_transpose_part_2(const density_bag_t d, const index_t z,
 	}
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t>
 constexpr void xy_fused_transpose_part_4(const density_bag_t d, const index_t z, const diag_bag_t a, const diag_bag_t b,
 										 const diag_bag_t c, const scratch_bag_t b_scratch, const index_t y_offset)
 {
@@ -441,6 +638,7 @@ constexpr void xy_fused_transpose_part_4(const density_bag_t d, const index_t z,
 
 	const index_t simd_y_len = (y_len - y_offset) / simd_length * simd_length;
 
+	if constexpr (!multi)
 	{
 		using simd_tag = hn::FixedTag<real_t, 4>;
 		simd_tag t;
@@ -451,11 +649,29 @@ constexpr void xy_fused_transpose_part_4(const density_bag_t d, const index_t z,
 		xy_fused_transpose_part<simd_t>(d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, vec0, vec1, vec2,
 										vec3);
 	}
+	else
+	{
+		using simd_tag = hn::FixedTag<real_t, 4>;
+		simd_tag t;
+		using simd_t = hn::Vec<simd_tag>;
 
-	xy_fused_transpose_part_2<real_t>(d, z, a, b, c, b_scratch, y_offset + simd_y_len);
+		simd_t avec0, avec1, avec2, avec3;
+		simd_t bvec0, bvec1, bvec2, bvec3;
+		simd_t cvec0, cvec1, cvec2, cvec3;
+		simd_t dvec0, dvec1, dvec2, dvec3;
+
+		xy_fused_transpose_part_multi<simd_t, simd_tag, index_t, density_bag_t, diag_bag_t, scratch_bag_t, simd_t,
+									  simd_t, simd_t, simd_t>(
+			d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, avec0, avec1, avec2, avec3, bvec0, bvec1,
+			bvec2, bvec3, cvec0, cvec1, cvec2, cvec3, dvec0, dvec1, dvec2, dvec3);
+	}
+
+	if (y_offset + simd_y_len < y_len)
+		xy_fused_transpose_part_2<multi, real_t>(d, z, a, b, c, b_scratch, y_offset + simd_y_len);
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t>
 constexpr void xy_fused_transpose_part_8(const density_bag_t d, const index_t z, const diag_bag_t a, const diag_bag_t b,
 										 const diag_bag_t c, const scratch_bag_t b_scratch, const index_t y_offset)
 {
@@ -465,6 +681,7 @@ constexpr void xy_fused_transpose_part_8(const density_bag_t d, const index_t z,
 
 	const index_t simd_y_len = (y_len - y_offset) / simd_length * simd_length;
 
+	if constexpr (!multi)
 	{
 		using simd_tag = hn::FixedTag<real_t, 8>;
 		simd_tag t;
@@ -475,11 +692,30 @@ constexpr void xy_fused_transpose_part_8(const density_bag_t d, const index_t z,
 		xy_fused_transpose_part<simd_t>(d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, vec0, vec1, vec2,
 										vec3, vec4, vec5, vec6, vec7);
 	}
+	else
+	{
+		using simd_tag = hn::FixedTag<real_t, 8>;
+		simd_tag t;
+		using simd_t = hn::Vec<simd_tag>;
 
-	xy_fused_transpose_part_4<real_t>(d, z, a, b, c, b_scratch, y_offset + simd_y_len);
+		simd_t avec0, avec1, avec2, avec3, avec4, avec5, avec6, avec7;
+		simd_t bvec0, bvec1, bvec2, bvec3, bvec4, bvec5, bvec6, bvec7;
+		simd_t cvec0, cvec1, cvec2, cvec3, cvec4, cvec5, cvec6, cvec7;
+		simd_t dvec0, dvec1, dvec2, dvec3, dvec4, dvec5, dvec6, dvec7;
+
+		xy_fused_transpose_part_multi<simd_t, simd_tag, index_t, density_bag_t, diag_bag_t, scratch_bag_t, simd_t,
+									  simd_t, simd_t, simd_t, simd_t, simd_t, simd_t, simd_t>(
+			d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, avec0, avec1, avec2, avec3, avec4, avec5,
+			avec6, avec7, bvec0, bvec1, bvec2, bvec3, bvec4, bvec5, bvec6, bvec7, cvec0, cvec1, cvec2, cvec3, cvec4,
+			cvec5, cvec6, cvec7, dvec0, dvec1, dvec2, dvec3, dvec4, dvec5, dvec6, dvec7);
+	}
+
+	if (y_offset + simd_y_len < y_len)
+		xy_fused_transpose_part_4<multi, real_t>(d, z, a, b, c, b_scratch, y_offset + simd_y_len);
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t>
 constexpr void xy_fused_transpose_part_16(const density_bag_t d, const index_t z, const diag_bag_t a,
 										  const diag_bag_t b, const diag_bag_t c, const scratch_bag_t b_scratch,
 										  const index_t y_offset)
@@ -490,6 +726,7 @@ constexpr void xy_fused_transpose_part_16(const density_bag_t d, const index_t z
 
 	const index_t simd_y_len = (y_len - y_offset) / simd_length * simd_length;
 
+	if constexpr (!multi)
 	{
 		using simd_tag = hn::FixedTag<real_t, 16>;
 		simd_tag t;
@@ -501,59 +738,86 @@ constexpr void xy_fused_transpose_part_16(const density_bag_t d, const index_t z
 										vec3, vec4, vec5, vec6, vec7, vec8, vec9, vec10, vec11, vec12, vec13, vec14,
 										vec15);
 	}
+	else
+	{
+		using simd_tag = hn::FixedTag<real_t, 16>;
+		simd_tag t;
+		using simd_t = hn::Vec<simd_tag>;
 
-	xy_fused_transpose_part_8<real_t>(d, z, a, b, c, b_scratch, y_offset + simd_y_len);
+		simd_t avec0, avec1, avec2, avec3, avec4, avec5, avec6, avec7, avec8, avec9, avec10, avec11, avec12, avec13,
+			avec14, avec15;
+		simd_t bvec0, bvec1, bvec2, bvec3, bvec4, bvec5, bvec6, bvec7, bvec8, bvec9, bvec10, bvec11, bvec12, bvec13,
+			bvec14, bvec15;
+		simd_t cvec0, cvec1, cvec2, cvec3, cvec4, cvec5, cvec6, cvec7, cvec8, cvec9, cvec10, cvec11, cvec12, cvec13,
+			cvec14, cvec15;
+		simd_t dvec0, dvec1, dvec2, dvec3, dvec4, dvec5, dvec6, dvec7, dvec8, dvec9, dvec10, dvec11, dvec12, dvec13,
+			dvec14, dvec15;
+
+		xy_fused_transpose_part_multi<simd_t, simd_tag, index_t, density_bag_t, diag_bag_t, scratch_bag_t, simd_t,
+									  simd_t, simd_t, simd_t, simd_t, simd_t, simd_t, simd_t, simd_t, simd_t, simd_t,
+									  simd_t, simd_t, simd_t, simd_t, simd_t>(
+			d, t, y_offset, y_offset + simd_y_len, z, a, b, c, b_scratch, avec0, avec1, avec2, avec3, avec4, avec5,
+			avec6, avec7, avec8, avec9, avec10, avec11, avec12, avec13, avec14, avec15, bvec0, bvec1, bvec2, bvec3,
+			bvec4, bvec5, bvec6, bvec7, bvec8, bvec9, bvec10, bvec11, bvec12, bvec13, bvec14, bvec15, cvec0, cvec1,
+			cvec2, cvec3, cvec4, cvec5, cvec6, cvec7, cvec8, cvec9, cvec10, cvec11, cvec12, cvec13, cvec14, cvec15,
+			dvec0, dvec1, dvec2, dvec3, dvec4, dvec5, dvec6, dvec7, dvec8, dvec9, dvec10, dvec11, dvec12, dvec13,
+			dvec14, dvec15);
+	}
+
+	if (y_offset + simd_y_len < y_len)
+		xy_fused_transpose_part_8<multi, real_t>(d, z, a, b, c, b_scratch, y_offset + simd_y_len);
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t,
-		  std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) == 2, bool> = true>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t, std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) == 2, bool> = true>
 constexpr void xy_fused_transpose_part_dispatch(const density_bag_t d, const index_t z, const diag_bag_t a,
 												const diag_bag_t b, const diag_bag_t c, const scratch_bag_t b_scratch)
 {
-	xy_fused_transpose_part_2<real_t>(d, z, a, b, c, b_scratch, 0);
+	xy_fused_transpose_part_2<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t,
-		  std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) == 4, bool> = true>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t, std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) == 4, bool> = true>
 constexpr void xy_fused_transpose_part_dispatch(const density_bag_t d, const index_t z, const diag_bag_t a,
 												const diag_bag_t b, const diag_bag_t c, const scratch_bag_t b_scratch)
 {
 	HWY_LANES_CONSTEXPR index_t max_length = hn::Lanes(hn::ScalableTag<real_t> {});
 	HWY_LANES_CONSTEXPR index_t simd_length = std::min(16, max_length);
 
-	if (simd_length == 2)
+	if HWY_LANES_CONSTEXPR (simd_length == 2)
 	{
-		xy_fused_transpose_part_2<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_2<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
-	else if (simd_length == 4)
+	else if HWY_LANES_CONSTEXPR (simd_length == 4)
 	{
-		xy_fused_transpose_part_4<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_4<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t,
-		  std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) == 8, bool> = true>
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t, std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) == 8, bool> = true>
 constexpr void xy_fused_transpose_part_dispatch(const density_bag_t d, const index_t z, const diag_bag_t a,
 												const diag_bag_t b, const diag_bag_t c, const scratch_bag_t b_scratch)
 {
 	HWY_LANES_CONSTEXPR index_t max_length = hn::Lanes(hn::ScalableTag<real_t> {});
 	HWY_LANES_CONSTEXPR index_t simd_length = std::min(16, max_length);
 
-	if (simd_length == 2)
+	if HWY_LANES_CONSTEXPR (simd_length == 2)
 	{
-		xy_fused_transpose_part_2<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_2<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
-	else if (simd_length == 4)
+	else if HWY_LANES_CONSTEXPR (simd_length == 4)
 	{
-		xy_fused_transpose_part_4<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_4<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
-	else if (simd_length == 8)
+	else if HWY_LANES_CONSTEXPR (simd_length == 8)
 	{
-		xy_fused_transpose_part_8<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_8<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
 }
 
-template <typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t, typename scratch_bag_t,
+template <bool multi, typename real_t, typename index_t, typename density_bag_t, typename diag_bag_t,
+		  typename scratch_bag_t,
 		  std::enable_if_t<HWY_MAX_LANES_V(hn::Vec<hn::ScalableTag<real_t>>) >= 16, bool> = true>
 constexpr void xy_fused_transpose_part_dispatch(const density_bag_t d, const index_t z, const diag_bag_t a,
 												const diag_bag_t b, const diag_bag_t c, const scratch_bag_t b_scratch)
@@ -561,21 +825,21 @@ constexpr void xy_fused_transpose_part_dispatch(const density_bag_t d, const ind
 	HWY_LANES_CONSTEXPR index_t max_length = hn::Lanes(hn::ScalableTag<real_t> {});
 	HWY_LANES_CONSTEXPR index_t simd_length = std::min(16, max_length);
 
-	if (simd_length == 2)
+	if HWY_LANES_CONSTEXPR (simd_length == 2)
 	{
-		xy_fused_transpose_part_2<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_2<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
-	else if (simd_length == 4)
+	else if HWY_LANES_CONSTEXPR (simd_length == 4)
 	{
-		xy_fused_transpose_part_4<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_4<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
-	else if (simd_length == 8)
+	else if HWY_LANES_CONSTEXPR (simd_length == 8)
 	{
-		xy_fused_transpose_part_8<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_8<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
-	else if (simd_length == 16)
+	else if HWY_LANES_CONSTEXPR (simd_length == 16)
 	{
-		xy_fused_transpose_part_16<real_t>(d, z, a, b, c, b_scratch, 0);
+		xy_fused_transpose_part_16<multi, real_t>(d, z, a, b, c, b_scratch, 0);
 	}
 }
 
@@ -596,7 +860,7 @@ static void solve_slice_x_2d_and_3d_transpose_l(real_t* __restrict__ densities, 
 
 	const auto b_scratch_bag = noarr::make_bag(scratch_l ^ noarr::fix<'v'>(noarr::lit<0>), b_scratch);
 
-	xy_fused_transpose_part_dispatch<real_t>(d_bag, z, a_bag, b_bag, c_bag, b_scratch_bag);
+	xy_fused_transpose_part_dispatch<false, real_t>(d_bag, z, a_bag, b_bag, c_bag, b_scratch_bag);
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
@@ -606,239 +870,15 @@ static void solve_slice_x_2d_and_3d_transpose(real_t* __restrict__ densities, co
 											  const diagonal_layout_t diag_l, const index_t s, const index_t z,
 											  index_t n)
 {
-	using simd_tag = hn::ScalableTag<real_t>;
-	simd_tag d;
-	constexpr index_t simd_length = hn::Lanes(d);
-	using simd_t = hn::Vec<simd_tag>;
+	const auto a_bag = noarr::make_bag(dens_l ^ noarr::fix<'s', 'z'>(s, z), a);
+	const auto b_bag = noarr::make_bag(dens_l ^ noarr::fix<'s', 'z'>(s, z), b);
+	const auto c_bag = noarr::make_bag(dens_l ^ noarr::fix<'s', 'z'>(s, z), c);
 
-	simd_t a_rows[simd_length];
-	simd_t b_rows[simd_length];
-	simd_t c_rows[simd_length];
-	simd_t d_rows[simd_length];
+	const auto d_bag = noarr::make_bag(dens_l ^ noarr::fix<'s', 'z'>(s, z) ^ noarr::slice<'x'>(n), densities);
 
-	auto blocked_dens_l = dens_l ^ noarr::into_blocks_static<'y', 'b', 'y', 'v'>(simd_length);
+	const auto b_scratch_bag = noarr::make_bag(diag_l ^ noarr::fix<'v'>(noarr::lit<0>), b_scratch);
 
-	// vectorized body
-	{
-		const index_t full_n = (n + simd_length - 1) / simd_length * simd_length;
-
-		auto body_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<0>);
-
-		const index_t y_len = body_dens_l | noarr::get_length<'y'>();
-
-		for (index_t y = 0; y < y_len; y++)
-		{
-			// vector registers that hold the to be transposed x*yz plane
-
-			simd_t c_prev = hn::Zero(d);
-			simd_t d_prev = hn::Zero(d);
-			simd_t scratch_prev = hn::Zero(d);
-
-			// forward substitution until last simd_length elements
-			for (index_t i = 0; i < full_n - simd_length; i += simd_length)
-			{
-				// aligned loads
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					a_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(a, z, y, v, i, s)));
-					b_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(b, z, y, v, i, s)));
-					c_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(c, z, y, v, i, s)));
-					d_rows[v] =
-						hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, i, s)));
-				}
-
-				// transposition to enable vectorization
-				transpose(a_rows);
-				transpose(b_rows);
-				transpose(c_rows);
-				transpose(d_rows);
-
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					auto r = hn::Mul(a_rows[v], scratch_prev);
-
-					scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_rows[v]));
-					hn::Store(scratch_prev, d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
-
-					d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
-
-					d_prev = d_rows[v];
-					c_prev = c_rows[v];
-				}
-
-				// aligned stores
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					hn::Store(d_rows[v], d,
-							  &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, i, s)));
-				}
-			}
-
-			// we are aligned to the vector size, so we can safely continue
-			// here we fuse the end of forward substitution and the beginning of backwards propagation
-			{
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					a_rows[v] =
-						hn::Load(d, &(body_dens_l
-									  | noarr::get_at<'z', 'y', 'v', 'x', 's'>(a, z, y, v, full_n - simd_length, s)));
-					b_rows[v] =
-						hn::Load(d, &(body_dens_l
-									  | noarr::get_at<'z', 'y', 'v', 'x', 's'>(b, z, y, v, full_n - simd_length, s)));
-					c_rows[v] =
-						hn::Load(d, &(body_dens_l
-									  | noarr::get_at<'z', 'y', 'v', 'x', 's'>(c, z, y, v, full_n - simd_length, s)));
-					d_rows[v] = hn::Load(
-						d, &(body_dens_l
-							 | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, full_n - simd_length, s)));
-				}
-
-
-				// transposition to enable vectorization
-				transpose(a_rows);
-				transpose(b_rows);
-				transpose(c_rows);
-				transpose(d_rows);
-
-				index_t remainder_work = n % simd_length;
-				remainder_work += remainder_work == 0 ? simd_length : 0;
-
-				// the rest of forward part
-				{
-					for (index_t v = 0; v < remainder_work; v++)
-					{
-						auto r = hn::Mul(a_rows[v], scratch_prev);
-
-						scratch_prev = hn::Div(hn::Set(d, 1), hn::NegMulAdd(c_prev, r, b_rows[v]));
-						hn::Store(scratch_prev, d,
-								  &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
-
-						d_rows[v] = hn::NegMulAdd(d_prev, r, d_rows[v]);
-
-						d_prev = d_rows[v];
-						c_prev = c_rows[v];
-					}
-				}
-
-				{
-					d_prev = hn::Mul(d_prev, scratch_prev);
-					d_rows[remainder_work - 1] = d_prev;
-				}
-
-				// the begin of backward part
-				{
-					for (index_t v = remainder_work - 2; v >= 0; v--)
-					{
-						auto scratch =
-							hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, full_n - simd_length + v, 0)));
-						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v], d_rows[v]), scratch);
-
-						d_prev = d_rows[v];
-					}
-				}
-
-				// transposition back to the original form
-				transpose(d_rows);
-
-				// aligned stores
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					hn::Store(d_rows[v], d,
-							  &(body_dens_l
-								| noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, full_n - simd_length, s)));
-				}
-			}
-
-			// we continue with backwards substitution
-			for (index_t i = full_n - simd_length * 2; i >= 0; i -= simd_length)
-			{
-				// aligned loads
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					c_rows[v] = hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(c, z, y, v, i, s)));
-					d_rows[v] =
-						hn::Load(d, &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, i, s)));
-				}
-
-				// transposition back to the original form
-				transpose(c_rows);
-
-				// backward propagation
-				{
-					for (index_t v = simd_length - 1; v >= 0; v--)
-					{
-						auto scratch = hn::Load(d, &(diag_l | noarr::get_at<'x', 'v'>(b_scratch, i + v, 0)));
-						d_rows[v] = hn::Mul(hn::NegMulAdd(d_prev, c_rows[v], d_rows[v]), scratch);
-
-						d_prev = d_rows[v];
-					}
-				}
-
-				// transposition back to the original form
-				transpose(d_rows);
-
-				// aligned stores
-				for (index_t v = 0; v < simd_length; v++)
-				{
-					hn::Store(d_rows[v], d,
-							  &(body_dens_l | noarr::get_at<'z', 'y', 'v', 'x', 's'>(densities, z, y, v, i, s)));
-				}
-			}
-		}
-	}
-
-	// yz remainder
-	{
-		auto rem_dens_l = blocked_dens_l ^ noarr::fix<'b'>(noarr::lit<1>) ^ noarr::fix<'y'>(noarr::lit<0>);
-		const index_t v_len = rem_dens_l | noarr::get_length<'v'>();
-
-		auto a_bag = noarr::make_bag(rem_dens_l, a);
-		auto b_bag = noarr::make_bag(rem_dens_l, b);
-		auto c_bag = noarr::make_bag(rem_dens_l, c);
-
-		auto d = noarr::make_bag(rem_dens_l, densities);
-
-		auto scratch = noarr::make_bag(diag_l, b_scratch);
-
-		for (index_t yz = 0; yz < v_len; yz++)
-		{
-			{
-				auto idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, 0);
-				scratch[idx] = 1 / b_bag[idx];
-			}
-
-			for (index_t i = 1; i < n; i++)
-			{
-				auto idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i);
-				auto prev_idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i - 1);
-
-				auto r = a_bag[idx] * scratch[prev_idx];
-
-				scratch[idx] = 1 / (b_bag[idx] - c_bag[prev_idx] * r);
-
-				d[idx] -= r * d[prev_idx];
-
-				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
-			}
-
-			{
-				auto idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, n - 1);
-				d[idx] *= scratch[idx];
-
-				// std::cout << "n-1: " << (dens_l | noarr::get_at<'x', 's'>(densities, n - 1, s)) << std::endl;
-			}
-
-			for (index_t i = n - 2; i >= 0; i--)
-			{
-				auto idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i);
-				auto next_idx = noarr::idx<'z', 's', 'v', 'x'>(z, s, yz, i + 1);
-
-				d[idx] = (d[idx] - c_bag[idx] * d[next_idx]) * scratch[idx];
-
-				// std::cout << i << ": " << (dens_l | noarr::get_at<'x', 's'>(densities, i, s)) << std::endl;
-			}
-		}
-	}
+	xy_fused_transpose_part_dispatch<true, real_t>(d_bag, z, a_bag, b_bag, c_bag, b_scratch_bag);
 }
 
 template <typename index_t, typename real_t, typename density_layout_t, typename diagonal_layout_t>
@@ -1066,29 +1106,31 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_x()
 	{
 #pragma omp parallel for schedule(static)
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-			if (continuous_x_diagonal_)
-				solve_slice_x_2d_and_3d_transpose_l<index_t>(
-					this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-					get_diag_layout_x(), get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
-			else
-				solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
-														   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-														   get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+				if (continuous_x_diagonal_)
+					solve_slice_x_2d_and_3d_transpose_l<index_t>(
+						this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+						get_diag_layout_x(), get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
+				else
+					solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
+															   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+															   get_scratch_layout<'x'>(), s, 0, this->problem_.nx);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
+			for (index_t i = 0; i < this->problem_.iterations; i++)
 #pragma omp for schedule(static) nowait
-			for (index_t z = 0; z < this->problem_.nz; z++)
-				if (continuous_x_diagonal_)
-					solve_slice_x_2d_and_3d_transpose_l<index_t>(
-						this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-						get_diag_layout_x(), get_scratch_layout<'x'>(), s, z, this->problem_.nx);
-				else
-					solve_slice_x_2d_and_3d_transpose<index_t>(this->substrates_, ax_, bx_, cx_,
-															   b_scratch_[get_thread_num()], get_substrates_layout<3>(),
-															   get_scratch_layout<'x'>(), s, z, this->problem_.nx);
+				for (index_t z = 0; z < this->problem_.nz; z++)
+					if (continuous_x_diagonal_)
+						solve_slice_x_2d_and_3d_transpose_l<index_t>(
+							this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+							get_diag_layout_x(), get_scratch_layout<'x'>(), s, z, this->problem_.nx);
+					else
+						solve_slice_x_2d_and_3d_transpose<index_t>(
+							this->substrates_, ax_, bx_, cx_, b_scratch_[get_thread_num()], get_substrates_layout<3>(),
+							get_scratch_layout<'x'>(), s, z, this->problem_.nx);
 	}
 }
 
@@ -1099,17 +1141,20 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_y()
 	{
 #pragma omp parallel for schedule(static)
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-			solve_slice_y_2d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
-									  get_substrates_layout<2>(), get_scratch_layout<'y'>(), s, x_tile_size_);
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+				solve_slice_y_2d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<2>(), get_scratch_layout<'y'>(), s, x_tile_size_);
 	}
 	else if (this->problem_.dims == 3)
 	{
 #pragma omp parallel
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
+			for (index_t i = 0; i < this->problem_.iterations; i++)
 #pragma omp for schedule(static) nowait
-			for (index_t z = 0; z < this->problem_.nz; z++)
-				solve_slice_y_3d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
-										  get_substrates_layout<3>(), get_scratch_layout<'y'>(), s, z, x_tile_size_);
+				for (index_t z = 0; z < this->problem_.nz; z++)
+					solve_slice_y_3d<index_t>(this->substrates_, ay_, by_, cy_, b_scratch_[get_thread_num()],
+											  get_substrates_layout<3>(), get_scratch_layout<'y'>(), s, z,
+											  x_tile_size_);
 	}
 }
 
@@ -1119,8 +1164,9 @@ void sdd_partial_blocking<real_t, aligned_x>::solve_z()
 #pragma omp parallel
 	{
 		for (index_t s = 0; s < this->problem_.substrates_count; s++)
-			solve_slice_z_3d<index_t>(this->substrates_, az_, bz_, cz_, b_scratch_[get_thread_num()],
-									  get_substrates_layout<3>(), get_scratch_layout<'z'>(), s, x_tile_size_);
+			for (index_t i = 0; i < this->problem_.iterations; i++)
+				solve_slice_z_3d<index_t>(this->substrates_, az_, bz_, cz_, b_scratch_[get_thread_num()],
+										  get_substrates_layout<3>(), get_scratch_layout<'z'>(), s, x_tile_size_);
 	}
 }
 
