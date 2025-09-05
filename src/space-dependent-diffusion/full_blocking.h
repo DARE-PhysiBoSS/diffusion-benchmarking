@@ -163,6 +163,8 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 		{
 			if constexpr (fused_z)
 			{
+				sync_step = std::min(sync_step, nz);
+
 				std::size_t Y_size = (ny * sync_step + elements - 1) / elements;
 
 				return noarr::scalar<real_t>()

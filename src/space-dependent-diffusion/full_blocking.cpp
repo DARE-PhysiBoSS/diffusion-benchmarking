@@ -325,12 +325,13 @@ void sdd_full_blocking<real_t, aligned_x>::initialize()
 
 		std::size_t max_size_blocked = 0;
 		{
-			auto scratch_lx =
-				get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y], y_sync_step_);
-			auto scratch_ly =
-				get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y], y_sync_step_);
-			auto scratch_lz =
-				get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_, group_block_lengthsz_[tid.z]);
+			auto scratch_lx = get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+															std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+			auto scratch_ly = get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+															std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+			auto scratch_lz = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x],
+															std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
+															group_block_lengthsz_[tid.z]);
 
 			auto max = std::max(
 				{ scratch_lx | noarr::get_size(), scratch_ly | noarr::get_size(), scratch_lz | noarr::get_size() });
@@ -338,11 +339,14 @@ void sdd_full_blocking<real_t, aligned_x>::initialize()
 		}
 
 		{
-			auto scratch_lx = get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x],
-																   group_block_lengthsy_[tid.y], y_sync_step_);
-			auto scratch_ly = get_scratch_layout<'y', true, false>(group_block_lengthsx_[tid.x],
-																   group_block_lengthsy_[tid.y], y_sync_step_);
-			auto scratch_lz = get_scratch_layout<'z', true, false>(group_block_lengthsx_[tid.x], z_sync_step_,
+			auto scratch_lx =
+				get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													 std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+			auto scratch_ly =
+				get_scratch_layout<'y', true, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+													 std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+			auto scratch_lz = get_scratch_layout<'z', true, false>(group_block_lengthsx_[tid.x],
+																   std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
 																   group_block_lengthsz_[tid.z]);
 
 			auto max = std::max(
@@ -3493,11 +3497,13 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x_nf()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto scratch_x = get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x],
-																	  group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_x =
+					get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+														 std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
 
-				auto scratch_x_wo_x = get_scratch_layout<'x', false, false>(group_block_lengthsx_[tid.x],
-																			group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_x_wo_x =
+					get_scratch_layout<'x', false, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+														  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -3600,11 +3606,13 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto scratch_x = get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x],
-															   group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_x =
+					get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
 
-				auto scratch_x_wo_x = get_scratch_layout<'x', false>(group_block_lengthsx_[tid.x],
-																	 group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_x_wo_x =
+					get_scratch_layout<'x', false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												   std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -3709,10 +3717,12 @@ void sdd_full_blocking<real_t, aligned_x>::solve_y()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto scratch_y = get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x],
-															   group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_y_wo_y = get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x],
-																	 group_block_lengthsy_[tid.y], y_sync_step_);
+				auto scratch_y =
+					get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_y_wo_y =
+					get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												   std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -3811,10 +3821,12 @@ void sdd_full_blocking<real_t, aligned_x>::solve_z()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_,
+				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x],
+															   std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
 															   group_block_lengthsz_[tid.z]);
-				auto scratch_z_wo_z = get_scratch_layout<'z', false>(group_block_lengthsx_[tid.x], z_sync_step_,
-																	 group_block_lengthsz_[tid.z]);
+				auto scratch_z_wo_z = get_scratch_layout<'z', false>(
+					group_block_lengthsx_[tid.x], std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
+					group_block_lengthsz_[tid.z]);
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -3941,18 +3953,24 @@ void sdd_full_blocking<real_t, aligned_x>::solve()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto scratch_x = get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x],
-															   group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_y = get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x],
-															   group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_,
+				auto scratch_x =
+					get_scratch_layout<'x', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_y =
+					get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x],
+															   std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
 															   group_block_lengthsz_[tid.z]);
-				auto scratch_x_wol = get_scratch_layout<'x', false>(group_block_lengthsx_[tid.x],
-																	group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_y_wol = get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x],
-																	group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_z_wol = get_scratch_layout<'z', false>(group_block_lengthsx_[tid.x], z_sync_step_,
-																	group_block_lengthsz_[tid.z]);
+				auto scratch_x_wol =
+					get_scratch_layout<'x', false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												   std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_y_wol =
+					get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												   std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_z_wol = get_scratch_layout<'z', false>(
+					group_block_lengthsx_[tid.x], std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
+					group_block_lengthsz_[tid.z]);
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
@@ -4176,18 +4194,24 @@ void sdd_full_blocking<real_t, aligned_x>::solve_nf()
 
 			for (index_t i = 0; i < this->problem_.iterations; i++)
 			{
-				auto scratch_x = get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x],
-																	  group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_y = get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x],
-															   group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x], z_sync_step_,
+				auto scratch_x =
+					get_scratch_layout<'x', true, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+														 std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_y =
+					get_scratch_layout<'y', true>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_z = get_scratch_layout<'z', true>(group_block_lengthsx_[tid.x],
+															   std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
 															   group_block_lengthsz_[tid.z]);
-				auto scratch_x_wol = get_scratch_layout<'x', false, false>(group_block_lengthsx_[tid.x],
-																		   group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_y_wol = get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x],
-																	group_block_lengthsy_[tid.y], y_sync_step_);
-				auto scratch_z_wol = get_scratch_layout<'z', false>(group_block_lengthsx_[tid.x], z_sync_step_,
-																	group_block_lengthsz_[tid.z]);
+				auto scratch_x_wol =
+					get_scratch_layout<'x', false, false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+														  std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_y_wol =
+					get_scratch_layout<'y', false>(group_block_lengthsx_[tid.x], group_block_lengthsy_[tid.y],
+												   std::min(y_sync_step_, group_block_lengthsz_[tid.z]));
+				auto scratch_z_wol = get_scratch_layout<'z', false>(
+					group_block_lengthsx_[tid.x], std::min(z_sync_step_, group_block_lengthsz_[tid.y]),
+					group_block_lengthsz_[tid.z]);
 
 				auto dist_l = noarr::scalar<real_t*>() ^ get_thread_distribution_layout() ^ noarr::fix<'g'>(tid.group);
 
