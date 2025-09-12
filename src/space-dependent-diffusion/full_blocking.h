@@ -2,12 +2,12 @@
 
 #include <iostream>
 
+#include "../barrier.h"
 #include "../base_solver.h"
 #include "../least_memory_thomas_solver_d_f.h"
 #include "../substrate_layouts.h"
 #include "../tridiagonal_solver.h"
 #include "../vector_transpose_helper.h"
-
 
 template <typename real_t, bool aligned_x>
 class sdd_full_blocking : public locally_onedimensional_solver,
@@ -25,6 +25,10 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	std::unique_ptr<real_t*[]> az_, bz_, cz_;
 	std::unique_ptr<real_t*[]> thread_substrate_array_;
 	std::unique_ptr<real_t*[]> a_scratch_, c_scratch_;
+	std::unique_ptr<real_t*[]> a_stream_, c_stream_, d_stream_;
+
+	std::unique_ptr<std::vector<barrier_t<true, index_t>>[]> barriers_wrapper_y_;
+	std::unique_ptr<std::vector<barrier_t<true, index_t>>[]> barriers_wrapper_z_;
 
 	index_t x_tile_size_;
 	std::size_t alignment_size_;
@@ -34,6 +38,7 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	std::array<index_t, 3> cores_division_;
 
 	index_t x_sync_step_ = 1, y_sync_step_ = 1, z_sync_step_ = 1;
+	index_t streams_count_;
 
 	std::array<index_t, 3> group_blocks_;
 	std::vector<index_t> group_block_lengthsx_;
@@ -47,6 +52,17 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	std::vector<index_t> group_block_offsetss_;
 
 	index_t substrate_groups_;
+
+	auto get_stream_layout(const index_t coop_size) const
+	{
+		using simd_tag = hn::ScalableTag<real_t>;
+		simd_tag d;
+
+		auto layout = noarr::scalar<real_t>() ^ noarr::vector<'v'>() ^ noarr::vector<'i'>() ^ noarr::vector<'j'>()
+					  ^ noarr::vector<'s'>();
+
+		return layout ^ noarr::set_length<'v', 'i', 's'>(hn::Lanes(d), coop_size * 2, streams_count_);
+	}
 
 	template <char dim_to_skip = ' '>
 	auto get_blocked_substrate_layout(index_t nx, index_t ny, index_t nz, index_t substrates_count) const
