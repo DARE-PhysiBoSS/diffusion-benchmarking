@@ -58,8 +58,7 @@ template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, dou
 HWY_INLINE void transpose(vec_t& row0, vec_t& row1, vec_t& row2, vec_t& row3, vec_t& row4, vec_t& row5, vec_t& row6,
 						  vec_t& row7, vec_t& row8, vec_t& row9, vec_t& row10, vec_t& row11, vec_t& row12, vec_t& row13,
 						  vec_t& row14, vec_t& row15)
-{
-}
+{}
 
 // 16xfloat
 template <typename vec_t, std::enable_if_t<std::is_same_v<hn::TFromV<vec_t>, float>, bool> = true>
@@ -534,3 +533,8 @@ HWY_INLINE void transpose(vec_t rows[2])
 	rows[0] = t0;
 	rows[1] = t1;
 }
+
+// 1xfloat & 1xdouble
+template <typename vec_t, std::enable_if_t<HWY_MAX_LANES_V(vec_t) == 1, bool> = true>
+HWY_INLINE void transpose(vec_t[1])
+{}

@@ -25,8 +25,11 @@ class sdd_full_blocking : public locally_onedimensional_solver,
 	std::unique_ptr<real_t*[]> az_, bz_, cz_;
 	std::unique_ptr<real_t*[]> thread_substrate_array_;
 	std::unique_ptr<real_t*[]> a_scratch_, c_scratch_;
-	std::unique_ptr<real_t*[]> a_stream_, c_stream_, d_stream_;
+	std::unique_ptr<real_t*[]> a_streamx_, c_streamx_, d_streamx_;
+	std::unique_ptr<real_t*[]> a_streamy_, c_streamy_, d_streamy_;
+	std::unique_ptr<real_t*[]> a_streamz_, c_streamz_, d_streamz_;
 
+	std::unique_ptr<std::vector<barrier_t<true, index_t>>[]> barriers_wrapper_x_;
 	std::unique_ptr<std::vector<barrier_t<true, index_t>>[]> barriers_wrapper_y_;
 	std::unique_ptr<std::vector<barrier_t<true, index_t>>[]> barriers_wrapper_z_;
 
