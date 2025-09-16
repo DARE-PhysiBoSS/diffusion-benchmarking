@@ -5583,7 +5583,7 @@ void sdd_full_blocking<real_t, aligned_x>::solve_x()
 		const auto lane_id_x = get_lane_id('x');
 
 		for (index_t s = 0; s < streams_count_; s++)
-			t_barriers.emplace_back(cores_division_[0], countersz_[lane_id_x * streams_count_ + s]->value);
+			t_barriers.emplace_back(cores_division_[0], countersx_[lane_id_x * streams_count_ + s]->value);
 
 		// barrier_t<true, index_t> barrier_x(cores_division_[0], countersx_[lane_id_x]->value);
 		// auto& barrier_y = *barriersy_[lane_id_y];
