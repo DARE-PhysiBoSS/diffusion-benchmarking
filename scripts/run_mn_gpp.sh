@@ -6,7 +6,7 @@
 #SBATCH --account=cns119
 # #SBATCH --qos=gp_bscls
 # #SBATCH --account=bsc08
-#SBATCH -t 1-00:00:00
+#SBATCH -t 3-00:00:00
 #SBATCH --exclusive
 # #SBATCH --constraint=perfparanoid 
 
