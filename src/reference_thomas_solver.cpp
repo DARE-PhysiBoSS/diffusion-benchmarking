@@ -1,7 +1,5 @@
 #include "reference_thomas_solver.h"
 
-#include "rave_user_events.h"
-
 template <typename real_t>
 void reference_thomas_solver<real_t>::precompute_values(std::unique_ptr<real_t[]>& a, std::unique_ptr<real_t[]>& b,
 														std::unique_ptr<real_t[]>& b0, index_t shape, index_t dims,
@@ -197,9 +195,6 @@ void reference_thomas_solver<real_t>::solve_z()
 template <typename real_t>
 void reference_thomas_solver<real_t>::solve()
 {
-	rave_restart_trace();
-	rave_start_trace();
-
 	for (index_t i = 0; i < this->problem_.iterations; i++)
 	{
 		if (this->problem_.dims == 1)
@@ -218,8 +213,6 @@ void reference_thomas_solver<real_t>::solve()
 			solve_z();
 		}
 	}
-
-	rave_stop_trace();
 }
 
 template class reference_thomas_solver<float>;

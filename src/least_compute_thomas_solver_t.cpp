@@ -4,8 +4,6 @@
 
 #include "perf_utils.h"
 
-#include "rave_user_events.h"
-
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::precompute_values(std::unique_ptr<real_t[]>& b,
 																		 std::unique_ptr<real_t[]>& c,
@@ -857,9 +855,6 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve_z()
 template <typename real_t, bool aligned_x>
 void least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 {
-	rave_restart_trace();
-	rave_start_trace();
-
 	if (this->problem_.dims == 1)
 	{
 #pragma omp parallel
@@ -917,8 +912,6 @@ void least_compute_thomas_solver_t<real_t, aligned_x>::solve()
 			}
 		}
 	}
-
-	rave_stop_trace();
 }
 
 template class least_compute_thomas_solver_t<float, false>;
