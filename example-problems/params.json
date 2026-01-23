@@ -2,5 +2,7 @@
     "inner_iterations": 10,
     "outer_iterations": 5,
     "warmup_time": 1,
-    "benchmark_kind": "per_dimension"
+    "benchmark_kind": "full_solve",
+    "cores_division": [1, 1, 1],
+    "xs_tile_size": 256
 }
