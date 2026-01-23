@@ -9,6 +9,8 @@
 #include "perf_utils.h"
 #include "vector_transpose_helper.h"
 
+#include "rave_user_events.h"
+
 
 template <typename real_t, bool aligned_x>
 thread_id_t<typename least_memory_thomas_solver_d_f_p<real_t, aligned_x>::index_t> least_memory_thomas_solver_d_f_p<
@@ -2359,6 +2361,9 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve_z()
 template <typename real_t, bool aligned_x>
 void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve()
 {
+	rave_restart_trace();
+	rave_start_trace();
+
 	if (partial_blocking_)
 	{
 		if (this->problem_.dims == 3)
@@ -2447,6 +2452,8 @@ void least_memory_thomas_solver_d_f_p<real_t, aligned_x>::solve()
 			}
 		}
 	}
+
+	rave_stop_trace();
 }
 
 template <typename real_t, bool aligned_x>
